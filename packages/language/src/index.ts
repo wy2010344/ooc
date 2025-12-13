@@ -1,0 +1,5 @@
+export * from './object-oriented-c-module.js';
+export * from './object-oriented-c-validator.js';
+export * from './generated/ast.js';
+export * from './generated/grammar.js';
+export * from './generated/module.js';

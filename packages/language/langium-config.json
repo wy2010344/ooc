@@ -1,0 +1,16 @@
+{
+    "projectName": "ObjectOrientedC",
+    "languages": [
+        {
+            "id": "object-oriented-c",
+            "grammar": "src/object-oriented-c.langium",
+            "fileExtensions": [
+                "ooc"
+            ],
+            "textMate": {
+                "out": "syntaxes/object-oriented-c.tmLanguage.json"
+            }
+        }
+    ],
+    "out": "src/generated"
+}
