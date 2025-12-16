@@ -49,7 +49,14 @@ NamedPipeExpression:
 
 // 消息表达式 - 对象消息传递: receiver message arg1 arg2
 MessageExpression:
+    NormalMessageExpression | UnionMessageExpression;
+
+
+NormalMessageExpression:
     receiver=PrimaryExpression ext=MessageExtExpression;
+
+UnionMessageExpression:
+    '$' ext=MessageExtExpression;
 
 // 消息扩展表达式
 MessageExtExpression:

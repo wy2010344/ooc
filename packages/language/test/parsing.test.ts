@@ -32,6 +32,8 @@ describe('Parsing tests', () => {
             // Pipe operations
             'abcdef' slice 1 4 | startsWith 'b';
               // Object definition
+
+            xx=$ abc 98 'sss';
             obj = {
                 (increment x) {
                     x add 1
