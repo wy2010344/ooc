@@ -167,4 +167,50 @@ describe('OOC Interpreter', () => {
       expect(result).toBeDefined()
     }
   })
+
+  test('bridge gcd builtin', async () => {
+    const document = await parse(`
+            a = 48;
+            b = 18;
+            res = a gcd b;
+        `)
+
+    if (document.parseResult.value) {
+      const out = executeOOC(document.parseResult.value)
+      const last = Array.isArray(out) ? out[out.length - 1] : out
+      expect(last).toBeDefined()
+      expect(last.$type).toBe('number')
+      expect(last.value).toBe(6)
+    }
+  })
+
+  test('bridge factorial builtin', async () => {
+    const document = await parse(`
+            n = 6;
+            f = n factorial;
+        `)
+
+    if (document.parseResult.value) {
+      const out = executeOOC(document.parseResult.value)
+      const last = Array.isArray(out) ? out[out.length - 1] : out
+      expect(last).toBeDefined()
+      expect(last.$type).toBe('number')
+      expect(last.value).toBe(720)
+    }
+  })
+
+  test('bridge sumList builtin for union list', async () => {
+    const document = await parse(`
+            lst = $cons 1 $cons 2 $cons 3 $nil;
+            s = lst sumList;
+        `)
+
+    if (document.parseResult.value) {
+      const out = executeOOC(document.parseResult.value)
+      const last = Array.isArray(out) ? out[out.length - 1] : out
+      expect(last).toBeDefined()
+      expect(last.$type).toBe('number')
+      expect(last.value).toBe(6)
+    }
+  })
 })

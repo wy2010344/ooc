@@ -71,25 +71,17 @@ BoolLit:
 ;
 
 ObjLit:
-    '{' items+=ObjItem (',' items+=ObjItem)* '}'
+    '{' (items+=ObjItem (',' items+=ObjItem)*)? '}'
 ;
 
 ObjItem:
-    name=ID body=Method
-       | name=ID prop=Prop
-       | name=ID
-;
-
-Method:
-    // Method must start with parentheses (parameters) to avoid ambiguity with properties
-    '(' params=ParamList? ')' ('@')?
+    // Try method first (name followed by parentheses)
+    name=ID '(' params=ParamList? ')' ('@')?
        ('{' expr=Expr '}' | ':' expr=Expr)
-;
-
-Prop:
-    ':=' val=Expr
-    | '=' val=Expr
-    | ':' val=Expr
+    // Then property (name with operator and value)
+    | name=ID (':=' | '=' | ':') val=Expr
+    // Or just a name (reference to variable)
+    | name=ID
 ;
 
 UnionVal:

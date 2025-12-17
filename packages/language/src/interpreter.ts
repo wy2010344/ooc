@@ -42,11 +42,21 @@ export class OOCInterpreter {
   private globalScope: Record<string, any> = {}
   private scopes: Record<string, any>[] = [this.globalScope]
 
+  constructor() {
+    this.initBuiltins()
+  }
+
   /**
    * Execute a complete OOC model
    */
   public execute(model: OOCModel): any {
     const results: any[] = []
+
+    // Debug: show item types to help trace missing handling
+    // console.log(
+    //   'Executing model items:',
+    //   model.items.map((i) => i.$type)
+    // )
 
     for (const item of model.items) {
       const result = this.executeItem(item)
@@ -54,6 +64,48 @@ export class OOCInterpreter {
     }
 
     return results.length === 1 ? results[0] : results
+  }
+
+  private initBuiltins(): void {
+    // gcd: computes greatest common divisor of two numbers
+    this.globalScope['gcd'] = (obj: any, other: any) => {
+      const a = this.toJSValue(obj)
+      const b = this.toJSValue(other)
+      const toInt = (v: any) => Math.floor(Number(v))
+      let x = Math.abs(toInt(a))
+      let y = Math.abs(toInt(b))
+      while (y !== 0) {
+        const t = x % y
+        x = y
+        y = t
+      }
+      return { $type: 'number', value: x }
+    }
+
+    // factorial: compute factorial of a non-negative integer
+    this.globalScope['factorial'] = (obj: any) => {
+      const n = Math.floor(Number(this.toJSValue(obj)))
+      if (n <= 1) return { $type: 'number', value: 1 }
+      let acc = 1
+      for (let i = 2; i <= n; i++) acc *= i
+      return { $type: 'number', value: acc }
+    }
+
+    // sumList: expects a linked list encoded as union $cons head tail | $nil
+    this.globalScope['sumList'] = (obj: any) => {
+      let cur = obj
+      let total = 0
+      while (cur && cur.$type === 'union' && cur.value) {
+        if (cur.value.tag === 'cons') {
+          const head = cur.value.args && cur.value.args[0]
+          total += Number(this.toJSValue(head))
+          cur = cur.value.args && cur.value.args[1]
+        } else {
+          break
+        }
+      }
+      return { $type: 'number', value: total }
+    }
   }
 
   /**
@@ -66,7 +118,12 @@ export class OOCInterpreter {
       return this.executeExport(item as Export)
     } else if (item.$type === 'Statement') {
       return this.executeExpr((item as any).expr)
+    } else if (item.$type === 'VarDecl') {
+      return this.executeVarDecl(item as VarDecl)
+    } else if (item.$type === 'MethodDecl') {
+      return this.executeMethodDecl(item as MethodDecl)
     }
+
     return undefined
   }
 
@@ -157,6 +214,9 @@ export class OOCInterpreter {
    * Execute primary expression
    */
   private executePrimary(primary: Primary): any {
+    if (!primary) return undefined
+
+    // Handle literals
     if (primary.$type === 'StringLit') {
       return this.executeStringLit(primary as StringLit)
     } else if (primary.$type === 'NumLit') {
@@ -167,6 +227,9 @@ export class OOCInterpreter {
       return this.executeObjLit(primary as ObjLit)
     } else if (primary.$type === 'UnionVal') {
       return this.executeUnionVal(primary as UnionVal)
+    } else if (primary.$type === 'Base') {
+      // It's a nested expression in parentheses
+      return this.executeBase(primary as Base)
     } else if (typeof primary === 'string') {
       // It's an identifier
       return this.getVariable(primary)
@@ -291,10 +354,10 @@ export class OOCInterpreter {
     const properties: Record<string, any> = {}
 
     for (const item of lit.items) {
-      if ((item as any).body) {
+      // Check if it's a method (has params or expr)
+      if (item.params !== undefined || item.expr !== undefined) {
         // It's a method
-        const method = (item as any).body
-        const params = method.params?.params ?? []
+        const params = item.params?.params ?? []
         methods[item.name] = {
           params,
           body: (args: any[]) => {
@@ -304,28 +367,36 @@ export class OOCInterpreter {
               methodScope[params[i]] = args[i]
             }
             // Add this object's properties to scope
-            Object.assign(methodScope, properties)
+            for (const [k, v] of Object.entries(properties)) {
+              methodScope[k] = v
+            }
 
             this.scopes.push(methodScope)
             try {
-              return this.executeExpr(method.expr)
+              return item.expr ? this.executeExpr(item.expr) : undefined
             } finally {
               this.scopes.pop()
             }
           },
         }
-      } else if ((item as any).prop) {
+      } else if (item.val !== undefined) {
         // It's a property
-        const value = this.executeExpr((item as any).prop.val)
+        const value = this.executeExpr(item.val)
         properties[item.name] = value
       } else {
         // Simple reference to variable
-        properties[item.name] = this.getVariable(item.name)
+        try {
+          properties[item.name] = this.getVariable(item.name)
+        } catch {
+          // Variable not found, skip
+        }
       }
     }
 
     // Combine properties and methods
-    Object.assign(obj, properties)
+    for (const [k, v] of Object.entries(properties)) {
+      obj[k] = v
+    }
     obj.methods = methods
     obj.value = properties
 
@@ -365,21 +436,29 @@ export class OOCInterpreter {
       return method.body(args)
     }
 
-    // Check if it's a built-in operation
-    if (call.name === 'call' && obj instanceof Function) {
-      return obj(...args)
+    // Try to find it in current scope as a function (including built-ins)
+    let func: any
+    try {
+      func = this.getVariable(call.name)
+    } catch {
+      // Function not found; skip
+      func = undefined
     }
 
-    // Try to find it in current scope as a function
-    const func = this.getVariable(call.name)
-    if (func instanceof Function || (func && func.body instanceof Function)) {
-      if (func.body) {
+    if (func) {
+      if (func instanceof Function) {
+        // Regular JS function (built-in)
+        return func(obj, ...args.map((a) => this.toJSValue(a)))
+      } else if (func.body instanceof Function) {
+        // OOC method object with body function
         return func.body([obj, ...args])
-      } else {
+      } else if (typeof func === 'function') {
+        // Wrapped function
         return func(obj, ...args)
       }
     }
 
+    // No method found
     throw new Error(`Unknown method or function: ${call.name}`)
   }
 

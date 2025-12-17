@@ -3,7 +3,7 @@ import type {
   ObjectOrientedCAstType,
   OOCModel,
   ObjLit,
-  Method,
+  ObjItem,
   VarDecl,
   Item,
 } from './generated/ast.js'
@@ -18,7 +18,7 @@ export function registerValidationChecks(services: ObjectOrientedCServices) {
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     OOCModel: validator.checkModel,
     ObjLit: validator.checkObjectMembers,
-    Method: validator.checkMethodParameters,
+    ObjItem: validator.checkMethodParameters,
     VarDecl: validator.checkVariableDeclaration,
     Item: validator.checkItemDeclaration,
   }
@@ -77,14 +77,14 @@ export class ObjectOrientedCValidator {
     }
   }
 
-  checkMethodParameters(method: Method, accept: ValidationAcceptor): void {
-    // Validate method parameter names are unique
-    if (method.params) {
+  checkMethodParameters(objItem: ObjItem, accept: ValidationAcceptor): void {
+    // Validate method parameter names are unique (only for items with params)
+    if (objItem.params) {
       const paramNames = new Set<string>()
-      for (const param of method.params.params) {
+      for (const param of objItem.params.params) {
         if (paramNames.has(param)) {
           accept('error', `Duplicate parameter name: ${param}`, {
-            node: method,
+            node: objItem,
           })
         } else {
           paramNames.add(param)
