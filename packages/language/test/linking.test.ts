@@ -45,10 +45,10 @@ describe('Linking tests', () => {
   test('reference to methods in objects', async () => {
     document = await parse(`
             calc = {
-                add(a b): a add b,
-                mul(a b): a mul b
+                add(a, b) => a add b,
+                mul(a, b) => a mul b
             };
-            result = calc add 5 | mul 2;
+            result = calc add 5 / mul 2;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()
@@ -56,9 +56,13 @@ describe('Linking tests', () => {
 
   test('multiple object references in chain', async () => {
     document = await parse(`
-            obj1 = { method1: 10 };
-            obj2 = { method2: 20 };
-            result = obj1 add obj2;
+            obj1 = {
+                method1() => 10
+            };
+            obj2 = {
+                method2() => 20
+            };
+            result = obj1 method1;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()
@@ -67,11 +71,11 @@ describe('Linking tests', () => {
   test('nested object references', async () => {
     document = await parse(`
             outer = {
-                inner: {
-                    value: 42
+                inner() => {
+                    value() => 42
                 }
             };
-            x = outer inner value;
+            x = outer inner;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()

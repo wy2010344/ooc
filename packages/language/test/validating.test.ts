@@ -42,8 +42,8 @@ describe('Validating', () => {
   test('check duplicate object members validation', async () => {
     document = await parse(`
             obj = {
-                x: 10,
-                x: 20
+                x => 10,
+                x => 20
             };
         `)
 
@@ -80,14 +80,16 @@ describe('Validating', () => {
   test('check duplicate method parameters', async () => {
     document = await parse(`
             obj = {
-                method(a a): a add a
+                method(a, a) => a add a
             };
         `)
 
-    expect(
-      checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
-    ).toEqual(expect.stringContaining('Duplicate parameter'))
+    const validationResult = checkDocumentValid(document)
+    const diagnosticsStr =
+      document?.diagnostics?.map(diagnosticToString)?.join('\n') || ''
+    const output = validationResult || diagnosticsStr
+
+    expect(output).toEqual(expect.stringContaining('Duplicate parameter'))
   })
 
   test('check uppercase variable name warning', async () => {
@@ -118,8 +120,8 @@ describe('Validating', () => {
     document = await parse(`
             X = 10;
             obj = {
-                a: 1,
-                a: 2
+                a => 1,
+                a => 2
             };
         `)
 
@@ -134,8 +136,8 @@ describe('Validating', () => {
   test('check valid method with parameters', async () => {
     document = await parse(`
             obj = {
-                add(x y): x add y,
-                mul(a b): a mul b
+                add(x, y) => x add y,
+                mul(a, b) => a mul b
             };
         `)
 
@@ -148,13 +150,13 @@ describe('Validating', () => {
   test('check complex nested object validation', async () => {
     document = await parse(`
             config = {
-                cache: {
-                    ttl: 3600,
-                    enabled: true
+                cache() => {
+                    ttl() => 3600,
+                    enabled() => true
                 },
-                logging: {
-                    level: 'info',
-                    output: 'console'
+                logging() => {
+                    level() => 'info',
+                    output() => 'console'
                 }
             };
         `)

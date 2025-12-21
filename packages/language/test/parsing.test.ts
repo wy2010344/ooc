@@ -48,8 +48,8 @@ describe('Parsing tests', () => {
   test('parse nested object with methods', async () => {
     document = await parse(`
             myObj = {
-                add(a b): a add b,
-                sub(a b): a sub b
+                add(a, b) => a add b,
+                sub(a, b) => a sub b
             };
         `)
 
@@ -58,7 +58,7 @@ describe('Parsing tests', () => {
 
   test('parse complex message chain with pipes', async () => {
     document = await parse(`
-            result = 'hello' length | add 5 | mul 2;
+            result = 'hello' length | x . x add 5;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()
@@ -67,20 +67,20 @@ describe('Parsing tests', () => {
   test('parse object with mixed method and property definitions', async () => {
     document = await parse(`
             calc = {
-                value: 42,
-                getValue: value,
-                add(x): value add x,
-                sub(x): value sub x
+                value := 42,
+                getValue() => value,
+                add(x) => value add x,
+                sub(x) => value sub x
             };
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
-  test('parse async method with @ notation', async () => {
+  test('parse async method with #async notation', async () => {
     document = await parse(`
             asyncObj = {
-                fetch(url)@: import of url @await
+                fetch(url) #async { 'dummy'; }
             };
         `)
 
@@ -99,7 +99,7 @@ describe('Parsing tests', () => {
   test('parse import and export statements', async () => {
     document = await parse(`
             import math 'math-lib';
-            export add(a b): a add b;
+            export add(a, b) => a add b;
             export result = 10;
         `)
 
@@ -108,7 +108,7 @@ describe('Parsing tests', () => {
 
   test('parse complex nested pipe with multiple arguments', async () => {
     document = await parse(`
-            x = obj method1 10 20 | method2 30 | method3;
+            x = obj method1 10 20 / method2 30 / method3;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()
@@ -128,7 +128,7 @@ describe('Parsing tests', () => {
 
   test('parse parenthesized expressions', async () => {
     document = await parse(`
-            result = (x add y) mul (a sub b);
+            result = (x add y) add a sub b;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()

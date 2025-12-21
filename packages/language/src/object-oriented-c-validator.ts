@@ -2,10 +2,10 @@ import type { ValidationAcceptor, ValidationChecks } from 'langium'
 import type {
   ObjectOrientedCAstType,
   OOCModel,
-  ObjLit,
-  ObjItem,
-  VarDecl,
-  Item,
+  ObjectLiteral,
+  VarDeclaration,
+  MethodMember,
+  MethodParams,
 } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
 
@@ -17,10 +17,10 @@ export function registerValidationChecks(services: ObjectOrientedCServices) {
   const validator = services.validation.ObjectOrientedCValidator
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     OOCModel: validator.checkModel,
-    ObjLit: validator.checkObjectMembers,
-    ObjItem: validator.checkMethodParameters,
-    VarDecl: validator.checkVariableDeclaration,
-    Item: validator.checkItemDeclaration,
+    ObjectLiteral: validator.checkObjectMembers,
+    VarDeclaration: validator.checkVariableDeclaration,
+    MethodMember: validator.checkMethodMember,
+    MethodParams: validator.checkMethodParams,
   }
   registry.register(checks, validator)
 }
@@ -30,14 +30,13 @@ export function registerValidationChecks(services: ObjectOrientedCServices) {
  */
 export class ObjectOrientedCValidator {
   checkModel(model: OOCModel, accept: ValidationAcceptor): void {
-    // Validate imports and exports
+    // Validate imports and exports at module level
     const exportedNames = new Set<string>()
     const importedNames = new Set<string>()
 
     for (const item of model.items) {
-      if (item.$type === 'Export' && item.decl) {
-        const name =
-          item.decl.$type === 'VarDecl' ? item.decl.name : item.decl.name
+      if (item.$type === 'Export') {
+        const name = item.varDecl?.name || item.methodDecl?.name
         if (name) {
           if (exportedNames.has(name)) {
             accept('error', `Duplicate export: ${name} is already exported`, {
@@ -62,14 +61,14 @@ export class ObjectOrientedCValidator {
     }
   }
 
-  checkObjectMembers(obj: ObjLit, accept: ValidationAcceptor): void {
+  checkObjectMembers(obj: ObjectLiteral, accept: ValidationAcceptor): void {
     // Check for duplicate member names in object
     const seenNames = new Set<string>()
-    for (const item of obj.items) {
-      const name = item.name
+    for (const member of obj.members) {
+      const name = member.name
       if (name) {
         if (seenNames.has(name)) {
-          accept('error', `Duplicate member name: ${name}`, { node: item })
+          accept('error', `Duplicate member name: ${name}`, { node: member })
         } else {
           seenNames.add(name)
         }
@@ -77,35 +76,23 @@ export class ObjectOrientedCValidator {
     }
   }
 
-  checkMethodParameters(objItem: ObjItem, accept: ValidationAcceptor): void {
-    // Validate method parameter names are unique (only for items with params)
-    if (objItem.params) {
-      const paramNames = new Set<string>()
-      for (const param of objItem.params.params) {
-        if (paramNames.has(param)) {
-          accept('error', `Duplicate parameter name: ${param}`, {
-            node: objItem,
-          })
-        } else {
-          paramNames.add(param)
-        }
-      }
-    }
-  }
-
-  checkVariableDeclaration(decl: VarDecl, accept: ValidationAcceptor): void {
-    // Check variable names follow naming conventions (optional but good practice)
-    // Variables should not be empty
+  checkVariableDeclaration(
+    decl: VarDeclaration,
+    accept: ValidationAcceptor
+  ): void {
+    // Check variable names are not empty
     if (!decl.name || decl.name.trim().length === 0) {
       accept('error', 'Variable name cannot be empty', { node: decl })
+      return
     }
 
-    // Warn about uppercase variable names (should be lowercase)
-    if (decl.name && /^[A-Z]/.test(decl.name)) {
-      accept('warning', 'Variable names should start with lowercase letter', {
-        node: decl,
-        property: 'name',
-      })
+    // Check that variable names start with lowercase
+    if (decl.name && decl.name[0] === decl.name[0].toUpperCase()) {
+      accept(
+        'warning',
+        `Variable name '${decl.name}' should start with lowercase`,
+        { node: decl }
+      )
     }
 
     // Ensure value is assigned
@@ -116,18 +103,32 @@ export class ObjectOrientedCValidator {
     }
   }
 
-  checkItemDeclaration(item: Item, accept: ValidationAcceptor): void {
-    // Additional checks for items at module level
-    if (item.$type === 'Export') {
-      if (!item.decl) {
-        accept('error', 'Export must have a declaration', { node: item })
+  checkMethodMember(method: MethodMember, accept: ValidationAcceptor): void {
+    // Check for duplicate parameters
+    if (method.params && method.params.params) {
+      const seenParams = new Set<string>()
+      for (const param of method.params.params) {
+        if (seenParams.has(param)) {
+          accept('error', `Duplicate parameter: ${param}`, {
+            node: method.params,
+          })
+        } else {
+          seenParams.add(param)
+        }
       }
-    } else if (item.$type === 'Import') {
-      if (!item.filepath) {
-        accept('error', 'Import must specify a file path', { node: item })
-      }
-      if (!item.name) {
-        accept('error', 'Import must have a name', { node: item })
+    }
+  }
+
+  checkMethodParams(params: MethodParams, accept: ValidationAcceptor): void {
+    // Check for duplicate parameters
+    const seenParams = new Set<string>()
+    for (const param of params.params) {
+      if (seenParams.has(param)) {
+        accept('error', `Duplicate parameter: ${param}`, {
+          node: params,
+        })
+      } else {
+        seenParams.add(param)
       }
     }
   }

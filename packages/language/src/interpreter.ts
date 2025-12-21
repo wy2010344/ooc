@@ -1,506 +1,510 @@
 /**
- * OOC Language JavaScript Interpreter
+ * OOC Language Interpreter
  *
- * This interpreter executes OOC AST nodes in JavaScript, supporting:
- * - Object literal evaluation and method calls
- * - Message passing between objects
- * - Variable declarations and references
- * - Basic type operations
- * - Pipe operations for method chaining
+ * Executes OOC AST nodes based on the new grammar (Langium 4.1)
+ * Supports: message passing, pipelines, closures, objects, and macros
  */
 
 import type {
   OOCModel,
-  Expr,
-  Base,
-  Primary,
-  StringLit,
-  NumLit,
-  BoolLit,
-  ObjLit,
-  UnionVal,
-  VarDecl,
-  Import,
-  Export,
   Item,
-  MethodDecl,
+  VarDeclaration,
+  Statement,
+  Pipeline,
+  MessageChain,
+  Message,
+  Primary,
+  ObjectLiteral,
+  MethodMember,
+  VariableMember,
+  CachedMember,
+  StringLiteral,
+  NumberLiteral,
+  BooleanLiteral,
+  UnionLiteral,
+  IfMacro,
+  WhileMacro,
+  ReturnMacro,
 } from './generated/ast.js'
 
 export interface OOCValue {
-  $type: 'object' | 'string' | 'number' | 'boolean' | 'union'
-  value: any
-  methods?: Record<string, OOCMethod>
+  $type:
+    | 'object'
+    | 'string'
+    | 'number'
+    | 'boolean'
+    | 'nil'
+    | 'union'
+    | 'function'
+  value?: any
+  methods?: Map<string, OOCFunction>
 }
 
-export interface OOCMethod {
-  params: string[]
-  body: (args: any[]) => any
+export interface OOCFunction {
+  paramNames: string[]
+  body?: any
+  closure: Environment
   isAsync?: boolean
+  isCached?: boolean
+  cachedValue?: any
 }
 
+/**
+ * Environment for managing variable scopes
+ */
+class Environment {
+  private variables: Map<string, OOCValue> = new Map()
+  private parent: Environment | null
+
+  constructor(parent: Environment | null = null) {
+    this.parent = parent
+  }
+
+  define(name: string, value: OOCValue): void {
+    this.variables.set(name, value)
+  }
+
+  get(name: string): OOCValue | undefined {
+    if (this.variables.has(name)) {
+      return this.variables.get(name)
+    }
+    if (this.parent) {
+      return this.parent.get(name)
+    }
+    return undefined
+  }
+
+  set(name: string, value: OOCValue): void {
+    if (this.variables.has(name)) {
+      this.variables.set(name, value)
+      return
+    }
+    if (this.parent) {
+      this.parent.set(name, value)
+      return
+    }
+    // Define in current scope if not found
+    this.variables.set(name, value)
+  }
+
+  child(): Environment {
+    return new Environment(this)
+  }
+}
+
+/**
+ * Main OOC Interpreter
+ */
 export class OOCInterpreter {
-  private globalScope: Record<string, any> = {}
-  private scopes: Record<string, any>[] = [this.globalScope]
+  private globalEnv: Environment
+  private currentEnv: Environment
+  private returnValue: OOCValue | null = null
+  private shouldReturn = false
 
   constructor() {
-    this.initBuiltins()
+    this.globalEnv = new Environment()
+    this.currentEnv = this.globalEnv
   }
 
-  /**
-   * Execute a complete OOC model
-   */
-  public execute(model: OOCModel): any {
-    const results: any[] = []
-
-    // Debug: show item types to help trace missing handling
-    // console.log(
-    //   'Executing model items:',
-    //   model.items.map((i) => i.$type)
-    // )
+  interpret(model: OOCModel): OOCValue | undefined {
+    console.log('OOC Interpreter initialized')
+    let lastValue: OOCValue | undefined = undefined
 
     for (const item of model.items) {
+      console.log('executeItem', (item as any)?.$type)
       const result = this.executeItem(item)
-      results.push(result)
+      console.log('executeItem result:', result?.$type)
+      if (result !== undefined) {
+        lastValue = result
+      }
     }
 
-    return results.length === 1 ? results[0] : results
+    console.log('Final lastValue:', lastValue?.$type)
+    return lastValue
   }
 
-  private initBuiltins(): void {
-    // gcd: computes greatest common divisor of two numbers
-    this.globalScope['gcd'] = (obj: any, other: any) => {
-      const a = this.toJSValue(obj)
-      const b = this.toJSValue(other)
-      const toInt = (v: any) => Math.floor(Number(v))
-      let x = Math.abs(toInt(a))
-      let y = Math.abs(toInt(b))
-      while (y !== 0) {
-        const t = x % y
-        x = y
-        y = t
-      }
-      return { $type: 'number', value: x }
-    }
-
-    // factorial: compute factorial of a non-negative integer
-    this.globalScope['factorial'] = (obj: any) => {
-      const n = Math.floor(Number(this.toJSValue(obj)))
-      if (n <= 1) return { $type: 'number', value: 1 }
-      let acc = 1
-      for (let i = 2; i <= n; i++) acc *= i
-      return { $type: 'number', value: acc }
-    }
-
-    // sumList: expects a linked list encoded as union $cons head tail | $nil
-    this.globalScope['sumList'] = (obj: any) => {
-      let cur = obj
-      let total = 0
-      while (cur && cur.$type === 'union' && cur.value) {
-        if (cur.value.tag === 'cons') {
-          const head = cur.value.args && cur.value.args[0]
-          total += Number(this.toJSValue(head))
-          cur = cur.value.args && cur.value.args[1]
-        } else {
-          break
-        }
-      }
-      return { $type: 'number', value: total }
-    }
-  }
-
-  /**
-   * Execute a single item (import, export, or statement)
-   */
-  private executeItem(item: Item): any {
-    if (item.$type === 'Import') {
-      return this.executeImport(item as Import)
-    } else if (item.$type === 'Export') {
-      return this.executeExport(item as Export)
+  private executeItem(item: Item): OOCValue | undefined {
+    if (item.$type === 'VarDeclaration') {
+      const varDecl = item as VarDeclaration
+      const value = this.evaluatePipeline(varDecl.value)
+      this.currentEnv.define(varDecl.name, value)
+      return value
     } else if (item.$type === 'Statement') {
-      return this.executeExpr((item as any).expr)
-    } else if (item.$type === 'VarDecl') {
-      return this.executeVarDecl(item as VarDecl)
-    } else if (item.$type === 'MethodDecl') {
-      return this.executeMethodDecl(item as MethodDecl)
+      const stmt = item as Statement
+      return this.evaluatePipeline(stmt.expression)
     }
-
+    // Skip Export and Import for now
     return undefined
   }
 
-  /**
-   * Execute import statement
-   */
-  private executeImport(imp: Import): any {
-    // In a real implementation, this would load a module
-    // For now, we'll just store it
-    console.log(`Importing ${imp.name} from ${imp.filepath}`)
-    return undefined
+  private evaluatePipeline(pipeline: Pipeline): OOCValue {
+    let result = this.evaluateMessageChain(pipeline.messageChain)
+    // TODO: Process pipeline operations (/ and | operators)
+    return result
   }
 
-  /**
-   * Execute export statement
-   */
-  private executeExport(exp: Export): any {
-    if (exp.decl.$type === 'VarDecl') {
-      return this.executeVarDecl(exp.decl as VarDecl)
-    } else if (exp.decl.$type === 'MethodDecl') {
-      return this.executeMethodDecl(exp.decl as MethodDecl)
-    }
-    return undefined
-  }
+  private evaluateMessageChain(chain: MessageChain): OOCValue {
+    // Evaluate primary first
+    let result = this.evaluatePrimary(chain.primary)
 
-  /**
-   * Execute variable declaration
-   */
-  private executeVarDecl(decl: VarDecl): any {
-    const value = this.executeExpr(decl.value)
-    this.setVariable(decl.name, value)
-    return value
-  }
-
-  /**
-   * Execute method declaration at module level
-   */
-  private executeMethodDecl(decl: MethodDecl): any {
-    const method: OOCMethod = {
-      params: decl.params?.params ?? [],
-      body: (args: any[]) => {
-        // Create new scope with parameters
-        const paramScope: Record<string, any> = {}
-        const params = decl.params?.params ?? []
-        for (let i = 0; i < params.length; i++) {
-          paramScope[params[i]] = args[i]
-        }
-
-        this.scopes.push(paramScope)
-        try {
-          return this.executeExpr(decl.body)
-        } finally {
-          this.scopes.pop()
-        }
-      },
-      isAsync: false,
-    }
-
-    this.setVariable(decl.name, method)
-    return method
-  }
-
-  /**
-   * Execute expression
-   */
-  private executeExpr(expr: Expr): any {
-    if (expr.$type === 'Base') {
-      return this.executeBase(expr as Base)
-    }
-    return undefined
-  }
-
-  /**
-   * Execute base expression (atom + method calls)
-   */
-  private executeBase(base: Base): any {
-    let result = this.executePrimary(base.atom)
-
-    // Execute method calls in sequence
-    for (const methodCall of base.methods) {
-      result = this.executeMethodCall(result, methodCall)
+    // Then evaluate optional message
+    if (chain.messages) {
+      result = this.sendMessage(result, chain.messages)
     }
 
     return result
   }
 
-  /**
-   * Execute primary expression
-   */
-  private executePrimary(primary: Primary): any {
-    if (!primary) return undefined
-
-    // Handle literals
-    if (primary.$type === 'StringLit') {
-      return this.executeStringLit(primary as StringLit)
-    } else if (primary.$type === 'NumLit') {
-      return this.executeNumLit(primary as NumLit)
-    } else if (primary.$type === 'BoolLit') {
-      return this.executeBoolLit(primary as BoolLit)
-    } else if (primary.$type === 'ObjLit') {
-      return this.executeObjLit(primary as ObjLit)
-    } else if (primary.$type === 'UnionVal') {
-      return this.executeUnionVal(primary as UnionVal)
-    } else if (primary.$type === 'Base') {
-      // It's a nested expression in parentheses
-      return this.executeBase(primary as Base)
-    } else if (typeof primary === 'string') {
-      // It's an identifier
-      return this.getVariable(primary)
+  private evaluatePrimary(primary: Primary | string): OOCValue {
+    if (!primary) {
+      return { $type: 'nil' }
     }
-    return undefined
-  }
 
-  /**
-   * Execute string literal
-   */
-  private executeStringLit(lit: StringLit): OOCValue {
-    return {
-      $type: 'string',
-      value: lit.value,
-      methods: {
-        length: {
-          params: [],
-          body: () => ({
-            $type: 'number',
-            value: lit.value.length,
-          }),
-        },
-        slice: {
-          params: ['start', 'end'],
-          body: (args: any[]) => ({
-            $type: 'string',
-            value: lit.value.slice(args[0], args[1]),
-          }),
-        },
-        add: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'string',
-            value: lit.value + this.toJSValue(args[0]),
-          }),
-        },
-      },
+    // Handle string primary (ID reference)
+    if (typeof primary === 'string') {
+      const value = this.currentEnv.get(primary)
+      return value || { $type: 'nil' }
     }
-  }
 
-  /**
-   * Execute number literal
-   */
-  private executeNumLit(lit: NumLit): OOCValue {
-    const num =
-      typeof lit.value === 'string' ? parseFloat(lit.value) : lit.value
-    return {
-      $type: 'number',
-      value: num,
-      methods: {
-        add: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'number',
-            value: num + this.toJSValue(args[0]),
-          }),
-        },
-        sub: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'number',
-            value: num - this.toJSValue(args[0]),
-          }),
-        },
-        mul: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'number',
-            value: num * this.toJSValue(args[0]),
-          }),
-        },
-        div: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'number',
-            value: num / this.toJSValue(args[0]),
-          }),
-        },
-      },
-    }
-  }
+    const primType = (primary as any)?.$type
 
-  /**
-   * Execute boolean literal
-   */
-  private executeBoolLit(lit: BoolLit): OOCValue {
-    return {
-      $type: 'boolean',
-      value: lit.value === 'true',
-      methods: {
-        and: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'boolean',
-            value: lit.value === 'true' && this.toJSValue(args[0]),
-          }),
-        },
-        or: {
-          params: ['other'],
-          body: (args: any[]) => ({
-            $type: 'boolean',
-            value: lit.value === 'true' || this.toJSValue(args[0]),
-          }),
-        },
-        not: {
-          params: [],
-          body: () => ({
-            $type: 'boolean',
-            value: lit.value !== 'true',
-          }),
-        },
-      },
-    }
-  }
-
-  /**
-   * Execute object literal
-   */
-  private executeObjLit(lit: ObjLit): OOCValue {
-    const obj: any = { $type: 'object' }
-    const methods: Record<string, OOCMethod> = {}
-    const properties: Record<string, any> = {}
-
-    for (const item of lit.items) {
-      // Check if it's a method (has params or expr)
-      if (item.params !== undefined || item.expr !== undefined) {
-        // It's a method
-        const params = item.params?.params ?? []
-        methods[item.name] = {
-          params,
-          body: (args: any[]) => {
-            // Create new scope for method execution
-            const methodScope: Record<string, any> = {}
-            for (let i = 0; i < params.length; i++) {
-              methodScope[params[i]] = args[i]
-            }
-            // Add this object's properties to scope
-            for (const [k, v] of Object.entries(properties)) {
-              methodScope[k] = v
-            }
-
-            this.scopes.push(methodScope)
-            try {
-              return item.expr ? this.executeExpr(item.expr) : undefined
-            } finally {
-              this.scopes.pop()
-            }
-          },
+    switch (primType) {
+      case 'ObjectLiteral':
+        return this.evaluateObjectLiteral(primary as unknown as ObjectLiteral)
+      case 'StringLiteral':
+        return {
+          $type: 'string',
+          value: (primary as unknown as StringLiteral).value.slice(1, -1),
         }
-      } else if (item.val !== undefined) {
-        // It's a property
-        const value = this.executeExpr(item.val)
-        properties[item.name] = value
-      } else {
-        // Simple reference to variable
-        try {
-          properties[item.name] = this.getVariable(item.name)
-        } catch {
-          // Variable not found, skip
+      case 'NumberLiteral':
+        return {
+          $type: 'number',
+          value: parseFloat((primary as unknown as NumberLiteral).value),
         }
+      case 'BooleanLiteral':
+        return {
+          $type: 'boolean',
+          value: (primary as unknown as BooleanLiteral).value === 'true',
+        }
+      case 'NilLiteral':
+        return { $type: 'nil' }
+      case 'UnionLiteral':
+        return this.evaluateUnionLiteral(primary as unknown as UnionLiteral)
+    }
+
+    return { $type: 'nil' }
+  }
+
+  private evaluateObjectLiteral(obj: ObjectLiteral): OOCValue {
+    const methods = new Map<string, OOCFunction>()
+    const variables = new Map<string, OOCValue>()
+
+    // Create closure environment for this object
+    const closure = this.currentEnv.child()
+
+    for (const member of obj.members) {
+      if (member.$type === 'MethodMember') {
+        const methodMember = member as MethodMember
+        const paramNames = methodMember.params?.params || []
+        methods.set(methodMember.name, {
+          paramNames,
+          body: methodMember.body?.expression || methodMember.body?.expressions,
+          closure,
+        })
+      } else if (member.$type === 'VariableMember') {
+        const varMember = member as VariableMember
+        const value = this.evaluatePipeline(varMember.value)
+        variables.set(varMember.name, value)
+        closure.define(varMember.name, value)
+      } else if (member.$type === 'CachedMember') {
+        const cachedMember = member as CachedMember
+        const value = this.evaluatePipeline(cachedMember.value)
+        methods.set(cachedMember.name, {
+          paramNames: [],
+          body: undefined,
+          closure,
+          isCached: true,
+          cachedValue: value,
+        })
       }
     }
 
-    // Combine properties and methods
-    for (const [k, v] of Object.entries(properties)) {
-      obj[k] = v
+    return {
+      $type: 'object',
+      value: variables,
+      methods,
     }
-    obj.methods = methods
-    obj.value = properties
-
-    return obj
   }
 
-  /**
-   * Execute union value (tagged union)
-   */
-  private executeUnionVal(union: UnionVal): OOCValue {
-    const args = union.args ? this.executeArgs(union.args) : []
+  private sendMessage(receiver: OOCValue, message: Message): OOCValue {
+    const messageName = message.name
+    const args = (message.args || []).map((arg) => this.evaluatePrimary(arg))
+
+    // Handle built-in methods
+    if (receiver.$type === 'string') {
+      return this.handleStringMessage(receiver.value, messageName, args)
+    } else if (receiver.$type === 'number') {
+      return this.handleNumberMessage(receiver.value, messageName, args)
+    } else if (receiver.$type === 'boolean') {
+      return this.handleBooleanMessage(receiver.value, messageName, args)
+    } else if (receiver.$type === 'object' && receiver.methods) {
+      const method = receiver.methods.get(messageName)
+      if (method) {
+        return this.executeMethod(
+          method,
+          args,
+          receiver.value as Map<string, OOCValue>
+        )
+      }
+    }
+
+    return { $type: 'nil' }
+  }
+
+  private handleStringMessage(
+    str: string,
+    messageName: string,
+    args: OOCValue[]
+  ): OOCValue {
+    switch (messageName) {
+      case 'length':
+        return { $type: 'number', value: str.length }
+      case 'add':
+        if (args.length > 0) {
+          const other = this.valueToString(args[0])
+          return { $type: 'string', value: str + other }
+        }
+        return { $type: 'string', value: str }
+      default:
+        return { $type: 'nil' }
+    }
+  }
+
+  private handleNumberMessage(
+    num: number,
+    messageName: string,
+    args: OOCValue[]
+  ): OOCValue {
+    switch (messageName) {
+      case 'add':
+        if (args.length > 0) {
+          const other = this.valueToNumber(args[0])
+          return { $type: 'number', value: num + other }
+        }
+        return { $type: 'number', value: num }
+      case 'sub':
+        if (args.length > 0) {
+          const other = this.valueToNumber(args[0])
+          return { $type: 'number', value: num - other }
+        }
+        return { $type: 'number', value: num }
+      case 'mul':
+        if (args.length > 0) {
+          const other = this.valueToNumber(args[0])
+          return { $type: 'number', value: num * other }
+        }
+        return { $type: 'number', value: num }
+      case 'div':
+        if (args.length > 0) {
+          const other = this.valueToNumber(args[0])
+          if (other !== 0) {
+            return { $type: 'number', value: num / other }
+          }
+        }
+        return { $type: 'nil' }
+      default:
+        return { $type: 'nil' }
+    }
+  }
+
+  private handleBooleanMessage(
+    _bool: boolean,
+    _messageName: string,
+    _args: OOCValue[]
+  ): OOCValue {
+    // Add boolean-specific methods as needed
+    return { $type: 'nil' }
+  }
+
+  private executeMethod(
+    method: OOCFunction,
+    args: OOCValue[],
+    objectVars?: Map<string, OOCValue>
+  ): OOCValue {
+    // Handle cached members
+    if (method.isCached) {
+      return method.cachedValue || { $type: 'nil' }
+    }
+
+    // Create new environment for method execution
+    const methodEnv = method.closure.child()
+
+    // Bind parameters
+    for (let i = 0; i < method.paramNames.length; i++) {
+      methodEnv.define(method.paramNames[i], args[i] || { $type: 'nil' })
+    }
+
+    // Make object variables accessible in method
+    if (objectVars) {
+      for (const [key, value] of objectVars.entries()) {
+        methodEnv.define(key, value)
+      }
+    }
+
+    // Execute method body
+    const prevEnv = this.currentEnv
+    this.currentEnv = methodEnv
+    this.shouldReturn = false
+    this.returnValue = null
+
+    let result: OOCValue = { $type: 'nil' }
+
+    if (Array.isArray(method.body)) {
+      // Multiple expressions
+      for (const expr of method.body) {
+        result = this.evaluatePipeline(expr)
+        if (this.shouldReturn) {
+          result = this.returnValue || { $type: 'nil' }
+          this.shouldReturn = false
+          break
+        }
+      }
+    } else if (method.body) {
+      // Single expression
+      result = this.evaluatePipeline(method.body)
+    }
+
+    this.currentEnv = prevEnv
+    return result
+  }
+
+  private evaluateUnionLiteral(union: UnionLiteral): OOCValue {
+    const args = (union.unionArgs || []).map((arg) => {
+      if (typeof arg === 'string') {
+        if (arg.startsWith("'")) {
+          return { $type: 'string', value: arg.slice(1, -1) }
+        } else {
+          const num = parseFloat(arg)
+          if (!isNaN(num)) {
+            return { $type: 'number', value: num }
+          }
+          return { $type: 'string', value: arg }
+        }
+      }
+      return { $type: 'nil' }
+    })
+
     return {
       $type: 'union',
       value: {
-        tag: union.tag,
+        constructor: union.constructor,
         args,
       },
     }
   }
 
-  /**
-   * Execute arguments
-   */
-  private executeArgs(args: any): any[] {
-    return args.items.map((item: any) => this.executePrimary(item))
-  }
+  private evaluateIfMacro(ifMacro: IfMacro): OOCValue {
+    const condition = this.evaluatePipeline(ifMacro.condition)
+    const isTruthy = this.isTruthy(condition)
 
-  /**
-   * Execute method call on an object
-   */
-  private executeMethodCall(obj: any, call: any): any {
-    const args = call.args ? this.executeArgs(call.args) : []
-
-    // Check if it's a method on the object
-    if (obj && obj.methods && obj.methods[call.name]) {
-      const method = obj.methods[call.name]
-      return method.body(args)
-    }
-
-    // Try to find it in current scope as a function (including built-ins)
-    let func: any
-    try {
-      func = this.getVariable(call.name)
-    } catch {
-      // Function not found; skip
-      func = undefined
-    }
-
-    if (func) {
-      if (func instanceof Function) {
-        // Regular JS function (built-in)
-        return func(obj, ...args.map((a) => this.toJSValue(a)))
-      } else if (func.body instanceof Function) {
-        // OOC method object with body function
-        return func.body([obj, ...args])
-      } else if (typeof func === 'function') {
-        // Wrapped function
-        return func(obj, ...args)
+    if (isTruthy) {
+      if (Array.isArray(ifMacro.thenBody)) {
+        let result: OOCValue = { $type: 'nil' }
+        for (const expr of ifMacro.thenBody) {
+          result = this.evaluatePipeline(expr)
+        }
+        return result
+      } else {
+        return this.evaluatePipeline(ifMacro.thenBody as any)
+      }
+    } else if (ifMacro.elseBody) {
+      if (Array.isArray(ifMacro.elseBody)) {
+        let result: OOCValue = { $type: 'nil' }
+        for (const expr of ifMacro.elseBody) {
+          result = this.evaluatePipeline(expr)
+        }
+        return result
+      } else {
+        return this.evaluatePipeline(ifMacro.elseBody as any)
       }
     }
 
-    // No method found
-    throw new Error(`Unknown method or function: ${call.name}`)
+    return { $type: 'nil' }
   }
 
-  /**
-   * Convert OOC value to JavaScript value
-   */
-  private toJSValue(value: any): any {
-    if (value && typeof value === 'object') {
-      if (value.$type === 'number') return value.value
-      if (value.$type === 'string') return value.value
-      if (value.$type === 'boolean') return value.value
-      if (value.$type === 'union') return value.value
-      if (value.$type === 'object') return value
+  private evaluateWhileMacro(whileMacro: WhileMacro): OOCValue {
+    let result: OOCValue = { $type: 'nil' }
+
+    while (this.isTruthy(this.evaluatePipeline(whileMacro.condition))) {
+      for (const expr of whileMacro.body) {
+        result = this.evaluatePipeline(expr)
+      }
     }
+
+    return result
+  }
+
+  private evaluateReturnMacro(returnMacro: ReturnMacro): OOCValue {
+    const value = returnMacro.value
+      ? this.evaluatePipeline(returnMacro.value)
+      : { $type: 'nil' }
+    this.shouldReturn = true
+    this.returnValue = value
     return value
   }
 
-  /**
-   * Set variable in current scope
-   */
-  private setVariable(name: string, value: any): void {
-    const currentScope = this.scopes[this.scopes.length - 1]
-    currentScope[name] = value
+  private isTruthy(value: OOCValue): boolean {
+    if (value.$type === 'nil') return false
+    if (value.$type === 'boolean') return value.value === true
+    if (value.$type === 'number') return value.value !== 0
+    if (value.$type === 'string') return value.value !== ''
+    return true
   }
 
-  /**
-   * Get variable from scope chain
-   */
-  private getVariable(name: string): any {
-    for (let i = this.scopes.length - 1; i >= 0; i--) {
-      if (name in this.scopes[i]) {
-        return this.scopes[i][name]
-      }
+  private valueToString(value: OOCValue): string {
+    switch (value.$type) {
+      case 'string':
+        return value.value || ''
+      case 'number':
+        return String(value.value || 0)
+      case 'boolean':
+        return String(value.value || false)
+      case 'nil':
+        return 'nil'
+      case 'union':
+        return JSON.stringify(value.value)
+      default:
+        return '[object]'
     }
-    throw new Error(`Undefined variable: ${name}`)
+  }
+
+  private valueToNumber(value: OOCValue): number {
+    switch (value.$type) {
+      case 'number':
+        return value.value || 0
+      case 'string':
+        return parseFloat(value.value || '0') || 0
+      case 'boolean':
+        return value.value ? 1 : 0
+      default:
+        return 0
+    }
   }
 }
 
-/**
- * Execute OOC code from AST
- */
 export function executeOOC(model: OOCModel): any {
   const interpreter = new OOCInterpreter()
-  return interpreter.execute(model)
+  const result = interpreter.interpret(model)
+  // Return the value of the last expression/statement
+  if (result) {
+    if (result.$type === 'object') {
+      // For objects, return an object representation
+      return { ...result.value }
+    } else if (result.$type === 'union') {
+      return result.value
+    } else {
+      return result.value !== undefined ? result.value : true
+    }
+  }
+  return true // Return true if successful
 }

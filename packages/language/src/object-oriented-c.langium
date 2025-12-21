@@ -1,98 +1,196 @@
 grammar ObjectOrientedC
 
+hidden terminal WS: /\s+/;
+hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
+hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
+
 entry OOCModel:
-    (items+=Item)*
+    items+=Item*
 ;
 
 Item:
-    (Declaration | Statement) (';')?
+    Import | Export | TopLevelItem
 ;
 
-Declaration:
-    VarDecl | MethodDecl | Import | Export
+TopLevelItem:
+    VarDeclaration ';'?
+    | Statement ';'?
 ;
+
+// ============================================================
+// Imports & Exports
+// ============================================================
 
 Import:
-    'import' name=ID filepath=STRING
+    'import' name=ID path=STRING ';'?
 ;
 
 Export:
-    'export' decl=(VarDecl | MethodDecl)
+    'export' (varDecl=VarDeclaration | methodDecl=MethodDeclaration) ';'?
 ;
 
-VarDecl:
-    name=ID op=(':=' | '=') value=Expr
+// ============================================================
+// Variable Declaration
+// ============================================================
+
+VarDeclaration:
+    name=ID assignOp=('=' | ':=') value=Expression
 ;
 
-MethodDecl:
-    name=ID '(' params=ParamList? ')' ('@')?
-    ('{' body=Expr '}' | ':' body=Expr)
+MethodDeclaration:
+    name=ID params=MethodParams body=MethodBody
 ;
 
-ParamList:
-    // Accept either comma-separated or space-separated parameter lists
-    params+=ID (','? params+=ID)*
+MethodParams:
+    '(' (params+=ID (',' params+=ID)*)? ')'
 ;
+
+MethodBody:
+    '#async'? ('{' expressions+=Expression (';' expressions+=Expression)* ';'? '}'
+    | '=>' expression=Expression)
+;
+
+// ============================================================
+// Statements
+// ============================================================
 
 Statement:
-    expr=Expr
+    expression=Expression
 ;
 
-Expr:
-    Base
+// ============================================================
+// Expression Hierarchy
+// ============================================================
+
+Expression:
+    Pipeline
 ;
 
-Base:
-    atom=Primary (methods+=MethodCall)*
+// Pipeline: left-recursive infix operators (/ and |)
+// / right side: single message (method arg1 arg2...)
+// | right side: pattern binding or message chain
+Pipeline infers Pipeline:
+    messageChain=MessageChain
+    ({infer Pipeline.left=current} ('/' message=Message | '|' right=PipelineRight))*
 ;
 
-MethodCall:
-    name=ID (args=Args)?
+// Right side of pipe can be either:
+// 1. Pattern binding: var . expression
+// 2. Message chain (primary + messages)
+PipelineRight:
+    PatternBinding | MessageChain
 ;
 
-Args:
-    items+=Primary (',' items+=Primary)*
+PatternBinding:
+    varName=ID '.' expr=MessageChain
+;
+
+// Message chain: primary optionally followed by messages
+MessageChain:
+    primary=Primary (messages=Message)?
+;
+
+Message:
+    name=ID args+=Primary*
 ;
 
 Primary:
-    StringLit | NumLit | BoolLit | ObjLit | ID | UnionVal | '(' Expr ')'
+    '(' Expression ')'
+    | ObjectLiteral
+    | StringLiteral
+    | BooleanLiteral
+    | NumberLiteral
+    | NilLiteral
+    | UnionLiteral
+    | MacroCall
+    | ID
 ;
 
-StringLit:
+// ============================================================
+// Macros
+// ============================================================
+
+MacroCall:
+    IfMacro
+    | WhileMacro
+    | ReturnMacro
+    | '#await'
+;
+
+IfMacro:
+    '#if' '(' condition=Expression ')'
+    thenBody=ExpressionBody
+    ('#else' elseBody=ExpressionBody)?
+;
+
+ExpressionBody:
+    '{' expressions+=Expression (';' expressions+=Expression)* ';'? '}'
+    | Expression
+;
+
+WhileMacro:
+    '#while' '(' condition=Expression ')' '{'
+    body+=Expression (';' body+=Expression)* ';'?
+    '}'
+;
+
+ReturnMacro:
+    '#return' value=Expression?
+;
+
+// ============================================================
+// Object Literal
+// ============================================================
+
+ObjectLiteral:
+    '{' members+=ObjectMember (',' members+=ObjectMember)* '}'
+    | '{' '}'
+;
+
+ObjectMember:
+    MethodMember | CachedMember | VariableMember
+;
+
+MethodMember:
+    name=ID params=MethodParams body=MethodBody
+;
+
+CachedMember:
+    name=ID '=' value=Expression
+;
+
+VariableMember:
+    name=ID assignOp=(':=' | '=') value=Expression
+;
+
+// ============================================================
+// Literals
+// ============================================================
+
+StringLiteral:
     value=STRING
 ;
 
-NumLit:
-    value=(INT | FLOAT)
-;
-
-BoolLit:
+BooleanLiteral:
     value=('true' | 'false')
 ;
 
-ObjLit:
-    '{' (items+=ObjItem (',' items+=ObjItem)*)? '}'
+NumberLiteral:
+    value=NUMBER
 ;
 
-ObjItem:
-    // Try method first (name followed by parentheses)
-    name=ID '(' params=ParamList? ')' ('@')?
-       ('{' expr=Expr '}' | ':' expr=Expr)
-    // Then property (name with operator and value)
-    | name=ID (':=' | '=' | ':') val=Expr
-    // Or just a name (reference to variable)
-    | name=ID
+NilLiteral:
+    {infer NilLiteral} 'nil'
 ;
 
-UnionVal:
-    '$' tag=ID (args=Args)?
+UnionLiteral:
+    '$' constructor=ID (unionArgs+=(NUMBER | STRING | ID))*
 ;
 
-hidden terminal WS: /\s+/;
-terminal ID: /[_a-zA-Z][\w_]*/;
-terminal INT: /[0-9]+/;
-terminal FLOAT: /[0-9]+\.[0-9]+/;
-terminal STRING: /'(\\.|[^'\\])*'/;
+// ============================================================
+// Terminals
+// ============================================================
 
-hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
-hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
+terminal STRING: /'[^']*'/;
+terminal NUMBER: /[0-9]+(\.[0-9]+)?/;
+terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;
