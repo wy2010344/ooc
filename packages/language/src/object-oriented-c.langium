@@ -5,28 +5,32 @@ hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
 
 entry OOCModel:
-    items+=Item*
+    beforeExpressions+=Item ';' 
+    expression=Expression
 ;
 
 Item:
-    Import | Export | TopLevelItem
+    Import | TopLevelItem
 ;
 
 TopLevelItem:
-    VarDeclaration ';'?
-    | Statement ';'?
+    VarDeclaration | ExpressionCatch | Expression
 ;
 
 // ============================================================
-// Imports & Exports
+// Imports,最终转化成Promise.all的导入，最后一条语句作为导出
+// 异步的方法体，可以使用#await与#import
+// 普通函数体里有import，自动变成一个promise。普通函数里有#await，也自动变成promise，毕竟这只是脚本语言。什么csp的yield。
+// 主要是await当然必然只是单次通知。而yield可能多次通知，这时必须是回调函数，因为事件性。
+// 因为promise是类似于return来resolve一次。
+// 有yield，自动变成一种流程介入。但#await是只一次。
+// yield将函数分成几段，其实每一段都可以接受上一段的返回，传递下一段的参数。应该可以 a=yield b,b作为本次返回，a作为本次调用的传入。
+// 事实上每次都返回一个值与函数，函数表示继续，需要传入参数。
+// 还有xxx #throw 抛出错误
 // ============================================================
 
 Import:
-    'import' name=ID path=STRING ';'?
-;
-
-Export:
-    'export' (varDecl=VarDeclaration | methodDecl=MethodDeclaration) ';'?
+    '#import' name=ID path=STRING
 ;
 
 // ============================================================
@@ -34,11 +38,11 @@ Export:
 // ============================================================
 
 VarDeclaration:
-    name=ID assignOp=('=' | ':=') value=Expression
+    name=ID  '=' value=Expression
 ;
 
-MethodDeclaration:
-    name=ID params=MethodParams body=MethodBody
+ExpressionCatch:
+    error=ID','name=ID '=' value=Expression
 ;
 
 MethodParams:
@@ -46,16 +50,15 @@ MethodParams:
 ;
 
 MethodBody:
-    '#async'? ('{' expressions+=Expression (';' expressions+=Expression)* ';'? '}'
-    | '=>' expression=Expression)
+    '#async'? (Expressions | ('=>' expression=Expression))
 ;
 
-// ============================================================
-// Statements
-// ============================================================
 
-Statement:
-    expression=Expression
+fragment Expressions:
+    '{'
+        beforeExpressions+=TopLevelItem ';' 
+        expression=Expression
+    '}'
 ;
 
 // ============================================================
@@ -69,9 +72,8 @@ Expression:
 // Pipeline: left-recursive infix operators (/ and |)
 // / right side: single message (method arg1 arg2...)
 // | right side: pattern binding or message chain
-Pipeline infers Pipeline:
-    messageChain=MessageChain
-    ({infer Pipeline.left=current} ('/' message=Message | '|' right=PipelineRight))*
+Pipeline infers Expression:
+    MessageOrChain ({infer Pipeline.left=current} ('/' right=Message | '|' right=PipelineRight))*
 ;
 
 // Right side of pipe can be either:
@@ -82,12 +84,15 @@ PipelineRight:
 ;
 
 PatternBinding:
-    varName=ID '.' expr=MessageChain
+    varName=ID '.' expr=MessageOrChain
 ;
 
+MessageOrChain:
+    primary=Primary (messages=Message)?
+;
 // Message chain: primary optionally followed by messages
 MessageChain:
-    primary=Primary (messages=Message)?
+    primary=Primary messages=Message
 ;
 
 Message:
@@ -107,7 +112,7 @@ Primary:
 ;
 
 // ============================================================
-// Macros
+// Macros。增加函数声明的macro?
 // ============================================================
 
 MacroCall:
@@ -124,14 +129,12 @@ IfMacro:
 ;
 
 ExpressionBody:
-    '{' expressions+=Expression (';' expressions+=Expression)* ';'? '}'
-    | Expression
+    Expressions
+    | expression=Expression
 ;
 
 WhileMacro:
-    '#while' '(' condition=Expression ')' '{'
-    body+=Expression (';' body+=Expression)* ';'?
-    '}'
+    '#while' '(' condition=Expression ')' expression=ExpressionBody
 ;
 
 ReturnMacro:
@@ -139,12 +142,11 @@ ReturnMacro:
 ;
 
 // ============================================================
-// Object Literal
+// Object Literal。简化，始终有逗号。
 // ============================================================
 
 ObjectLiteral:
-    '{' members+=ObjectMember (',' members+=ObjectMember)* '}'
-    | '{' '}'
+    '{' ( members+=ObjectMember ',')* '}'
 ;
 
 ObjectMember:
@@ -152,7 +154,7 @@ ObjectMember:
 ;
 
 MethodMember:
-    name=ID params=MethodParams body=MethodBody
+    name=ID params=MethodParams? body=MethodBody
 ;
 
 CachedMember:
@@ -160,7 +162,7 @@ CachedMember:
 ;
 
 VariableMember:
-    name=ID assignOp=(':=' | '=') value=Expression
+    name=ID params=MethodParams? '=>' value=Expression
 ;
 
 // ============================================================
@@ -184,7 +186,7 @@ NilLiteral:
 ;
 
 UnionLiteral:
-    '$' constructor=ID (unionArgs+=(NUMBER | STRING | ID))*
+    '$' message=Message
 ;
 
 // ============================================================

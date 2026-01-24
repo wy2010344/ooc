@@ -7,504 +7,261 @@
 
 import type {
   OOCModel,
-  Item,
-  VarDeclaration,
-  Statement,
-  Pipeline,
-  MessageChain,
   Message,
   Primary,
   ObjectLiteral,
-  MethodMember,
-  VariableMember,
   CachedMember,
-  StringLiteral,
-  NumberLiteral,
-  BooleanLiteral,
-  UnionLiteral,
   IfMacro,
   WhileMacro,
-  ReturnMacro,
+  Expression,
+  ExpressionBody,
+  TopLevelItem,
 } from './generated/ast.js'
 
-export interface OOCValue {
-  $type:
-    | 'object'
-    | 'string'
-    | 'number'
-    | 'boolean'
-    | 'nil'
-    | 'union'
-    | 'function'
-  value?: any
-  methods?: Map<string, OOCFunction>
+export type OOCValue =
+  | OOCObject
+  | OOCUnion
+  | string
+  | number
+  | boolean
+  | undefined
+export class OOCObject {
+  constructor(private parentEnv: Environment, private methods: ObjectLiteral) {}
+  sendMessage(name: string, msgs: any[]) {
+    const method = this.methods.members.find((x) => x.name == name)
+    if (method) {
+      switch (method.$type) {
+        case 'CachedMember':
+          const m = method as CachedMember & {
+            cached?: boolean
+            cache?: OOCValue
+          }
+          if (m.cached) {
+            return m.cache
+          }
+          m.cached = true
+          m.cache = this.parentEnv.evaluateExpression(method.value)
+          return m.cache
+          return
+        case 'MethodMember':
+          const scope = new EnvironmentI(this.parentEnv)
+          return
+        case 'VariableMember':
+          method
+          return
+      }
+    }
+    throw new Error(`未找到方法定义`)
+  }
+}
+export class OOCUnion {
+  constructor(readonly name: string, readonly args: any[]) {}
 }
 
-export interface OOCFunction {
-  paramNames: string[]
-  body?: any
-  closure: Environment
-  isAsync?: boolean
-  isCached?: boolean
-  cachedValue?: any
+class ReturnValue {
+  constructor(readonly value: any) {}
+}
+abstract class Environment {
+  abstract define(name: string, value: OOCValue): void
+  abstract get(name: string): OOCValue
+
+  private evaluatePrimary(primary: Primary): OOCValue {
+    switch (primary.$type) {
+      case 'ObjectLiteral':
+        return new OOCObject(this, primary)
+      case 'StringLiteral':
+        //先简单处理
+        return primary.value.slice(1, -1)
+      case 'NumberLiteral':
+        return Number(primary.value)
+      case 'BooleanLiteral':
+        return primary.value === 'true'
+      case 'NilLiteral':
+        return undefined
+      case 'UnionLiteral':
+        return new OOCUnion(
+          primary.message.name,
+          primary.message.args.map((row) => this.evaluatePrimary(row))
+        )
+      case 'IfMacro':
+        return this.evaluateIfMacro(primary)
+      case 'ReturnMacro':
+        throw new ReturnValue(
+          primary.value ? this.evaluateExpression(primary.value) : undefined
+        )
+      case 'WhileMacro':
+        return this.evaluateWhileMacro(primary)
+      default:
+        return this.evaluateExpression(primary)
+    }
+  }
+
+  interpret(model: OOCModel): OOCValue | undefined {
+    const imports = model.beforeExpressions.filter((x) => x.$type == 'Import')
+    //@todo imports批量导入
+    try {
+      for (const item of model.beforeExpressions) {
+        if (item.$type != 'Import') {
+          this.executeItem(item)
+        }
+      }
+    } catch (error) {
+      if (error instanceof ReturnValue) {
+        return error.value
+      }
+    }
+    return this.evaluateExpression(model.expression)
+  }
+
+  private executeItem(item: TopLevelItem): OOCValue {
+    switch (item.$type) {
+      case 'ExpressionCatch':
+        try {
+          const value = this.evaluateExpression(item.value)
+          this.define(item.name, value)
+        } catch (error) {
+          if (error instanceof ReturnValue) {
+            console.warn('不应该在这里出现')
+          }
+          this.define(item.error, error as any)
+        }
+        return
+      case 'VarDeclaration':
+        const value = this.evaluateExpression(item.value)
+        this.define(item.name, value)
+        return
+      default:
+        return this.evaluateExpression(item)
+    }
+  }
+
+  evaluateExpression(expr: Expression): OOCValue {
+    if (expr.$type == 'MessageOrChain') {
+      const o = this.evaluatePrimary(expr.primary)
+      if (expr.messages) {
+        return this.willSendMessage(o, expr.messages)
+      }
+      return o
+    }
+    const result = this.evaluateExpression(expr.left)
+    const right = expr.right
+
+    switch (right.$type) {
+      case 'Message':
+        return this.willSendMessage(result, right)
+      case 'MessageChain':
+        const o = this.evaluatePrimary(right.primary)
+        const name = right.messages.name
+        const args = right.messages.args.map((v) => this.evaluatePrimary(v))
+        args.unshift(result)
+        return this.sendMessage(o, name, args)
+      case 'PatternBinding':
+        const env = new PatternBindingEnvironment(this, right.varName, result)
+        return env.evaluateExpression(right.expr)
+    }
+  }
+  private sendMessage(o: OOCValue, name: string, args: any[]): OOCValue {
+    if (o instanceof OOCObject) {
+      return o.sendMessage(name, args)
+    }
+    const tp = typeof o
+    if (tp == 'undefined') {
+      throw 'no method for nil'
+    }
+    if (tp == 'string') {
+      const df = String.prototype[name as 'slice']
+      if (df) {
+        return df.apply(o, args as any)
+      }
+    }
+
+    if (tp == 'number') {
+    }
+    if (tp == 'boolean') {
+    }
+
+    throw 'todo'
+  }
+  private willSendMessage(receiver: OOCValue, message: Message): OOCValue {
+    const args = message.args.map((arg) => this.evaluatePrimary(arg))
+    return this.sendMessage(receiver, message.name, args)
+  }
+
+  private evalExpressionBody(expressionBody: ExpressionBody) {
+    for (let i = 0; i < expressionBody.beforeExpressions.length; i++) {
+      const exp = expressionBody.beforeExpressions[i]
+      this.executeItem(exp)
+    }
+    return this.evaluateExpression(expressionBody.expression)
+  }
+
+  private evaluateIfMacro(ifMacro: IfMacro): OOCValue {
+    const condition = this.evaluateExpression(ifMacro.condition)
+    if (condition) {
+      return this.evalExpressionBody(ifMacro.thenBody)
+    } else if (ifMacro.elseBody) {
+      return this.evalExpressionBody(ifMacro.elseBody)
+    }
+    return undefined
+  }
+
+  private evaluateWhileMacro(whileMacro: WhileMacro): OOCValue {
+    let out = undefined
+    while (this.evaluateExpression(whileMacro.condition)) {
+      out = this.evalExpressionBody(whileMacro.expression)
+    }
+    return out
+  }
 }
 
+class PatternBindingEnvironment extends Environment {
+  constructor(
+    private parent: Environment,
+    private name: string,
+    private value: any
+  ) {
+    super()
+  }
+  get(name: string): OOCValue {
+    if (name == this.name) {
+      return this.value
+    }
+    return this.parent.get(name)
+  }
+  override define(name: string, value: OOCValue): void {
+    throw new Error(`不能定义任何东西[${name}]`)
+  }
+}
 /**
  * Environment for managing variable scopes
  */
-class Environment {
-  private variables: Map<string, OOCValue> = new Map()
-  private parent: Environment | null
-
-  constructor(parent: Environment | null = null) {
-    this.parent = parent
+class EnvironmentI extends Environment {
+  private variables: Map<string, { value: OOCValue; asConst?: boolean }> =
+    new Map()
+  constructor(private parent: Environment | null = null) {
+    super()
   }
 
-  define(name: string, value: OOCValue): void {
-    this.variables.set(name, value)
+  define(name: string, value: OOCValue, asConst?: boolean): void {
+    if (this.variables.has(name)) {
+      throw new Error(`此作用域中变量[${name}]已经定义`)
+    }
+    this.variables.set(name, { value, asConst })
   }
 
   get(name: string): OOCValue | undefined {
-    if (this.variables.has(name)) {
-      return this.variables.get(name)
+    const value = this.variables.get(name)
+    if (value) {
+      return value.value
     }
     if (this.parent) {
       return this.parent.get(name)
     }
-    return undefined
-  }
-
-  set(name: string, value: OOCValue): void {
-    if (this.variables.has(name)) {
-      this.variables.set(name, value)
-      return
-    }
-    if (this.parent) {
-      this.parent.set(name, value)
-      return
-    }
-    // Define in current scope if not found
-    this.variables.set(name, value)
-  }
-
-  child(): Environment {
-    return new Environment(this)
+    throw new Error(`在作用域链上无法找到[${name}]`)
   }
 }
-
-/**
- * Main OOC Interpreter
- */
-export class OOCInterpreter {
-  private globalEnv: Environment
-  private currentEnv: Environment
-  private returnValue: OOCValue | null = null
-  private shouldReturn = false
-
-  constructor() {
-    this.globalEnv = new Environment()
-    this.currentEnv = this.globalEnv
-  }
-
-  interpret(model: OOCModel): OOCValue | undefined {
-    console.log('OOC Interpreter initialized')
-    let lastValue: OOCValue | undefined = undefined
-
-    for (const item of model.items) {
-      console.log('executeItem', (item as any)?.$type)
-      const result = this.executeItem(item)
-      console.log('executeItem result:', result?.$type)
-      if (result !== undefined) {
-        lastValue = result
-      }
-    }
-
-    console.log('Final lastValue:', lastValue?.$type)
-    return lastValue
-  }
-
-  private executeItem(item: Item): OOCValue | undefined {
-    if (item.$type === 'VarDeclaration') {
-      const varDecl = item as VarDeclaration
-      const value = this.evaluatePipeline(varDecl.value)
-      this.currentEnv.define(varDecl.name, value)
-      return value
-    } else if (item.$type === 'Statement') {
-      const stmt = item as Statement
-      return this.evaluatePipeline(stmt.expression)
-    }
-    // Skip Export and Import for now
-    return undefined
-  }
-
-  private evaluatePipeline(pipeline: Pipeline): OOCValue {
-    let result = this.evaluateMessageChain(pipeline.messageChain)
-    // TODO: Process pipeline operations (/ and | operators)
-    return result
-  }
-
-  private evaluateMessageChain(chain: MessageChain): OOCValue {
-    // Evaluate primary first
-    let result = this.evaluatePrimary(chain.primary)
-
-    // Then evaluate optional message
-    if (chain.messages) {
-      result = this.sendMessage(result, chain.messages)
-    }
-
-    return result
-  }
-
-  private evaluatePrimary(primary: Primary | string): OOCValue {
-    if (!primary) {
-      return { $type: 'nil' }
-    }
-
-    // Handle string primary (ID reference)
-    if (typeof primary === 'string') {
-      const value = this.currentEnv.get(primary)
-      return value || { $type: 'nil' }
-    }
-
-    const primType = (primary as any)?.$type
-
-    switch (primType) {
-      case 'ObjectLiteral':
-        return this.evaluateObjectLiteral(primary as unknown as ObjectLiteral)
-      case 'StringLiteral':
-        return {
-          $type: 'string',
-          value: (primary as unknown as StringLiteral).value.slice(1, -1),
-        }
-      case 'NumberLiteral':
-        return {
-          $type: 'number',
-          value: parseFloat((primary as unknown as NumberLiteral).value),
-        }
-      case 'BooleanLiteral':
-        return {
-          $type: 'boolean',
-          value: (primary as unknown as BooleanLiteral).value === 'true',
-        }
-      case 'NilLiteral':
-        return { $type: 'nil' }
-      case 'UnionLiteral':
-        return this.evaluateUnionLiteral(primary as unknown as UnionLiteral)
-    }
-
-    return { $type: 'nil' }
-  }
-
-  private evaluateObjectLiteral(obj: ObjectLiteral): OOCValue {
-    const methods = new Map<string, OOCFunction>()
-    const variables = new Map<string, OOCValue>()
-
-    // Create closure environment for this object
-    const closure = this.currentEnv.child()
-
-    for (const member of obj.members) {
-      if (member.$type === 'MethodMember') {
-        const methodMember = member as MethodMember
-        const paramNames = methodMember.params?.params || []
-        methods.set(methodMember.name, {
-          paramNames,
-          body: methodMember.body?.expression || methodMember.body?.expressions,
-          closure,
-        })
-      } else if (member.$type === 'VariableMember') {
-        const varMember = member as VariableMember
-        const value = this.evaluatePipeline(varMember.value)
-        variables.set(varMember.name, value)
-        closure.define(varMember.name, value)
-      } else if (member.$type === 'CachedMember') {
-        const cachedMember = member as CachedMember
-        const value = this.evaluatePipeline(cachedMember.value)
-        methods.set(cachedMember.name, {
-          paramNames: [],
-          body: undefined,
-          closure,
-          isCached: true,
-          cachedValue: value,
-        })
-      }
-    }
-
-    return {
-      $type: 'object',
-      value: variables,
-      methods,
-    }
-  }
-
-  private sendMessage(receiver: OOCValue, message: Message): OOCValue {
-    const messageName = message.name
-    const args = (message.args || []).map((arg) => this.evaluatePrimary(arg))
-
-    // Handle built-in methods
-    if (receiver.$type === 'string') {
-      return this.handleStringMessage(receiver.value, messageName, args)
-    } else if (receiver.$type === 'number') {
-      return this.handleNumberMessage(receiver.value, messageName, args)
-    } else if (receiver.$type === 'boolean') {
-      return this.handleBooleanMessage(receiver.value, messageName, args)
-    } else if (receiver.$type === 'object' && receiver.methods) {
-      const method = receiver.methods.get(messageName)
-      if (method) {
-        return this.executeMethod(
-          method,
-          args,
-          receiver.value as Map<string, OOCValue>
-        )
-      }
-    }
-
-    return { $type: 'nil' }
-  }
-
-  private handleStringMessage(
-    str: string,
-    messageName: string,
-    args: OOCValue[]
-  ): OOCValue {
-    switch (messageName) {
-      case 'length':
-        return { $type: 'number', value: str.length }
-      case 'add':
-        if (args.length > 0) {
-          const other = this.valueToString(args[0])
-          return { $type: 'string', value: str + other }
-        }
-        return { $type: 'string', value: str }
-      default:
-        return { $type: 'nil' }
-    }
-  }
-
-  private handleNumberMessage(
-    num: number,
-    messageName: string,
-    args: OOCValue[]
-  ): OOCValue {
-    switch (messageName) {
-      case 'add':
-        if (args.length > 0) {
-          const other = this.valueToNumber(args[0])
-          return { $type: 'number', value: num + other }
-        }
-        return { $type: 'number', value: num }
-      case 'sub':
-        if (args.length > 0) {
-          const other = this.valueToNumber(args[0])
-          return { $type: 'number', value: num - other }
-        }
-        return { $type: 'number', value: num }
-      case 'mul':
-        if (args.length > 0) {
-          const other = this.valueToNumber(args[0])
-          return { $type: 'number', value: num * other }
-        }
-        return { $type: 'number', value: num }
-      case 'div':
-        if (args.length > 0) {
-          const other = this.valueToNumber(args[0])
-          if (other !== 0) {
-            return { $type: 'number', value: num / other }
-          }
-        }
-        return { $type: 'nil' }
-      default:
-        return { $type: 'nil' }
-    }
-  }
-
-  private handleBooleanMessage(
-    _bool: boolean,
-    _messageName: string,
-    _args: OOCValue[]
-  ): OOCValue {
-    // Add boolean-specific methods as needed
-    return { $type: 'nil' }
-  }
-
-  private executeMethod(
-    method: OOCFunction,
-    args: OOCValue[],
-    objectVars?: Map<string, OOCValue>
-  ): OOCValue {
-    // Handle cached members
-    if (method.isCached) {
-      return method.cachedValue || { $type: 'nil' }
-    }
-
-    // Create new environment for method execution
-    const methodEnv = method.closure.child()
-
-    // Bind parameters
-    for (let i = 0; i < method.paramNames.length; i++) {
-      methodEnv.define(method.paramNames[i], args[i] || { $type: 'nil' })
-    }
-
-    // Make object variables accessible in method
-    if (objectVars) {
-      for (const [key, value] of objectVars.entries()) {
-        methodEnv.define(key, value)
-      }
-    }
-
-    // Execute method body
-    const prevEnv = this.currentEnv
-    this.currentEnv = methodEnv
-    this.shouldReturn = false
-    this.returnValue = null
-
-    let result: OOCValue = { $type: 'nil' }
-
-    if (Array.isArray(method.body)) {
-      // Multiple expressions
-      for (const expr of method.body) {
-        result = this.evaluatePipeline(expr)
-        if (this.shouldReturn) {
-          result = this.returnValue || { $type: 'nil' }
-          this.shouldReturn = false
-          break
-        }
-      }
-    } else if (method.body) {
-      // Single expression
-      result = this.evaluatePipeline(method.body)
-    }
-
-    this.currentEnv = prevEnv
-    return result
-  }
-
-  private evaluateUnionLiteral(union: UnionLiteral): OOCValue {
-    const args = (union.unionArgs || []).map((arg) => {
-      if (typeof arg === 'string') {
-        if (arg.startsWith("'")) {
-          return { $type: 'string', value: arg.slice(1, -1) }
-        } else {
-          const num = parseFloat(arg)
-          if (!isNaN(num)) {
-            return { $type: 'number', value: num }
-          }
-          return { $type: 'string', value: arg }
-        }
-      }
-      return { $type: 'nil' }
-    })
-
-    return {
-      $type: 'union',
-      value: {
-        constructor: union.constructor,
-        args,
-      },
-    }
-  }
-
-  private evaluateIfMacro(ifMacro: IfMacro): OOCValue {
-    const condition = this.evaluatePipeline(ifMacro.condition)
-    const isTruthy = this.isTruthy(condition)
-
-    if (isTruthy) {
-      if (Array.isArray(ifMacro.thenBody)) {
-        let result: OOCValue = { $type: 'nil' }
-        for (const expr of ifMacro.thenBody) {
-          result = this.evaluatePipeline(expr)
-        }
-        return result
-      } else {
-        return this.evaluatePipeline(ifMacro.thenBody as any)
-      }
-    } else if (ifMacro.elseBody) {
-      if (Array.isArray(ifMacro.elseBody)) {
-        let result: OOCValue = { $type: 'nil' }
-        for (const expr of ifMacro.elseBody) {
-          result = this.evaluatePipeline(expr)
-        }
-        return result
-      } else {
-        return this.evaluatePipeline(ifMacro.elseBody as any)
-      }
-    }
-
-    return { $type: 'nil' }
-  }
-
-  private evaluateWhileMacro(whileMacro: WhileMacro): OOCValue {
-    let result: OOCValue = { $type: 'nil' }
-
-    while (this.isTruthy(this.evaluatePipeline(whileMacro.condition))) {
-      for (const expr of whileMacro.body) {
-        result = this.evaluatePipeline(expr)
-      }
-    }
-
-    return result
-  }
-
-  private evaluateReturnMacro(returnMacro: ReturnMacro): OOCValue {
-    const value = returnMacro.value
-      ? this.evaluatePipeline(returnMacro.value)
-      : { $type: 'nil' }
-    this.shouldReturn = true
-    this.returnValue = value
-    return value
-  }
-
-  private isTruthy(value: OOCValue): boolean {
-    if (value.$type === 'nil') return false
-    if (value.$type === 'boolean') return value.value === true
-    if (value.$type === 'number') return value.value !== 0
-    if (value.$type === 'string') return value.value !== ''
-    return true
-  }
-
-  private valueToString(value: OOCValue): string {
-    switch (value.$type) {
-      case 'string':
-        return value.value || ''
-      case 'number':
-        return String(value.value || 0)
-      case 'boolean':
-        return String(value.value || false)
-      case 'nil':
-        return 'nil'
-      case 'union':
-        return JSON.stringify(value.value)
-      default:
-        return '[object]'
-    }
-  }
-
-  private valueToNumber(value: OOCValue): number {
-    switch (value.$type) {
-      case 'number':
-        return value.value || 0
-      case 'string':
-        return parseFloat(value.value || '0') || 0
-      case 'boolean':
-        return value.value ? 1 : 0
-      default:
-        return 0
-    }
-  }
-}
+const globalEnv = new EnvironmentI()
 
 export function executeOOC(model: OOCModel): any {
-  const interpreter = new OOCInterpreter()
-  const result = interpreter.interpret(model)
-  // Return the value of the last expression/statement
-  if (result) {
-    if (result.$type === 'object') {
-      // For objects, return an object representation
-      return { ...result.value }
-    } else if (result.$type === 'union') {
-      return result.value
-    } else {
-      return result.value !== undefined ? result.value : true
-    }
-  }
-  return true // Return true if successful
+  return globalEnv.interpret(model)
 }
