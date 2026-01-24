@@ -26,5 +26,8 @@
         "packages/language",
         "packages/cli",
         "packages/extension"
-    ]
+    ],
+    "dependencies": {
+        "wy-helper": "^1.1.1"
+    }
 }

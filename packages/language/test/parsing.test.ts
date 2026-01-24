@@ -2,19 +2,19 @@ import { beforeAll, describe, expect, test } from 'vitest'
 import { EmptyFileSystem, type LangiumDocument } from 'langium'
 import { expandToString as s } from 'langium/generate'
 import { parseHelper } from 'langium/test'
-import type { OOCModel } from 'object-oriented-c-language'
+import type { Model } from 'object-oriented-c-language'
 import {
   createObjectOrientedCServices,
-  isOOCModel,
+  isModel,
 } from 'object-oriented-c-language'
 
 let services: ReturnType<typeof createObjectOrientedCServices>
-let parse: ReturnType<typeof parseHelper<OOCModel>>
-let document: LangiumDocument<OOCModel> | undefined
+let parse: ReturnType<typeof parseHelper<Model>>
+let document: LangiumDocument<Model> | undefined
 
 beforeAll(async () => {
   services = createObjectOrientedCServices(EmptyFileSystem)
-  parse = parseHelper<OOCModel>(services.ObjectOrientedC)
+  parse = parseHelper<Model>(services.ObjectOrientedC)
 
   // activate the following if your linking test requires elements from a built-in library, for example
   // await services.shared.workspace.WorkspaceManager.initializeWorkspace([]);
@@ -39,7 +39,7 @@ describe('Parsing tests', () => {
       checkDocumentValid(document) ||
         s`
                 Items parsed successfully
-            `
+            `,
     ).toBe(s`
             Items parsed successfully
         `)
@@ -146,8 +146,8 @@ function checkDocumentValid(document: LangiumDocument): string | undefined {
     `) ||
     (document.parseResult.value === undefined &&
       `ParseResult is 'undefined'.`) ||
-    (!isOOCModel(document.parseResult.value) &&
-      `Root AST object is a ${document.parseResult.value.$type}, expected a 'OOCModel'.`) ||
+    (!isModel(document.parseResult.value) &&
+      `Root AST object is a ${document.parseResult.value.$type}, expected a 'Model'`) ||
     undefined
   )
 }

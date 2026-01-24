@@ -1,41 +1,60 @@
-import type { OOCModel } from 'object-oriented-c-language';
-import { createObjectOrientedCServices, ObjectOrientedCLanguageMetaData } from 'object-oriented-c-language';
-import chalk from 'chalk';
-import { Command } from 'commander';
-import { extractAstNode } from './util.js';
-import { generateJavaScript } from './generator.js';
-import { NodeFileSystem } from 'langium/node';
-import * as url from 'node:url';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
+import type { Model } from 'object-oriented-c-language'
+type OOCModel = Model
+import {
+  createObjectOrientedCServices,
+  ObjectOrientedCLanguageMetaData,
+} from 'object-oriented-c-language'
+import chalk from 'chalk'
+import { Command } from 'commander'
+import { extractAstNode } from './util.js'
+import { generateJavaScript } from './generator.js'
+import { NodeFileSystem } from 'langium/node'
+import * as url from 'node:url'
+import * as fs from 'node:fs/promises'
+import * as path from 'node:path'
+const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 
-const packagePath = path.resolve(__dirname, '..', 'package.json');
-const packageContent = await fs.readFile(packagePath, 'utf-8');
+const packagePath = path.resolve(__dirname, '..', 'package.json')
+const packageContent = await fs.readFile(packagePath, 'utf-8')
 
-export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
-    const services = createObjectOrientedCServices(NodeFileSystem).ObjectOrientedC;
-    const model = await extractAstNode<OOCModel>(fileName, services);
-    const generatedFilePath = generateJavaScript(model, fileName, opts.destination);
-    console.log(chalk.green(`JavaScript code generated successfully: ${generatedFilePath}`));
-};
-
-export type GenerateOptions = {
-    destination?: string;
+export const generateAction = async (
+  fileName: string,
+  opts: GenerateOptions,
+): Promise<void> => {
+  const services = createObjectOrientedCServices(NodeFileSystem).ObjectOrientedC
+  const model = await extractAstNode<OOCModel>(fileName, services)
+  const generatedFilePath = generateJavaScript(
+    model,
+    fileName,
+    opts.destination,
+  )
+  console.log(
+    chalk.green(`JavaScript code generated successfully: ${generatedFilePath}`),
+  )
 }
 
-export default function(): void {
-    const program = new Command();
+export type GenerateOptions = {
+  destination?: string
+}
 
-    program.version(JSON.parse(packageContent).version);
+export default function (): void {
+  const program = new Command()
 
-    const fileExtensions = ObjectOrientedCLanguageMetaData.fileExtensions.join(', ');
-    program
-        .command('generate')
-        .argument('<file>', `source file (possible file extensions: ${fileExtensions})`)
-        .option('-d, --destination <dir>', 'destination directory of generating')
-        .description('generates JavaScript code that prints "Hello, {name}!" for each greeting in a source file')
-        .action(generateAction);
+  program.version(JSON.parse(packageContent).version)
 
-    program.parse(process.argv);
+  const fileExtensions =
+    ObjectOrientedCLanguageMetaData.fileExtensions.join(', ')
+  program
+    .command('generate')
+    .argument(
+      '<file>',
+      `source file (possible file extensions: ${fileExtensions})`,
+    )
+    .option('-d, --destination <dir>', 'destination directory of generating')
+    .description(
+      'generates JavaScript code that prints "Hello, {name}!" for each greeting in a source file',
+    )
+    .action(generateAction)
+
+  program.parse(process.argv)
 }

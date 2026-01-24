@@ -3,19 +3,19 @@ import { EmptyFileSystem, type LangiumDocument } from 'langium'
 import { expandToString as s } from 'langium/generate'
 import { parseHelper } from 'langium/test'
 import type { Diagnostic } from 'vscode-languageserver-types'
-import type { OOCModel } from 'object-oriented-c-language'
+import type { Model } from 'object-oriented-c-language'
 import {
   createObjectOrientedCServices,
-  isOOCModel,
+  isModel,
 } from 'object-oriented-c-language'
 
 let services: ReturnType<typeof createObjectOrientedCServices>
-let parse: ReturnType<typeof parseHelper<OOCModel>>
-let document: LangiumDocument<OOCModel> | undefined
+let parse: ReturnType<typeof parseHelper<Model>>
+let document: LangiumDocument<Model> | undefined
 
 beforeAll(async () => {
   services = createObjectOrientedCServices(EmptyFileSystem)
-  const doParse = parseHelper<OOCModel>(services.ObjectOrientedC)
+  const doParse = parseHelper<Model>(services.ObjectOrientedC)
   parse = (input: string) => doParse(input, { validation: true })
 
   // activate the following if your linking test requires elements from a built-in library, for example
@@ -35,7 +35,7 @@ describe('Validating', () => {
       // and then evaluate the diagnostics by converting them into human readable strings;
       // note that 'toHaveLength()' works for arrays and strings alike ;-)
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
   })
 
@@ -49,7 +49,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toEqual(expect.stringContaining('Duplicate member name: x'))
   })
 
@@ -61,7 +61,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toEqual(expect.stringContaining('Duplicate export'))
   })
 
@@ -73,7 +73,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toEqual(expect.stringContaining('Duplicate import'))
   })
 
@@ -99,7 +99,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toEqual(expect.stringContaining('lowercase'))
   })
 
@@ -112,7 +112,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).not.toContain('lowercase')
   })
 
@@ -143,7 +143,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
   })
 
@@ -163,7 +163,7 @@ describe('Validating', () => {
 
     expect(
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
   })
 })
@@ -179,8 +179,8 @@ function checkDocumentValid(document: LangiumDocument): string | undefined {
     `) ||
     (document.parseResult.value === undefined &&
       `ParseResult is 'undefined'.`) ||
-    (!isOOCModel(document.parseResult.value) &&
-      `Root AST object is a ${document.parseResult.value.$type}, expected a 'OOCModel'.`) ||
+    (!isModel(document.parseResult.value) &&
+      `Root AST object is a ${document.parseResult.value.$type}, expected a 'Model'`) ||
     undefined
   )
 }

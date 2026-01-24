@@ -1,267 +1,297 @@
-/**
- * OOC Language Interpreter
- *
- * Executes OOC AST nodes based on the new grammar (Langium 4.1)
- * Supports: message passing, pipelines, closures, objects, and macros
- */
-
-import type {
-  OOCModel,
-  Message,
-  Primary,
-  ObjectLiteral,
-  CachedMember,
-  IfMacro,
-  WhileMacro,
+import { KVPair } from 'wy-helper'
+import {
+  ExceptionCatch,
   Expression,
-  ExpressionBody,
-  TopLevelItem,
+  Method,
+  Model,
+  Primary,
+  Message,
 } from './generated/ast.js'
 
-export type OOCValue =
-  | OOCObject
-  | OOCUnion
-  | string
-  | number
-  | boolean
-  | undefined
-export class OOCObject {
-  constructor(private parentEnv: Environment, private methods: ObjectLiteral) {}
-  sendMessage(name: string, msgs: any[]) {
-    const method = this.methods.members.find((x) => x.name == name)
-    if (method) {
-      switch (method.$type) {
-        case 'CachedMember':
-          const m = method as CachedMember & {
-            cached?: boolean
-            cache?: OOCValue
-          }
-          if (m.cached) {
-            return m.cache
-          }
-          m.cached = true
-          m.cache = this.parentEnv.evaluateExpression(method.value)
-          return m.cache
-          return
-        case 'MethodMember':
-          const scope = new EnvironmentI(this.parentEnv)
-          return
-        case 'VariableMember':
-          method
-          return
-      }
+// 定义值类型
+export type Value = number | string | boolean | null | ObjectValue
+
+export class ObjectValue {
+  constructor(
+    readonly methods: Method[],
+    readonly scope: Scope,
+  ) {}
+  send(name: string, args: any[]) {
+    const method = this.methods.find((v) => v.name == name)
+    if (!method) {
+      throw new Error(`没有定义该方法${name}`)
     }
-    throw new Error(`未找到方法定义`)
-  }
-}
-export class OOCUnion {
-  constructor(readonly name: string, readonly args: any[]) {}
-}
-
-class ReturnValue {
-  constructor(readonly value: any) {}
-}
-abstract class Environment {
-  abstract define(name: string, value: OOCValue): void
-  abstract get(name: string): OOCValue
-
-  private evaluatePrimary(primary: Primary): OOCValue {
-    switch (primary.$type) {
-      case 'ObjectLiteral':
-        return new OOCObject(this, primary)
-      case 'StringLiteral':
-        //先简单处理
-        return primary.value.slice(1, -1)
-      case 'NumberLiteral':
-        return Number(primary.value)
-      case 'BooleanLiteral':
-        return primary.value === 'true'
-      case 'NilLiteral':
-        return undefined
-      case 'UnionLiteral':
-        return new OOCUnion(
-          primary.message.name,
-          primary.message.args.map((row) => this.evaluatePrimary(row))
-        )
-      case 'IfMacro':
-        return this.evaluateIfMacro(primary)
-      case 'ReturnMacro':
-        throw new ReturnValue(
-          primary.value ? this.evaluateExpression(primary.value) : undefined
-        )
-      case 'WhileMacro':
-        return this.evaluateWhileMacro(primary)
-      default:
-        return this.evaluateExpression(primary)
-    }
-  }
-
-  interpret(model: OOCModel): OOCValue | undefined {
-    const imports = model.beforeExpressions.filter((x) => x.$type == 'Import')
-    //@todo imports批量导入
-    try {
-      for (const item of model.beforeExpressions) {
-        if (item.$type != 'Import') {
-          this.executeItem(item)
+    switch (method.$type) {
+      case 'MethodBind':
+        const cache = method as Method & {
+          cache: any
+          cached: boolean
         }
-      }
-    } catch (error) {
-      if (error instanceof ReturnValue) {
-        return error.value
+        if (!cache.cached) {
+          cache.cache = interpretExpression(method.expression, this.scope)
+          cache.cached = true
+        }
+        return cache.cache
+      case 'MethodAll':
+        let s = addScope(this.scope, 'this', this)
+        s = addScope(s, 'args', args)
+        s = addScope(s, 'methodName', name)
+        method.params.forEach((param, index) => {
+          s = addScope(s, param, args[index])
+        })
+        method.beforeExpressions.forEach((e) => {
+          switch (e.$type) {
+            case 'Assignment':
+              s = addScope(s, e.name, interpretExpression(e.expression, s))
+              return
+            case 'ExceptionCatch':
+              s = interpretExpressionCatch(e, s)
+              return
+            default:
+              interpretExpression(e, s)
+              return
+          }
+        })
+        return interpretExpression(method.expression, s)
+    }
+  }
+}
+
+function interpretExpressionCatch(e: ExceptionCatch, scope: Scope): any {
+  try {
+    const value = interpretExpression(e.expression, scope)
+    scope = addScope(scope, e.error, null)
+    scope = addScope(scope, e.name, value)
+  } catch (err) {
+    scope = addScope(scope, e.error, err)
+    scope = addScope(scope, e.name, null)
+  }
+  return scope
+}
+
+export function interpret(model: Model, scope: Scope) {
+  // 收集导入语句
+  const imports = model.beforeExpressions.filter(
+    (x) => x.$type == 'ImportStatement',
+  )
+
+  // 处理导入（支持动态加载模块）
+  imports.forEach((importStmt) => {
+    if (importStmt.$type === 'ImportStatement') {
+      // 导入模块路径（去掉引号）
+      const modulePath = importStmt.path.replace(/^'(.*)'$/, '$1')
+      // 将模块注册到作用域中，可用于后续的动态加载
+      // 这里暂时只记录导入的信息，具体的加载逻辑取决于运行环境
+      try {
+        // 可以在这里添加动态导入的逻辑
+        // 例如：const module = await import(modulePath)
+        // scope = addScope(scope, importStmt.name, module)
+      } catch (err) {
+        console.warn(`Failed to import module: ${modulePath}`)
       }
     }
-    return this.evaluateExpression(model.expression)
-  }
+  })
 
-  private executeItem(item: TopLevelItem): OOCValue {
-    switch (item.$type) {
-      case 'ExpressionCatch':
-        try {
-          const value = this.evaluateExpression(item.value)
-          this.define(item.name, value)
-        } catch (error) {
-          if (error instanceof ReturnValue) {
-            console.warn('不应该在这里出现')
-          }
-          this.define(item.error, error as any)
-        }
+  model.beforeExpressions.forEach((e) => {
+    switch (e.$type) {
+      case 'Assignment':
+        scope = addScope(
+          scope,
+          e.name,
+          interpretExpression(e.expression, scope),
+        )
         return
-      case 'VarDeclaration':
-        const value = this.evaluateExpression(item.value)
-        this.define(item.name, value)
+      case 'ImportStatement':
+        return
+      case 'ExceptionCatch':
+        scope = interpretExpressionCatch(e, scope)
         return
       default:
-        return this.evaluateExpression(item)
+        interpretExpression(e, scope)
+        return
     }
-  }
+  })
+  return interpretExpression(model.expression, scope)
+}
 
-  evaluateExpression(expr: Expression): OOCValue {
-    if (expr.$type == 'MessageOrChain') {
-      const o = this.evaluatePrimary(expr.primary)
-      if (expr.messages) {
-        return this.willSendMessage(o, expr.messages)
+function interpretExpression(e: Expression, scope: Scope): any {
+  switch (e.$type) {
+    case 'MessageOrChain':
+      const o = interpretPrimary(e.primary, scope)
+      if (e.message) {
+        return sendMessageWith(o, e.message, scope)
       }
       return o
-    }
-    const result = this.evaluateExpression(expr.left)
-    const right = expr.right
-
-    switch (right.$type) {
-      case 'Message':
-        return this.willSendMessage(result, right)
-      case 'MessageChain':
-        const o = this.evaluatePrimary(right.primary)
-        const name = right.messages.name
-        const args = right.messages.args.map((v) => this.evaluatePrimary(v))
-        args.unshift(result)
-        return this.sendMessage(o, name, args)
-      case 'PatternBinding':
-        const env = new PatternBindingEnvironment(this, right.varName, result)
-        return env.evaluateExpression(right.expr)
-    }
-  }
-  private sendMessage(o: OOCValue, name: string, args: any[]): OOCValue {
-    if (o instanceof OOCObject) {
-      return o.sendMessage(name, args)
-    }
-    const tp = typeof o
-    if (tp == 'undefined') {
-      throw 'no method for nil'
-    }
-    if (tp == 'string') {
-      const df = String.prototype[name as 'slice']
-      if (df) {
-        return df.apply(o, args as any)
+    default:
+      const obj = interpretExpression(e.left, scope)
+      const r = e.right
+      switch (r.$type) {
+        case 'Message':
+          return sendMessageWith(obj, r, scope)
+        case 'MessageChain':
+          const args = r.message.args.map((arg) => interpretPrimary(arg, scope))
+          args.unshift(obj)
+          const main = interpretPrimary(r.primary, scope)
+          return sendMessage(main, r.message.name, args)
+        default:
+          scope = addScope(scope, r.param, obj)
+          const re = r.expression
+          switch (re.$type) {
+            case 'MessageChain':
+              const o = interpretPrimary(re.primary, scope)
+              return sendMessageWith(o, re.message, scope)
+            default:
+              return interpretPrimary(re, scope)
+          }
       }
-    }
-
-    if (tp == 'number') {
-    }
-    if (tp == 'boolean') {
-    }
-
-    throw 'todo'
-  }
-  private willSendMessage(receiver: OOCValue, message: Message): OOCValue {
-    const args = message.args.map((arg) => this.evaluatePrimary(arg))
-    return this.sendMessage(receiver, message.name, args)
-  }
-
-  private evalExpressionBody(expressionBody: ExpressionBody) {
-    for (let i = 0; i < expressionBody.beforeExpressions.length; i++) {
-      const exp = expressionBody.beforeExpressions[i]
-      this.executeItem(exp)
-    }
-    return this.evaluateExpression(expressionBody.expression)
-  }
-
-  private evaluateIfMacro(ifMacro: IfMacro): OOCValue {
-    const condition = this.evaluateExpression(ifMacro.condition)
-    if (condition) {
-      return this.evalExpressionBody(ifMacro.thenBody)
-    } else if (ifMacro.elseBody) {
-      return this.evalExpressionBody(ifMacro.elseBody)
-    }
-    return undefined
-  }
-
-  private evaluateWhileMacro(whileMacro: WhileMacro): OOCValue {
-    let out = undefined
-    while (this.evaluateExpression(whileMacro.condition)) {
-      out = this.evalExpressionBody(whileMacro.expression)
-    }
-    return out
   }
 }
 
-class PatternBindingEnvironment extends Environment {
-  constructor(
-    private parent: Environment,
-    private name: string,
-    private value: any
-  ) {
-    super()
+function sendMessageWith(o: any, message: Message, scope: Scope) {
+  const name = message.name
+  const args = message.args.map((arg) => interpretPrimary(arg, scope))
+  return sendMessage(o, name, args)
+}
+
+const boolBuildIn = {
+  and: function (a: boolean, b: boolean) {
+    return a && b
+  },
+  or: function (a: boolean, b: boolean) {
+    return a || b
+  },
+  not: function (a: boolean) {
+    return !a
+  },
+}
+const numberBuildIn = {
+  // 数值方法
+  add: function (a: number, b: number) {
+    return a + b
+  },
+  sub: function (a: number, b: number) {
+    return a - b
+  },
+  mul: function (a: number, b: number) {
+    return a * b
+  },
+  div: function (a: number, b: number) {
+    return a / b
+  },
+  mod: function (a: number, b: number) {
+    return a % b
+  },
+  concat: function (a: string, b: string) {
+    return a + b
+  },
+  // 比较操作
+  eq: function (a: any, b: any) {
+    return a === b
+  },
+  neq: function (a: any, b: any) {
+    return a !== b
+  },
+  lt: function (a: any, b: any) {
+    return a < b
+  },
+  gt: function (a: any, b: any) {
+    return a > b
+  },
+  lte: function (a: any, b: any) {
+    return a <= b
+  },
+  gte: function (a: any, b: any) {
+    return a >= b
+  },
+}
+
+function sendMessage(o: any, name: string, args: any[]) {
+  if (o instanceof ObjectValue) {
+    return o.send(name, args)
   }
-  get(name: string): OOCValue {
-    if (name == this.name) {
-      return this.value
+  const tp = typeof o
+  if (tp == 'number') {
+    //数字类型扩展方法
+    const fun = numberBuildIn[name as 'add'] as any
+    if (fun) {
+      return fun(o, ...args)
     }
-    return this.parent.get(name)
   }
-  override define(name: string, value: OOCValue): void {
-    throw new Error(`不能定义任何东西[${name}]`)
+  if (tp == 'boolean') {
+    //布尔类型扩展方法
+    const fun = boolBuildIn[name as 'and'] as any
+    if (fun) {
+      return fun(o, ...args)
+    }
+  }
+  //普通js对象
+  return o[name].apply(o, args)
+}
+
+function interpretPrimary(e: Primary, scope: Scope) {
+  switch (e.$type) {
+    case 'Bool':
+      return e.value == 'true'
+    case 'Nil':
+      return null
+    case 'Num':
+      return e.value
+    case 'Ref':
+      return getScope(scope, e.value)
+    case 'ObjectDef':
+      return new ObjectValue(e.methods, scope)
+    case 'Str':
+      return e.value
+    default:
+      return interpretExpression(e, scope)
   }
 }
+
+interface RootScope {
+  get(key: string): any
+}
+
+type Scope = KVPair<any> | undefined
+
+function addScope(scope: Scope, key: string, value: any) {
+  return new KVPair(key, value, scope)
+}
+function getScope(scope: Scope, key: string) {
+  if (scope) {
+    const kv = scope.get(key)
+    if (kv) {
+      return kv.value
+    }
+  }
+  return globalRoot.get(key)
+}
+const extendGlobalObject = {
+  JSAttr: {
+    get(obj: any, name: string) {
+      return obj[name]
+    },
+    set(obj: any, name: string, value: any) {
+      obj[name] = value
+      return value
+    },
+  },
+}
+
+const globalRoot: RootScope = {
+  get(key: string): any {
+    if (key in extendGlobalObject) {
+      return extendGlobalObject[key as 'JSAttr']
+    }
+    if (key in global) {
+      return global[key as 'Object']
+    }
+    throw new Error(`not foun define for ${key}`)
+  },
+}
+
 /**
- * Environment for managing variable scopes
+ * 执行 OOC 模型的入口函数
  */
-class EnvironmentI extends Environment {
-  private variables: Map<string, { value: OOCValue; asConst?: boolean }> =
-    new Map()
-  constructor(private parent: Environment | null = null) {
-    super()
-  }
-
-  define(name: string, value: OOCValue, asConst?: boolean): void {
-    if (this.variables.has(name)) {
-      throw new Error(`此作用域中变量[${name}]已经定义`)
-    }
-    this.variables.set(name, { value, asConst })
-  }
-
-  get(name: string): OOCValue | undefined {
-    const value = this.variables.get(name)
-    if (value) {
-      return value.value
-    }
-    if (this.parent) {
-      return this.parent.get(name)
-    }
-    throw new Error(`在作用域链上无法找到[${name}]`)
-  }
-}
-const globalEnv = new EnvironmentI()
-
-export function executeOOC(model: OOCModel): any {
-  return globalEnv.interpret(model)
+export function executeOOC(model: Model): any {
+  return interpret(model, undefined)
 }
