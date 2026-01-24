@@ -6,6 +6,7 @@ import {
   Model,
   Primary,
   Message,
+  StID,
 } from './generated/ast.js'
 
 // 定义值类型
@@ -240,7 +241,16 @@ function interpretPrimary(e: Primary, scope: Scope) {
       return getScope(scope, e.value)
     case 'ObjectDef':
       return new ObjectValue(e.methods, scope)
+    case 'StID':
+      const n = e as StID & {
+        xvalue: string
+      }
+      if (!n.xvalue) {
+        n.xvalue = n.value.slice(1)
+      }
+      return n.xvalue
     case 'Str':
+      console.log('str', e.value)
       return e.value
     default:
       return interpretExpression(e, scope)

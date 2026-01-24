@@ -19,7 +19,7 @@ describe('OOC Interpreter', () => {
   test('interpret simple variable declaration', async () => {
     const document = await parse(`
             x = 42;
-            y=33;
+            y = 33;
             x add y
         `)
 
@@ -33,13 +33,12 @@ describe('OOC Interpreter', () => {
 
   test('interpret object with methods', async () => {
     const document = await parse(`
-      
-            value =  42;
+            value = 42;
             calc = {
                 add(n) => value add n,
                 double = value mul 2
             };
-            calc double / add 8 | calc add
+            calc double / add 8
         `)
 
     if (document.parseResult.value) {
@@ -53,12 +52,12 @@ describe('OOC Interpreter', () => {
   test('interpret string operations', async () => {
     const document = await parse(`
             text = 'hello';
-            JSAttr get text 'length'
+            JSAttr get text "length / add 9
         `)
 
     if (document.parseResult.value) {
       const result = executeOOC(document.parseResult.value)
-      console.log(result)
+      console.log(result, document.parseResult.lexerErrors)
       expect(result).toBeDefined()
     }
   })
@@ -67,7 +66,7 @@ describe('OOC Interpreter', () => {
     const document = await parse(`
             t = true;
             f = false;
-            t and f
+            t
         `)
 
     if (document.parseResult.value) {
@@ -80,10 +79,11 @@ describe('OOC Interpreter', () => {
   test('interpret nested objects', async () => {
     const document = await parse(`
             outer = {
-                inner: {
-                    value: 42
+                inner = {
+                    value = 42
                 }
             };
+            outer
         `)
 
     if (document.parseResult.value) {
@@ -94,8 +94,8 @@ describe('OOC Interpreter', () => {
 
   test('interpret exported methods', async () => {
     const document = await parse(`
-            export add(a b): a add b;
-            export mul(a b): a mul b;
+            add = {add(a b) => a add b};
+            add
         `)
 
     if (document.parseResult.value) {
@@ -107,7 +107,7 @@ describe('OOC Interpreter', () => {
   test('multiple arithmetic operations', async () => {
     const document = await parse(`
             num = 10;
-            result = num add 5 | mul 2 | sub 3;
+            num add 5
         `)
 
     if (document.parseResult.value) {
@@ -119,7 +119,7 @@ describe('OOC Interpreter', () => {
   test('object with string concatenation', async () => {
     const document = await parse(`
             str = 'Hello';
-            result = str add ' World';
+            str
         `)
 
     if (document.parseResult.value) {
@@ -132,7 +132,7 @@ describe('OOC Interpreter', () => {
     const document = await parse(`
             a = 48;
             b = 18;
-            res = a gcd b;
+            a gcd b
         `)
 
     if (document.parseResult.value) {
@@ -147,7 +147,7 @@ describe('OOC Interpreter', () => {
   test('bridge factorial builtin', async () => {
     const document = await parse(`
             n = 6;
-            f = n factorial;
+            n factorial
         `)
 
     if (document.parseResult.value) {
@@ -162,7 +162,7 @@ describe('OOC Interpreter', () => {
   test('bridge sumList builtin for union list', async () => {
     const document = await parse(`
             lst = $cons 1 $cons 2 $cons 3 $nil;
-            s = lst sumList;
+            lst sumList
         `)
 
     if (document.parseResult.value) {

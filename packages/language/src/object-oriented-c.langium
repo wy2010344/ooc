@@ -66,12 +66,14 @@ ComplexPrimary:
     ObjectDef | '(' Expression ')';
 
 Primary:
-    Num | Str | Bool | Nil | Ref | ComplexPrimary;
+    Num | Str|StID | Bool | Nil | Ref | ComplexPrimary;
 
 Ref:
     value=ID;
 Str:
     value=STRING;
+StID:
+    value=STID;
 Bool:
     value=BOOL;
 Num:
@@ -81,9 +83,10 @@ Nil:
 
 hidden terminal WS: /\s+/;
 terminal BOOL: /true|false/;
-terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;
-terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal STRING: /'[^']*'/;
+terminal STID: /"[^\s]*/;
+terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
+terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;
 
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
