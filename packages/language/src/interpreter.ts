@@ -1,4 +1,6 @@
-import { KVPair } from 'wy-helper'
+import { AstNode, LangiumDocument, URI } from 'langium'
+import { DefaultSharedModuleContext } from 'langium/lsp'
+import { parseHelper } from 'langium/test'
 import {
   ExceptionCatch,
   Expression,
@@ -7,8 +9,10 @@ import {
   Primary,
   Message,
   StID,
-} from './generated/ast.js'
-
+  createObjectOrientedCServices,
+} from 'object-oriented-c-language'
+import path from 'path'
+import { KVPair, run } from 'wy-helper'
 // 定义值类型
 export type Value = number | string | boolean | null | ObjectValue
 
@@ -38,9 +42,10 @@ export class ObjectValue {
         s = addScope(s, 'args', args)
         s = addScope(s, 'methodName', name)
         method.params.forEach((param, index) => {
-          s = addScope(s, param, args[index])
+          s = addScope(s, param.name, args[index])
         })
-        method.beforeExpressions.forEach((e) => {
+        let last = null
+        method.expressions.forEach((e) => {
           switch (e.$type) {
             case 'Assignment':
               s = addScope(s, e.name, interpretExpression(e.expression, s))
@@ -49,11 +54,11 @@ export class ObjectValue {
               s = interpretExpressionCatch(e, s)
               return
             default:
-              interpretExpression(e, s)
+              last = interpretExpression(e, s)
               return
           }
         })
-        return interpretExpression(method.expression, s)
+        return last
     }
   }
 }
@@ -70,30 +75,23 @@ function interpretExpressionCatch(e: ExceptionCatch, scope: Scope): any {
   return scope
 }
 
-export function interpret(model: Model, scope: Scope) {
+async function interpret(
+  model: Model,
+  scope: Scope,
+  rootPath: string,
+  interpretAction: InterpretAction,
+) {
   // 收集导入语句
-  const imports = model.beforeExpressions.filter(
-    (x) => x.$type == 'ImportStatement',
-  )
-
+  const imports = model.expressions.filter((x) => x.$type == 'ImportStatement')
   // 处理导入（支持动态加载模块）
-  imports.forEach((importStmt) => {
-    if (importStmt.$type === 'ImportStatement') {
-      // 导入模块路径（去掉引号）
-      const modulePath = importStmt.path.replace(/^'(.*)'$/, '$1')
-      // 将模块注册到作用域中，可用于后续的动态加载
-      // 这里暂时只记录导入的信息，具体的加载逻辑取决于运行环境
-      try {
-        // 可以在这里添加动态导入的逻辑
-        // 例如：const module = await import(modulePath)
-        // scope = addScope(scope, importStmt.name, module)
-      } catch (err) {
-        console.warn(`Failed to import module: ${modulePath}`)
-      }
-    }
-  })
-
-  model.beforeExpressions.forEach((e) => {
+  const out = await Promise.all(
+    imports.map((importStmt) =>
+      interpretAction(path.join(rootPath, '../', importStmt.path)),
+    ),
+  )
+  let last: any = null
+  let importIndex = 0
+  model.expressions.forEach((e) => {
     switch (e.$type) {
       case 'Assignment':
         scope = addScope(
@@ -103,16 +101,19 @@ export function interpret(model: Model, scope: Scope) {
         )
         return
       case 'ImportStatement':
+        const value = out[importIndex]
+        scope = addScope(scope, e.name, value)
+        importIndex++
         return
       case 'ExceptionCatch':
         scope = interpretExpressionCatch(e, scope)
         return
       default:
-        interpretExpression(e, scope)
+        last = interpretExpression(e, scope)
         return
     }
   })
-  return interpretExpression(model.expression, scope)
+  return last
 }
 
 function interpretExpression(e: Expression, scope: Scope): any {
@@ -295,13 +296,81 @@ const globalRoot: RootScope = {
     if (key in global) {
       return global[key as 'Object']
     }
-    throw new Error(`not foun define for ${key}`)
+    throw new Error(`not found define for ${key}`)
   },
 }
 
+type InterpretAction = (name: string) => Promise<any>
 /**
  * 执行 OOC 模型的入口函数
  */
-export function executeOOC(model: Model): any {
-  return interpret(model, undefined)
+function executeOOC(
+  model: Model,
+  path: string,
+  interpretAction: InterpretAction,
+) {
+  return interpret(model, undefined, path, interpretAction)
+}
+
+const cacheInterpret = new Map<string, Promise<any>>()
+export function createInterpretAction(context: DefaultSharedModuleContext) {
+  const services = createObjectOrientedCServices(context).ObjectOrientedC
+  const parse = parseHelper(services)
+  const fs = context.fileSystemProvider(services.shared)
+  function interpretPath(fileName: string) {
+    let value = cacheInterpret.get(fileName)
+    if (!value) {
+      value = run(async () => {
+        const extensions = services.LanguageMetaData.fileExtensions
+        if (!extensions.includes(path.extname(fileName))) {
+          throw `Please choose a file with one of these extensions: ${extensions}.`
+        }
+        const uri = URI.file(path.resolve(fileName))
+        if (!fs.exists(uri)) {
+          throw `File ${fileName} does not exist.`
+        }
+        const document =
+          await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+            uri,
+          )
+        return execDocument(document, fileName)
+      })
+      cacheInterpret.set(fileName, value)
+    }
+    return value
+  }
+
+  async function execDocument(
+    document: LangiumDocument<AstNode>,
+    fileName: string,
+  ) {
+    await services.shared.workspace.DocumentBuilder.build([document], {
+      validation: true,
+    })
+
+    const validationErrors = (document.diagnostics ?? []).filter(
+      (e) => e.severity === 1,
+    )
+    if (validationErrors.length > 0) {
+      throw (
+        'There are validation errors:\n' +
+        validationErrors
+          .map(
+            (validationError) =>
+              `line ${validationError.range.start.line + 1}: ${validationError.message} [${document.textDocument.getText(validationError.range)}]`,
+          )
+          .join('.\n')
+      )
+    }
+    const model = document.parseResult.value as Model
+    return executeOOC(model, fileName, interpretPath)
+  }
+
+  return {
+    interpretPath,
+    async interpret(txt: string, fileName = '') {
+      const document = await parse(txt)
+      return execDocument(document, fileName)
+    },
+  }
 }

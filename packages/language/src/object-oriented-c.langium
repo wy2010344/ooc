@@ -1,12 +1,11 @@
 grammar ObjectOrientedC
 
 entry Model:
-    (beforeExpressions+=TopStatement ';')*
-    expression=Expression;
+    (expressions+=TopStatement ( ';' expressions+=TopStatement )* ';'?)?;
 
 
 TopStatement:
-    ImportStatement|Statement
+    ImportStatement | Statement
 ;
 
 ImportStatement:
@@ -24,17 +23,18 @@ ExceptionCatch:
     error=ID ',' name=ID '=' expression=Expression;
 //object的方法
 Method:
-    MethodAll|MethodBind;
+    MethodAll | MethodBind;
 
 MethodAll:
-    name=ID ('(' params+=ID (',' ID)* ')')? (('{' 
-        (beforeExpressions+=Statement ';')*
-        expression=Expression
-    '}') | ('=>' expression=Expression) );
+    name=ID ('(' params+=Param (',' params+=Param)* ')')? (('{' 
+      (expressions+=Statement (';' expressions+=Statement)* ';'?)?
+    '}') | ('=>' expressions+=Expression) );
 
 MethodBind:
     name=ID '=' expression=Expression;
 
+Param:
+    name=ID;
 
 Expression:
     PipeExpression;
@@ -46,9 +46,9 @@ MessageOrChain:
     primary=Primary (message=Message)?;
 
 MessageRight:
-    Lambda | MessageChain;
+    NamedExpression | MessageChain;
 
-Lambda:
+NamedExpression:
     param=ID '=>' expression=(MessageChain| ComplexPrimary);
 
 MessageChain:
@@ -59,14 +59,14 @@ Message:
     name=ID args+=Primary*;
 
 ObjectDef:
-    '{' methods+=Method (',' methods+=Method)* '}';
+    '{' (methods+=Method (',' methods+=Method)* ','? )? '}';
 
 
 ComplexPrimary:
     ObjectDef | '(' Expression ')';
 
 Primary:
-    Num | Str|StID | Bool | Nil | Ref | ComplexPrimary;
+    Num | Str | StID | Bool | Nil | Ref | ComplexPrimary;
 
 Ref:
     value=ID;

@@ -1,6 +1,7 @@
 import type { Model } from 'object-oriented-c-language'
 type OOCModel = Model
 import {
+  createInterpretAction,
   createObjectOrientedCServices,
   ObjectOrientedCLanguageMetaData,
 } from 'object-oriented-c-language'
@@ -37,6 +38,9 @@ export type GenerateOptions = {
   destination?: string
 }
 
+export const interpretAction =
+  createInterpretAction(NodeFileSystem).interpretPath
+
 export default function (): void {
   const program = new Command()
 
@@ -55,6 +59,15 @@ export default function (): void {
       'generates JavaScript code that prints "Hello, {name}!" for each greeting in a source file',
     )
     .action(generateAction)
+
+  program
+    .command('interpret')
+    .argument(
+      '<file>',
+      `source file (possible file extensions: ${fileExtensions})`,
+    )
+    .description('interprets the source file')
+    .action(interpretAction)
 
   program.parse(process.argv)
 }
