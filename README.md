@@ -1,180 +1,107 @@
-这在个 langium 中，我想实现这样一门语言。
+Object Oriented C (OOC)
 
-没有函数与调用，只有对象定义与向对象发送消息。
+这是基于 Langium 的一门小型面向对象风格的消息传递语言文档，文档内容根据当前语法 `object-oriented-c.langium` 和解释器 `packages/language/src/interpreter.ts` 编写。
 
-# 定义对象
+核心设计要点：
 
-```js
-//类似js中 const ab=9
-ab = 9;
-//类似js中 let bc = 99
-bc := 99;
-//定义一个对象abc
-abc={
-  //最基础的方法定义形式，接受两个参数a b，花括号里多条语句，以`;`分割，最后一条语句返回，可以不加`;`
-  bb(a,b){
-    //类似于js中const f=b.add(5)
-    f = b add 5;
-    a sub f
-  },
-  //语法糖，没有参数，访问了闭包上的常量ab
-  aa{
-    98 add ab
-  },
-  //语法糖，如果body只有一条语句，可以这样简写，注意，对象下key是不能重复的，这里只是举例
-  af(a,b) => a sub b,
-  //语法糖叠加，无参且为单条语句
-  gc => ab add bc,
-  //语法糖， 返回ab call cd的结果(只执行一次，下次执行abc返回缓存的结果)
-  abc = ab sub bc,
-  // 这里主要演示赋值，使用`=:`符号，赋值给闭包变量bc
-  am(z) => bc =: z
+- 语言没有传统的函数调用模型，主要以“对象定义 + 向对象发送消息（message）”为中心。
+- 顶层由若干语句组成：赋值、导入、异常捕获或表达式；最终表达式的值可作为模块执行结果。
+
+主要语法概览
+
+- 赋值
+  - 顶层与方法内部使用简单赋值：`name = Expression`。
+  - 示例：`x = 42;`
+
+- 导入
+  - 导入语句格式：`mod = #import 'path'`（path 使用单引号字符串）。
+  - 解释器会按需解析导入的文件并把返回值绑定到左侧标识符。
+
+- 异常捕获赋值
+  - 语法：`errVar, resultVar = Expression`。
+  - 语义：尝试求值 Expression；若成功，`errVar` 绑定 `null`，`resultVar` 绑定值；若抛错，`errVar` 绑定异常对象，`resultVar` 绑定 `null`。
+
+- 对象定义
+  - 对象采用花括号定义，内部为若干方法（逗号分隔）：
+    - 普通方法：`name(params...) { ... }`，方法体多语句，最后一条语句的值作为返回值。
+    - 单表达式方法（简写）：`name(params...) => Expression`。
+    - 绑定方法（在对象创建时求值并缓存）：`name = Expression`（在解释器中称为 `MethodBind`，首次计算并缓存结果）。
+  - 示例：
+    abc = {
+    add(a,b) { a add b },
+    info => 'fixed',
+    cached = 1 add 2
+    };
+
+- 消息（方法）发送与链式/流水线
+  - 基本消息形式：`receiver messageName arg1 arg2 ...`，messageName 为普通标识符或属性（以 `#` 开头）。
+  - 管道 `/`：将当前表达式的结果作为接下来消息调用的“接收者/第一个参数”（表现为连续发送消息）。
+    - 示例：`'abc' slice 1 3 / slice 1 2`（将结果继续送入后续消息）。
+  - 管道 `|`：把左侧的值注入到右侧表达式中，右侧可为普通消息链或“命名占位”表达式 `name => expr`，命名占位会把左值绑定为 `name` 并在右侧表达式中使用。
+    - 示例：`'abcdef' length | 1 add` 把 `'abcdef' length` 的结果作为 `1 add` 的第一个参数。
+    - 命名占位示例：`v | x . 1 add x` 表示把 `v` 绑定为 `x` 用于右侧表达式。
+
+- 属性访问（MethodProperty）
+  - 消息名可以是以 `#` 开头的标识符（`PropertyID`），用于访问/设置对象或扩展对象的属性（例如与 JS 互操作时使用）。
+
+基本类型
+
+- 数字：词法为整数或小数。
+- 布尔：`true` / `false`。
+- 字符串：使用单引号 `'like this'`。
+- StID：以双引号开始的标识（语义上由解释器进一步处理，常用于 JS 属性等场景）。
+- 空值：`nil`（对应解释器中的 `null`）。
+
+对象与作用域
+
+- 对象没有字段概念（对象由方法集合组成），共享数据应放在外层闭包（通过外层作用域捕获）。
+- 对象创建时会带上定义时的作用域；方法执行时会自动注入 `this`、`args`、`methodName` 以及参数变量。
+
+内置与扩展语义
+
+- 数字与布尔有内置扩展方法（例如 `add`, `sub`, `mul`, `div`, `mod`, `eq`, `lt` 等；布尔有 `and`, `or`, `not`）。
+- 发送消息时：如果接收者是自定义 `ObjectValue`，消息会查找该对象的相应方法并调用；否则，会尝试把消息名当作 JS 属性/方法调用。
+
+异常与控制流
+
+- 语言通过异常捕获赋值（`err, val = expr`）在表达式级别处理异常。
+- 解释器中还可以通过宏/内置控制结构扩展（例如项目中可能存在的 `#if`, `#while`, `#return` 等扩展——这些为宏层面功能，视实现而定）。
+
+示例
+
+1. 基本赋值与对象
+
+```
+num = 10;
+obj = {
+  inc(x) { x add 1 },
+  value => 42,
+  cached = 1 add 2
 };
 
-//pipline方法，类似js中 'abcdef'.slice(1,4).slice(1,3)
-'abcdef' slice 1 4 / slice 1 3;
-
-
-//使用|，将左边的结果，放进右边消息的第一个参数参数，其结果类似于 1 add ('abcdef' length)
-'abcdef' length | 1 add;
-
-//pipline进阶, 如果右边的表达式类似于 `x . balabala`，则是将左边结果命名为x，代入点右的表达式中执行
-'abcdef' length | x . 1 add x;
-
-
+res = obj inc 5; // 调用 obj 的 inc 方法，返回 6
 ```
 
-对象上不能存放字段，没有 this，没有继承。
-
-共享的字段放在闭包环境中。
-
-不支持`+-*/`，目前只有 ID 作为方法名。
-
-即`/`与`|`是一种中缀符号，而且它们是平级的。`|`右边的表达式，如果中以`.`为中缀的表达式，则是命名代入。
-
-## 如果在模块中：
-
-```js
-
-import ab 'abc';
-
-//类似js中let bc = 9
-bc:=9;
-
-//最基础的方法定义
-export af(f,g){
-  z = f add 89;
-  f add z | ab call
-};
-
-//无参+单条语句的语法糖,返回bc的最新值
-export zz => bc;
-
-//始终返回第一次的值
-export am = bc;
+2. 管道与命名占位
 
 ```
+'abcdef' length | 1 add
+v = 'abc' slice 1 2 / length
 
-模块是导出多个方法，模块以对象的方式发送消息来调用。
-
-这里 export 都是模块的方法，与对象的方法定义很类似。
-
-## 异步
-
-```js
-
-abc={
- abc(xx)#async{
-   import of 'abc' | #await
- }
-}
+// 命名占位
+val | x . 1 add x
 ```
 
-通过这个`#async`将消息 abc 变成异步方法。特殊的`#await`宏消息是展开 promise。`import of 'abc'`是动态导入模块，意义即是向 import 对象发送 of 消息，传递'abc'这个路径参数，此时得到 promise 对象。
-
-即向这个 promise 对象发送 `#await` 消息，在异步方法中展开这个 promise
-
-## 异常
-
-```js
-ab,bc = x send y
+3. 异常捕获赋值
 
 ```
-
-当`=`与`:=`左边是逗号分割时，逗号左边是异常，右边是值。
-
-## 提前返回的
-
-```js
-abc = {
-  fun(a, c, d) {
-    #if (a) {
-      #return
-    }
-    #if (c) {
-      #return 99
-    }
-    //剩下语句
-  },
-}
+err, result = riskyOperation;
+// 成功时 err 为 null，result 为值；失败时 err 为异常对象，result 为 null
 ```
 
-用#if 宏与#return 提前返回
+解释器使用（开发者说明）
 
-## 基础类型
-
-字符串 'abc' 只支持单引号。
-
-布尔 true/false
-
-数字 类似 js
-
-枚举联合， 向`$`发送消息，类似`$ success 8 7`，`$ error 87`
-
-可通过
-
-```js
-union call data {
-  success(a,b){
-    //data为 $ success a b
-  },
-  error(value){
-    //data为 $ error
-  }
-}
-```
-
-## 空
-
-只有 nil，类似 js 的 null/undefined.
-
-来执行
-
-## 注释
-
-类似 js
-
-## 条件/循环语言
-
-有`#if...#else`宏，类似 js 的 if...else，且如果作为表达式，也是返回内部的
-
-```js
-
-ab=#if(x largeThan b)a #else b;
-zb=#if(x largeThan b){
-  a add b
-}#else{
-  b sub c
-};
-```
-
-### while 语句
-
-```js
-#while(...){
-  //语句，可以包含#return
-}
-
-```
-
-使用#while 宏，与 js 中的 while 类似
+- 解释器入口在 `packages/language/src/interpreter.ts`，导出 `createInterpretAction(context)`，返回对象包含：
+  - `interpretPath(filePath)`：按文件路径解析并执行模块，返回执行结果（支持导入缓存与按需解析）。
+  - `interpret(txt, fileName?)`：解析字符串并执行（用于测试或内存执行）。
+- 解释器实现要点：对象的 `MethodBind` 在对象创建时被求值并缓存；`MethodAll` 在调用时新建作用域并顺序执行方法体内语句；管道和命名占位在解释器中有明确实现，保证表达式组合的灵活性。

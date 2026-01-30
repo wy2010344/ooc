@@ -10,6 +10,8 @@ import {
   Message,
   StID,
   createObjectOrientedCServices,
+  MethodFunName,
+  MethodProperty,
 } from 'object-oriented-c-language'
 import path from 'path'
 import { KVPair, run } from 'wy-helper'
@@ -20,7 +22,19 @@ export class ObjectValue {
   constructor(
     readonly methods: Method[],
     readonly scope: Scope,
-  ) {}
+  ) {
+    this.cache = new Map()
+    methods.forEach((method) => {
+      if (method.$type == 'MethodBind') {
+        this.cache.set(
+          method.name,
+          interpretExpression(method.expression, this.scope),
+        )
+      }
+    })
+  }
+  private cache: Map<string, any>
+
   send(name: string, args: any[]) {
     const method = this.methods.find((v) => v.name == name)
     if (!method) {
@@ -28,15 +42,7 @@ export class ObjectValue {
     }
     switch (method.$type) {
       case 'MethodBind':
-        const cache = method as Method & {
-          cache: any
-          cached: boolean
-        }
-        if (!cache.cached) {
-          cache.cache = interpretExpression(method.expression, this.scope)
-          cache.cached = true
-        }
-        return cache.cache
+        return this.cache.get(method.name)
       case 'MethodAll':
         let s = addScope(this.scope, 'this', this)
         s = addScope(s, 'args', args)
@@ -207,27 +213,57 @@ const numberBuildIn = {
   },
 }
 
-function sendMessage(o: any, name: string, args: any[]) {
+function sendMessage(
+  o: any,
+  name: MethodFunName | MethodProperty,
+  args: any[],
+) {
+  let value = name.value
+  if (name.$type == 'MethodProperty') {
+    value = value.slice(1)
+  }
   if (o instanceof ObjectValue) {
-    return o.send(name, args)
+    if (name.$type == 'MethodProperty') {
+      console.log('自定义对象不需要property')
+    }
+    return o.send(value, args)
   }
   const tp = typeof o
-  if (tp == 'number') {
-    //数字类型扩展方法
-    const fun = numberBuildIn[name as 'add'] as any
-    if (fun) {
-      return fun(o, ...args)
-    }
+
+  switch (name.$type) {
+    case 'MethodFunName':
+      if (tp == 'number') {
+        //数字类型扩展方法
+        const fun = numberBuildIn[value as 'add'] as any
+        if (fun) {
+          return fun(o, ...args)
+        }
+      }
+      if (tp == 'boolean') {
+        //布尔类型扩展方法
+        const fun = boolBuildIn[value as 'and'] as any
+        if (fun) {
+          return fun(o, ...args)
+        }
+      }
+      //普通js对象
+      return o[value].apply(o, args)
+    default:
+      if (args.length) {
+        o[value] = args[0]
+      }
+      return o[value]
   }
-  if (tp == 'boolean') {
-    //布尔类型扩展方法
-    const fun = boolBuildIn[name as 'and'] as any
-    if (fun) {
-      return fun(o, ...args)
-    }
+}
+
+function getStId(e: StID) {
+  const n = e as StID & {
+    xvalue: string
   }
-  //普通js对象
-  return o[name].apply(o, args)
+  if (!n.xvalue) {
+    n.xvalue = n.value.slice(1)
+  }
+  return n.xvalue
 }
 
 function interpretPrimary(e: Primary, scope: Scope) {
@@ -243,13 +279,7 @@ function interpretPrimary(e: Primary, scope: Scope) {
     case 'ObjectDef':
       return new ObjectValue(e.methods, scope)
     case 'StID':
-      const n = e as StID & {
-        xvalue: string
-      }
-      if (!n.xvalue) {
-        n.xvalue = n.value.slice(1)
-      }
-      return n.xvalue
+      return getStId(e)
     case 'Str':
       console.log('str', e.value)
       return e.value

@@ -13,7 +13,7 @@
         "src"
     ],
     "bin": {
-        "object-oriented-c-cli": "./bin/cli.js"
+        "ooc": "./bin/cli.js"
     },
     "scripts": {
         "clean": "shx rm -fr *.tsbuildinfo out",

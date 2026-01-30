@@ -21,6 +21,8 @@ Assignment:
 //异常捕获
 ExceptionCatch:
     error=ID ',' name=ID '=' expression=Expression;
+
+
 //object的方法
 Method:
     MethodAll | MethodBind;
@@ -56,7 +58,12 @@ MessageChain:
 
 /**消息名 消息参数*/
 Message:
-    name=ID args+=Primary*;
+    name=(MethodFunName|MethodProperty) args+=Primary*;
+
+MethodFunName:
+    value=ID;
+MethodProperty:
+    value=PropertyID;
 
 ObjectDef:
     '{' (methods+=Method (',' methods+=Method)* ','? )? '}';
@@ -87,6 +94,7 @@ terminal STRING: /'[^']*'/;
 terminal STID: /"[^\s]*/;
 terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;
+terminal PropertyID: /#[_a-zA-Z][_a-zA-Z0-9]*/;
 
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
