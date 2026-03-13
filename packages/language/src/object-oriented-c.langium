@@ -13,15 +13,11 @@ ImportStatement:
 ;
 
 Statement:
-    Assignment | ExceptionCatch | Expression;
+    Assignment  | Expression;
 
 //绑定
 Assignment:
     name=ID '=' expression=Expression;
-//异常捕获
-ExceptionCatch:
-    error=ID ',' name=ID '=' expression=Expression;
-
 
 //object的方法
 Method:
@@ -94,7 +90,7 @@ terminal STRING: /'[^']*'/;
 terminal STID: /"[^\s]*/;
 terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;
-terminal PropertyID: /#[_a-zA-Z][_a-zA-Z0-9]*/;
+terminal PropertyID: /@[_a-zA-Z][_a-zA-Z0-9]*/;
 
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;

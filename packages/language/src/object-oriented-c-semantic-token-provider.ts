@@ -6,7 +6,6 @@ import {
 import {
   isAssignment,
   isBool,
-  isExceptionCatch,
   isImportStatement,
   isMessage,
   isMethod,
@@ -46,17 +45,6 @@ export class ObjectOrientedCSemanticTokenProvider extends AbstractSemanticTokenP
       acceptor({
         node,
         property: 'name',
-        type: SemanticTokenTypes.variable,
-      })
-    } else if (isExceptionCatch(node)) {
-      acceptor({
-        node,
-        property: 'name',
-        type: SemanticTokenTypes.variable,
-      })
-      acceptor({
-        node,
-        property: 'error',
         type: SemanticTokenTypes.variable,
       })
     } else if (isNamedExpression(node)) {

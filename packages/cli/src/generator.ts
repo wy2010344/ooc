@@ -1,7 +1,5 @@
 import type {
   Model,
-  TopStatement,
-  Assignment,
   ObjectDef,
   Method,
   MethodAll,
@@ -11,17 +9,11 @@ import type {
   Message,
   MessageChain,
   MessageOrChain,
-  ExceptionCatch,
 } from 'object-oriented-c-language'
 type OOCModel = Model
-import { expandToNode, toString } from 'langium/generate'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { extractDestinationAndName } from './util.js'
-
-function esc(s: string) {
-  return s.replace(/\\/g, '\\\\').replace(/`/g, '\\`')
-}
 
 function genPrimary(p: Primary): string {
   switch (p.$type) {

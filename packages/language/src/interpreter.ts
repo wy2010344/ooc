@@ -2,7 +2,6 @@ import { AstNode, LangiumDocument, URI } from 'langium'
 import { DefaultSharedModuleContext } from 'langium/lsp'
 import { parseHelper } from 'langium/test'
 import {
-  ExceptionCatch,
   Expression,
   Method,
   Model,
@@ -56,9 +55,6 @@ export class ObjectValue {
             case 'Assignment':
               s = addScope(s, e.name, interpretExpression(e.expression, s))
               return
-            case 'ExceptionCatch':
-              s = interpretExpressionCatch(e, s)
-              return
             default:
               last = interpretExpression(e, s)
               return
@@ -67,18 +63,6 @@ export class ObjectValue {
         return last
     }
   }
-}
-
-function interpretExpressionCatch(e: ExceptionCatch, scope: Scope): any {
-  try {
-    const value = interpretExpression(e.expression, scope)
-    scope = addScope(scope, e.error, null)
-    scope = addScope(scope, e.name, value)
-  } catch (err) {
-    scope = addScope(scope, e.error, err)
-    scope = addScope(scope, e.name, null)
-  }
-  return scope
 }
 
 async function interpret(
@@ -110,9 +94,6 @@ async function interpret(
         const value = out[importIndex]
         scope = addScope(scope, e.name, value)
         importIndex++
-        return
-      case 'ExceptionCatch':
-        scope = interpretExpressionCatch(e, scope)
         return
       default:
         last = interpretExpression(e, scope)
