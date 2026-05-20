@@ -26,7 +26,6 @@ describe('Validating', () => {
   test('check no errors', async () => {
     document = await parse(`
             ab = 9;
-            bc := 99;
         `)
 
     expect(

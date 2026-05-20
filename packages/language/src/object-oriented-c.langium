@@ -24,12 +24,28 @@ Method:
     MethodAll | MethodBind;
 
 MethodAll:
-    name=ID ('(' params+=Param (',' params+=Param)* ')')? (('{' 
-      (expressions+=Statement (';' expressions+=Statement)* ';'?)?
-    '}') | ('=>' expressions+=Expression) );
+    name=MethodDefName 
+        ('(' 
+            ( (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)
+             |('...' restParam=Param)
+            ) 
+          ')' 
+        )? 
+        (
+            ('{' 
+                ('#guard' guardExpression=Expression ';')?
+                (expressions+=Statement (';' expressions+=Statement)* ';'?)?
+             '}'
+            ) 
+          | ('=>' expressions+=Expression) 
+        );
+
 
 MethodBind:
-    name=ID '=' expression=Expression;
+    name=MethodDefName '=' expression=Expression;
+
+MethodDefName:
+    name=(Ref|Str|StID);
 
 Param:
     name=ID;
@@ -38,13 +54,21 @@ Expression:
     PipeExpression;
 
 PipeExpression infers Expression:
-    MessageOrChain ({infer PiplingExpression.left=current} (('/' right=Message ) | ('|' right=MessageRight)))*;
+    MessageOrChain ({infer PiplingExpression.left=current} (
+        right=(MessageChainExt|MessagePipRight|MessageInfixRight)
+    ))*;
 
 MessageOrChain:
     primary=Primary (message=Message)?;
 
-MessageRight:
-    NamedExpression | MessageChain;
+MessageChainExt:
+    '/' value=Message;
+
+MessagePipRight:
+    '|' value=(NamedExpression | MessageChain);
+
+MessageInfixRight:
+    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'//'|'%') value=Primary;
 
 NamedExpression:
     param=ID '=>' expression=(MessageChain| ComplexPrimary);
@@ -54,12 +78,10 @@ MessageChain:
 
 /**消息名 消息参数*/
 Message:
-    name=(MethodFunName|MethodProperty) args+=Primary*;
+    name=MethodCallName args+=Primary*;
 
-MethodFunName:
-    value=ID;
-MethodProperty:
-    value=PropertyID;
+MethodCallName:
+    value=(Ref|StID|Str|ProId);
 
 ObjectDef:
     '{' (methods+=Method (',' methods+=Method)* ','? )? '}';
@@ -83,10 +105,13 @@ Num:
     value=NUMBER;
 Nil:
     value='nil';
+ProId:
+    value=PropertyID;
 
 hidden terminal WS: /\s+/;
 terminal BOOL: /true|false/;
-terminal STRING: /'[^']*'/;
+//允许了转义
+terminal STRING: /'(\\.|[^'\\])*'/;
 terminal STID: /"[^\s]*/;
 terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;

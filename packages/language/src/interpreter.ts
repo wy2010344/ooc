@@ -9,59 +9,118 @@ import {
   Message,
   StID,
   createObjectOrientedCServices,
-  MethodFunName,
-  MethodProperty,
+  MethodDefName,
+  MethodCallName,
 } from 'object-oriented-c-language'
 import path from 'path'
 import { KVPair, run } from 'wy-helper'
+import { MethodAll, Str } from './generated/ast.js'
+import { objectDefine } from './library/object.js'
+import { numDef } from './library/num.js'
 // 定义值类型
 export type Value = number | string | boolean | null | ObjectValue
 
+type ObjectMethod =
+  | {
+      type: 'call'
+      name: string
+      value: MethodAll
+    }
+  | {
+      name: string
+      type: 'bind'
+      value: any
+    }
+function getObjDefineName(n: MethodDefName) {
+  const v = n.name
+  switch (v.$type) {
+    case 'Ref':
+      return v.value
+    case 'StID':
+      return v.value.slice(1)
+    case 'Str':
+      return getStrValue(v)
+  }
+}
 export class ObjectValue {
+  readonly methods: ObjectMethod[]
   constructor(
-    readonly methods: Method[],
+    methods: Method[],
     readonly scope: Scope,
   ) {
-    this.cache = new Map()
-    methods.forEach((method) => {
-      if (method.$type == 'MethodBind') {
-        this.cache.set(
-          method.name,
-          interpretExpression(method.expression, this.scope),
-        )
+    this.methods = Array(methods.length)
+    methods.forEach((method, i) => {
+      switch (method.$type) {
+        case 'MethodBind':
+          return (this.methods[i] = {
+            type: 'bind',
+            name: getObjDefineName(method.name),
+            value: interpretExpression(method.expression, this.scope),
+          })
+        default:
+          return (this.methods[i] = {
+            type: 'call',
+            name: getObjDefineName(method.name),
+            value: method,
+          })
       }
     })
   }
-  private cache: Map<string, any>
-
   send(name: string, args: any[]) {
-    const method = this.methods.find((v) => v.name == name)
-    if (!method) {
-      throw new Error(`没有定义该方法${name}`)
+    for (let i = 0; i < this.methods.length; i++) {
+      const pair = this.methods[i]
+      if (pair.name == name) {
+        switch (pair.type) {
+          case 'bind':
+            return pair.value
+          case 'call':
+            const method = pair.value
+            let s = addScope(this.scope, 'this', this)
+            s = addScope(s, 'args', args)
+            s = addScope(s, 'methodName', name)
+            method.params.forEach((param, index) => {
+              s = addScope(s, param.name, args[index])
+            })
+
+            if (method.restParam) {
+              s = addScope(
+                s,
+                method.restParam.name,
+                args.slice(method.params.length),
+              )
+            }
+            if (
+              !method.guardExpression ||
+              (method.guardExpression &&
+                interpretExpression(method.guardExpression, s))
+            ) {
+              //继续
+              let last = null
+              method.expressions.forEach((e) => {
+                switch (e.$type) {
+                  case 'Assignment':
+                    s = addScope(
+                      s,
+                      e.name,
+                      interpretExpression(e.expression, s),
+                    )
+                    return
+                  default:
+                    last = interpretExpression(e, s)
+                    return
+                }
+              })
+              return last
+            }
+        }
+      }
     }
-    switch (method.$type) {
-      case 'MethodBind':
-        return this.cache.get(method.name)
-      case 'MethodAll':
-        let s = addScope(this.scope, 'this', this)
-        s = addScope(s, 'args', args)
-        s = addScope(s, 'methodName', name)
-        method.params.forEach((param, index) => {
-          s = addScope(s, param.name, args[index])
-        })
-        let last = null
-        method.expressions.forEach((e) => {
-          switch (e.$type) {
-            case 'Assignment':
-              s = addScope(s, e.name, interpretExpression(e.expression, s))
-              return
-            default:
-              last = interpretExpression(e, s)
-              return
-          }
-        })
-        return last
+    //通用对象方法
+    const fun = objectDefine[name as '&&']
+    if (fun) {
+      return fun(this, args[0])
     }
+    throw new TypeError(`没有定义该方法${name}`)
   }
 }
 
@@ -115,23 +174,36 @@ function interpretExpression(e: Expression, scope: Scope): any {
       const obj = interpretExpression(e.left, scope)
       const r = e.right
       switch (r.$type) {
-        case 'Message':
-          return sendMessageWith(obj, r, scope)
-        case 'MessageChain':
-          const args = r.message.args.map((arg) => interpretPrimary(arg, scope))
-          args.unshift(obj)
-          const main = interpretPrimary(r.primary, scope)
-          return sendMessage(main, r.message.name, args)
-        default:
-          scope = addScope(scope, r.param, obj)
-          const re = r.expression
-          switch (re.$type) {
+        case 'MessageChainExt':
+          return sendMessageWith(obj, r.value, scope)
+        case 'MessagePipRight':
+          const rv = r.value
+          switch (rv.$type) {
             case 'MessageChain':
-              const o = interpretPrimary(re.primary, scope)
-              return sendMessageWith(o, re.message, scope)
+              const args = rv.message.args.map((arg) =>
+                interpretPrimary(arg, scope),
+              )
+              args.unshift(obj)
+              const main = interpretPrimary(rv.primary, scope)
+              return sendMessage(
+                main,
+                getMethodCallName(rv.message.name),
+                args,
+                rv.message.name.value.$type == 'ProId',
+              )
             default:
-              return interpretPrimary(re, scope)
+              scope = addScope(scope, rv.param, obj)
+              const re = rv.expression
+              switch (re.$type) {
+                case 'MessageChain':
+                  const o = interpretPrimary(re.primary, scope)
+                  return sendMessageWith(o, re.message, scope)
+                default:
+                  return interpretPrimary(re, scope)
+              }
           }
+        default:
+          return sendMessage(obj, r.infix, [interpretPrimary(r.value, scope)])
       }
   }
 }
@@ -139,102 +211,55 @@ function interpretExpression(e: Expression, scope: Scope): any {
 function sendMessageWith(o: any, message: Message, scope: Scope) {
   const name = message.name
   const args = message.args.map((arg) => interpretPrimary(arg, scope))
-  return sendMessage(o, name, args)
+  return sendMessage(
+    o,
+    getMethodCallName(name),
+    args,
+    name.value.$type == 'ProId',
+  )
 }
 
-const boolBuildIn = {
-  and: function (a: boolean, b: boolean) {
-    return a && b
-  },
-  or: function (a: boolean, b: boolean) {
-    return a || b
-  },
-  not: function (a: boolean) {
-    return !a
-  },
-}
-const numberBuildIn = {
-  // 数值方法
-  add: function (a: number, b: number) {
-    return a + b
-  },
-  sub: function (a: number, b: number) {
-    return a - b
-  },
-  mul: function (a: number, b: number) {
-    return a * b
-  },
-  div: function (a: number, b: number) {
-    return a / b
-  },
-  mod: function (a: number, b: number) {
-    return a % b
-  },
-  concat: function (a: string, b: string) {
-    return a + b
-  },
-  // 比较操作
-  eq: function (a: any, b: any) {
-    return a === b
-  },
-  neq: function (a: any, b: any) {
-    return a !== b
-  },
-  lt: function (a: any, b: any) {
-    return a < b
-  },
-  gt: function (a: any, b: any) {
-    return a > b
-  },
-  lte: function (a: any, b: any) {
-    return a <= b
-  },
-  gte: function (a: any, b: any) {
-    return a >= b
-  },
-}
-
-function sendMessage(
-  o: any,
-  name: MethodFunName | MethodProperty,
-  args: any[],
-) {
-  let value = name.value
-  if (name.$type == 'MethodProperty') {
-    value = value.slice(1)
+function getMethodCallName({ value }: MethodCallName) {
+  switch (value.$type) {
+    case 'ProId':
+      return value.value.slice(1)
+    case 'StID':
+      return value.value.slice(1)
+    case 'Str':
+      return getStrValue(value)
+    default:
+      return value.value
   }
+}
+function sendMessage(o: any, value: string, args: any[], isProd?: boolean) {
   if (o instanceof ObjectValue) {
-    if (name.$type == 'MethodProperty') {
+    if (isProd) {
       console.log('自定义对象不需要property')
     }
     return o.send(value, args)
   }
-  const tp = typeof o
-
-  switch (name.$type) {
-    case 'MethodFunName':
-      if (tp == 'number') {
-        //数字类型扩展方法
-        const fun = numberBuildIn[value as 'add'] as any
-        if (fun) {
-          return fun(o, ...args)
-        }
-      }
-      if (tp == 'boolean') {
-        //布尔类型扩展方法
-        const fun = boolBuildIn[value as 'and'] as any
-        if (fun) {
-          return fun(o, ...args)
-        }
-      }
-      //普通js对象
-      return o[value].apply(o, args)
-    default:
-      if (args.length) {
-        o[value] = args[0]
-      }
-      return o[value]
+  if (isProd) {
+    //属性值读取与设置
+    if (args.length) {
+      o[value] = args[0]
+    }
+    return o[value]
   }
+
+  const fun = o[value]
+  if (fun) {
+    //能找到对象方法定义，包括proxy其实也在里面
+    return fun.apply(o, args)
+  }
+  const num = numDef[value as '<']
+  if (num) {
+    return num(o, args[0])
+  }
+  const obj = objectDefine[value as '||']
+  if (obj) {
+    return obj(o, args[0])
+  }
+  throw new TypeError(`未找到方法${value}`)
 }
 
 function getStId(e: StID) {
@@ -245,6 +270,11 @@ function getStId(e: StID) {
     n.xvalue = n.value.slice(1)
   }
   return n.xvalue
+}
+
+function getStrValue(e: Str) {
+  console.log('str', e.value)
+  return e.value
 }
 
 function interpretPrimary(e: Primary, scope: Scope) {
@@ -262,8 +292,7 @@ function interpretPrimary(e: Primary, scope: Scope) {
     case 'StID':
       return getStId(e)
     case 'Str':
-      console.log('str', e.value)
-      return e.value
+      return getStrValue(e)
     default:
       return interpretExpression(e, scope)
   }

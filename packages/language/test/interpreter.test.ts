@@ -86,6 +86,18 @@ describe('OOC Interpreter', () => {
     expect(result).toBeDefined()
   })
 
+  test('剩余参数', async () => {
+    const result = await interpreter.interpret(`
+      obj={
+        apply(a,...b){
+          b
+        }
+      };
+      obj apply 1 2 3 4
+      `)
+    console.log(result)
+  })
+
   test('bridge gcd builtin', async () => {
     const result = await interpreter.interpret(`
             a = 48;

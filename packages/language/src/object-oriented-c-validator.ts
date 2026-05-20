@@ -40,6 +40,15 @@ export class ObjectOrientedCValidator {
           }
           reported.add(param.name)
         })
+        if (method.restParam) {
+          if (reported.has(method.restParam.name)) {
+            accept('error', `参数里已经定义了 '${method.restParam.name}'.`, {
+              node: method.restParam,
+              property: 'name',
+            })
+            reported.add(method.restParam.name)
+          }
+        }
       }
       methodNames.add(method.name)
     })

@@ -11,17 +11,26 @@
         "Programming Languages"
     ],
     "contributes": {
-        "languages": [{
-            "id": "object-oriented-c",
-            "aliases": ["Object-Oriented C", "object-oriented-c"],
-            "extensions": [".ooc"],
-            "configuration": "./language-configuration.json"
-        }],
-        "grammars": [{
-            "language": "object-oriented-c",
-            "scopeName": "source.object-oriented-c",
-            "path": "syntaxes/object-oriented-c.tmLanguage.json"
-        }]
+        "languages": [
+            {
+                "id": "object-oriented-c",
+                "aliases": [
+                    "Object-Oriented C",
+                    "object-oriented-c"
+                ],
+                "extensions": [
+                    ".ooc"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "object-oriented-c",
+                "scopeName": "source.object-oriented-c",
+                "path": "syntaxes/object-oriented-c.tmLanguage.json"
+            }
+        ]
     },
     "activationEvents": [
         "onLanguage:object-oriented-c"
@@ -41,11 +50,11 @@
         "vscode-languageserver": "~9.0.1"
     },
     "devDependencies": {
-        "@types/vscode": "~1.67.0",
-        "concurrently": "~8.2.1",
-        "esbuild": "~0.25.5"
+        "@types/vscode": "~1.110.0",
+        "concurrently": "~9.2.1",
+        "esbuild": "~0.27.4"
     },
     "vsce": {
-      "dependencies": false
+        "dependencies": false
     }
 }

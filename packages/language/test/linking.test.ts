@@ -28,7 +28,7 @@ describe('Linking tests', () => {
   test('linking of variables', async () => {
     document = await parse(`
             x = 10;
-            y := 20;
+            y = 20;
         `)
 
     expect(
