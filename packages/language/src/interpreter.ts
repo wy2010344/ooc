@@ -44,10 +44,15 @@ function getObjDefineName(n: MethodDefName) {
 }
 export class ObjectValue {
   readonly methods: ObjectMethod[]
+  private scope: Scope
   constructor(
     methods: Method[],
-    readonly scope: Scope,
+    scope: Scope,
+    readonly parent: ObjectValue | undefined,
   ) {
+    if (parent != undefined && !(parent instanceof ObjectValue)) {
+      throw new Error(`parent 应该是一个ObjectValue`)
+    }
     this.methods = Array(methods.length)
     methods.forEach((method, i) => {
       switch (method.$type) {
@@ -55,7 +60,7 @@ export class ObjectValue {
           return (this.methods[i] = {
             type: 'bind',
             name: getObjDefineName(method.name),
-            value: interpretExpression(method.expression, this.scope),
+            value: interpretExpression(method.expression, scope),
           })
         default:
           return (this.methods[i] = {
@@ -65,8 +70,9 @@ export class ObjectValue {
           })
       }
     })
+    this.scope = addScope(scope, 'currentObject', this)
   }
-  send(name: string, args: any[]) {
+  send(name: string, responser: any, args: any[]) {
     for (let i = 0; i < this.methods.length; i++) {
       const pair = this.methods[i]
       if (pair.name == name) {
@@ -76,8 +82,7 @@ export class ObjectValue {
           case 'call':
             const method = pair.value
             let s = addScope(this.scope, 'this', this)
-            s = addScope(s, 'args', args)
-            s = addScope(s, 'methodName', name)
+            s = addScope(s, 'responser', responser)
             method.params.forEach((param, index) => {
               s = addScope(s, param.name, args[index])
             })
@@ -120,7 +125,10 @@ export class ObjectValue {
     if (fun) {
       return fun(this, args[0])
     }
-    throw new TypeError(`没有定义该方法${name}`)
+    if (name == 'methodNotFound') {
+      throw new TypeError(`没有定义该方法${name}`)
+    }
+    return sendMessage(responser, 'methodNotFound', [name, ...args])
   }
 }
 
@@ -231,12 +239,17 @@ function getMethodCallName({ value }: MethodCallName) {
       return value.value
   }
 }
-function sendMessage(o: any, value: string, args: any[], isProd?: boolean) {
+function sendMessage(
+  o: any,
+  value: string,
+  args: any[],
+  isProd?: boolean,
+): any {
   if (o instanceof ObjectValue) {
     if (isProd) {
       console.log('自定义对象不需要property')
     }
-    return o.send(value, args)
+    return o.send(value, o, args)
   }
   if (isProd) {
     //属性值读取与设置
@@ -277,7 +290,7 @@ function getStrValue(e: Str) {
   return e.value
 }
 
-function interpretPrimary(e: Primary, scope: Scope) {
+function interpretPrimary(e: Primary, scope: Scope): any {
   switch (e.$type) {
     case 'Bool':
       return e.value == 'true'
@@ -288,7 +301,11 @@ function interpretPrimary(e: Primary, scope: Scope) {
     case 'Ref':
       return getScope(scope, e.value)
     case 'ObjectDef':
-      return new ObjectValue(e.methods, scope)
+      return new ObjectValue(
+        e.methods,
+        scope,
+        e.extends ? interpretPrimary(e.extends, scope) : undefined,
+      )
     case 'StID':
       return getStId(e)
     case 'Str':

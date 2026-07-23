@@ -84,7 +84,7 @@ MethodCallName:
     value=(Ref|StID|Str|ProId);
 
 ObjectDef:
-    '{' (methods+=Method (',' methods+=Method)* ','? )? '}';
+    '{' (methods+=Method (',' methods+=Method)* (',' '...' extends=(Ref|Expression))? )? '}';
 
 
 ComplexPrimary:
