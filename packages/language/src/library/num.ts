@@ -21,7 +21,7 @@ export const numDef = {
     return a < b
   },
   '>='(a: number, b: number) {
-    return a > b
+    return a >= b
   },
   '<='(a: number, b: number) {
     return a <= b

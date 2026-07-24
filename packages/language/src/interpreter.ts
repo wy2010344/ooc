@@ -54,13 +54,14 @@ export class ObjectValue {
       throw new Error(`parent 应该是一个ObjectValue`)
     }
     this.methods = Array(methods.length)
+    this.scope = addScope(scope, 'currentObject', this)
     methods.forEach((method, i) => {
       switch (method.$type) {
         case 'MethodBind':
           return (this.methods[i] = {
             type: 'bind',
             name: getObjDefineName(method.name),
-            value: interpretExpression(method.expression, scope),
+            value: interpretExpression(method.expression, this.scope),
           })
         default:
           return (this.methods[i] = {
@@ -70,7 +71,6 @@ export class ObjectValue {
           })
       }
     })
-    this.scope = addScope(scope, 'currentObject', this)
   }
   send(name: string, responser: any, args: any[]) {
     for (let i = 0; i < this.methods.length; i++) {
@@ -286,7 +286,7 @@ function getStId(e: StID) {
 }
 
 function getStrValue(e: Str) {
-  console.log('str', e.value)
+  // console.log('str', e.value)
   return e.value
 }
 
