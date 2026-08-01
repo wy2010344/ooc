@@ -1,6 +1,7 @@
 import type { ValidationAcceptor, ValidationChecks } from 'langium'
 import type { ObjectOrientedCAstType, ObjectDef } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
+import { ObjectOrientedCTypeChecker } from './type-checker.js'
 
 /**
  * Register custom validation checks.
@@ -10,6 +11,7 @@ export function registerValidationChecks(services: ObjectOrientedCServices) {
   const validator = services.validation.ObjectOrientedCValidator
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     ObjectDef: validator.checkObjectDef,
+    Model: validator.checkModel,
   }
   registry.register(checks, validator)
 }
@@ -18,6 +20,14 @@ export function registerValidationChecks(services: ObjectOrientedCServices) {
  * Implementation of custom validations.
  */
 export class ObjectOrientedCValidator {
+  checkModel(
+    model: Parameters<ObjectOrientedCTypeChecker['checkModel']>[0],
+    accept: ValidationAcceptor,
+  ): void {
+    // 每次新建，避免不同文档之间的类型定义互相污染
+    new ObjectOrientedCTypeChecker().checkModel(model, accept)
+  }
+
   checkObjectDef(model: ObjectDef, accept: ValidationAcceptor): void {
     // 基本的模型验证逻辑
     // 可以在这里添加模型级别的验证

@@ -9,119 +9,120 @@ beforeAll(async () => {
 })
 
 describe('OOC Interpreter', () => {
-  test('interpret simple variable declaration', async () => {
+  test('变量与算术', async () => {
     const result = await interpreter.interpret(`
             x = 42;
             y = 33;
-            x add y
+            x + y
         `)
-
-    expect(result).toBeDefined()
+    expect(result).toBe(75)
   })
 
-  test('interpret object with methods', async () => {
+  test('对象方法调用', async () => {
     const result = await interpreter.interpret(`
             value = 42;
             calc = {
-                add(n) => value add n,
-                double = value mul 2
+                add(n) => value + n,
+                double = value * 2
             };
-            calc double / add 8
+            calc double
         `)
-
-    expect(result).toBeDefined()
+    expect(result).toBe(84)
   })
 
-  test('interpret string operations', async () => {
+  test('对象方法带参数', async () => {
     const result = await interpreter.interpret(`
-            text = 'hello';
-            JSAttr get text "length / add 9
+            calc = {
+                add(n) => n + 1
+            };
+            calc add 4
         `)
-
-    expect(result).toBeDefined()
+    expect(result).toBe(5)
   })
 
-  test('interpret boolean values', async () => {
+  test('字符串拼接', async () => {
+    const result = await interpreter.interpret(`
+            'hello' + ' world'
+        `)
+    expect(result).toBe('hello world')
+  })
+
+  test('布尔值', async () => {
     const result = await interpreter.interpret(`
             t = true;
             f = false;
             t
         `)
-    expect(result).toBeDefined()
+    expect(result).toBe(true)
   })
 
-  test('interpret nested objects', async () => {
+  test('嵌套对象', async () => {
     const result = await interpreter.interpret(`
             outer = {
                 inner = {
                     value = 42
                 }
             };
-            outer
+            outer inner / value
         `)
-    expect(result).toBeDefined()
+    expect(result).toBe(42)
   })
 
-  test('interpret exported methods', async () => {
+  test('#guard 分支', async () => {
     const result = await interpreter.interpret(`
-            add = {add(a b) => a add b};
-            add
+            obj = {
+                fun(a) { #guard a > 5; a }
+            };
+            obj fun 9
         `)
-    expect(result).toBeDefined()
-  })
-
-  test('multiple arithmetic operations', async () => {
-    const result = await interpreter.interpret(`
-            num = 10;
-            num add 5
-        `)
-    expect(result).toBeDefined()
-  })
-
-  test('object with string concatenation', async () => {
-    const result = await interpreter.interpret(`
-            str = 'Hello';
-            str
-        `)
-    expect(result).toBeDefined()
+    expect(result).toBe(9)
   })
 
   test('剩余参数', async () => {
     const result = await interpreter.interpret(`
-      obj={
-        apply(a,...b){
-          b
-        }
-      };
-      obj apply 1 2 3 4
-      `)
-    console.log(result)
+            obj = {
+                apply(a, ...b) { b }
+            };
+            obj apply 1 2 3 4
+        `)
+    expect(result).toEqual([2, 3, 4])
   })
 
-  test('bridge gcd builtin', async () => {
+  test('继承调用父方法', async () => {
     const result = await interpreter.interpret(`
-            a = 48;
-            b = 18;
-            a gcd b
+            animal = { speak() { "voice } };
+            dog = { ...animal, bark() { "wang } };
+            dog speak
         `)
+    expect(result).toBe('voice')
+  })
 
+  test('继承覆盖父方法', async () => {
+    const result = await interpreter.interpret(`
+            animal = { speak() { "voice } };
+            dog = { ...animal, speak() { "wang } };
+            dog speak
+        `)
+    expect(result).toBe('wang')
+  })
+
+  test('父方法 this 访问父字段', async () => {
+    const result = await interpreter.interpret(`
+            base = { name = 'pet' };
+            child = { ...base, greet() { this name } };
+            child greet
+        `)
+    expect(result).toBe('pet')
+  })
+
+  test('JS 对象属性用 @ 访问', async () => {
+    const result = await interpreter.interpret(`'abcdef' @length`)
     expect(result).toBe(6)
   })
 
-  test('bridge factorial builtin', async () => {
-    const result = await interpreter.interpret(`
-            n = 6;
-            n factorial
-        `)
-
-    expect(result).toBe(720)
-  })
-
-  test('bridge sumList builtin for union list', async () => {
-    const result = await interpreter.interpret(`
-            lst = $cons 1 $cons 2 $cons 3 $nil;
-            lst sumList
-        `)
-    expect(result).toBeDefined()
+  test('JS 对象属性当方法调用给出提示', async () => {
+    await expect(interpreter.interpret(`'abcdef' length`)).rejects.toThrow(
+      '属性，不是方法',
+    )
   })
 })

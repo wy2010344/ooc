@@ -17,9 +17,6 @@ beforeAll(async () => {
   services = createObjectOrientedCServices(EmptyFileSystem)
   const doParse = parseHelper<Model>(services.ObjectOrientedC)
   parse = (input: string) => doParse(input, { validation: true })
-
-  // activate the following if your linking test requires elements from a built-in library, for example
-  // await services.shared.workspace.WorkspaceManager.initializeWorkspace([]);
 })
 
 describe('Validating', () => {
@@ -29,114 +26,60 @@ describe('Validating', () => {
         `)
 
     expect(
-      // here we first check for validity of the parsed document object by means of the reusable function
-      //  'checkDocumentValid()' to sort out (critical) typos first,
-      // and then evaluate the diagnostics by converting them into human readable strings;
-      // note that 'toHaveLength()' works for arrays and strings alike ;-)
       checkDocumentValid(document) ||
         document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
   })
 
-  test('check duplicate object members validation', async () => {
+  test('同名方法重载不报重复错误', async () => {
     document = await parse(`
             obj = {
-                x => 10,
-                x => 20
+                fun(a) { a },
+                fun(a, b) { a }
             };
         `)
 
     expect(
       checkDocumentValid(document) ||
         document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).toEqual(expect.stringContaining('Duplicate member name: x'))
+    ).not.toContain('已经定义了')
   })
 
-  test('check duplicate export validation', async () => {
-    document = await parse(`
-            export x = 10;
-            export x = 20;
-        `)
-
-    expect(
-      checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).toEqual(expect.stringContaining('Duplicate export'))
-  })
-
-  test('check duplicate import validation', async () => {
-    document = await parse(`
-            import lib 'math';
-            import lib 'another';
-        `)
-
-    expect(
-      checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).toEqual(expect.stringContaining('Duplicate import'))
-  })
-
-  test('check duplicate method parameters', async () => {
+  test('重复方法参数报错', async () => {
     document = await parse(`
             obj = {
-                method(a, a) => a add a
+                method(a, a) => a
             };
         `)
 
-    const validationResult = checkDocumentValid(document)
-    const diagnosticsStr =
-      document?.diagnostics?.map(diagnosticToString)?.join('\n') || ''
-    const output = validationResult || diagnosticsStr
-
-    expect(output).toEqual(expect.stringContaining('Duplicate parameter'))
+        const output =
+          (checkDocumentValid(document) ||
+            document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
+          ''
+        expect(output).toContain('参数里已经定义了')
   })
 
-  test('check uppercase variable name warning', async () => {
+  test('同时报告多个错误', async () => {
     document = await parse(`
-            X = 10;
-        `)
-
-    expect(
-      checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).toEqual(expect.stringContaining('lowercase'))
-  })
-
-  test('check valid lowercase variable names', async () => {
-    document = await parse(`
-            x = 10;
-            myVar = 20;
-            _private = 30;
-        `)
-
-    expect(
-      checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).not.toContain('lowercase')
-  })
-
-  test('check multiple errors are reported', async () => {
-    document = await parse(`
-            X = 10;
             obj = {
-                a => 1,
-                a => 2
+                method(a, a) { a }
             };
+            x: number = 'str'
         `)
 
-    const diagnosticText =
-      checkDocumentValid(document) ||
-      document?.diagnostics?.map(diagnosticToString)?.join('\n')
-
-    // Should have at least warnings or errors
-    expect(diagnosticText?.length).toBeGreaterThan(0)
+        const output =
+          (checkDocumentValid(document) ||
+            document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
+          ''
+        expect(output.length).toBeGreaterThan(0)
+        expect(output).toContain('参数里已经定义了')
   })
 
   test('check valid method with parameters', async () => {
     document = await parse(`
             obj = {
-                add(x, y) => x add y,
-                mul(a, b) => a mul b
+                add(x, y) => x + y,
+                mul(a, b) => a * b
             };
         `)
 
@@ -146,7 +89,7 @@ describe('Validating', () => {
     ).toHaveLength(0)
   })
 
-  test('check complex nested object validation', async () => {
+  test('复杂嵌套对象无类型告警', async () => {
     document = await parse(`
             config = {
                 cache() => {

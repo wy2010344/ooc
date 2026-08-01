@@ -15,94 +15,60 @@ let document: LangiumDocument<Model> | undefined
 beforeAll(async () => {
   services = createObjectOrientedCServices(EmptyFileSystem)
   parse = parseHelper<Model>(services.ObjectOrientedC)
-
-  // activate the following if your linking test requires elements from a built-in library, for example
-  // await services.shared.workspace.WorkspaceManager.initializeWorkspace([]);
 })
 
 describe('Parsing tests', () => {
   test('parse simple OOCModel', async () => {
     document = await parse(`
             ab = 9;
-            bc := 99;
+            bc = 99;
         `)
-
-    // check for absence of parser errors the classic way:
-    //  deactivated, find a much more human readable way below!
-    // expect(document.parseResult.parserErrors).toHaveLength(0);
-
-    expect(
-      // here we use a (tagged) template expression to create a human readable representation
-      //  of the AST part we are interested in and that is to be compared to our expectation;
-      // prior to the tagged template expression we check for validity of the parsed document object
-      //  by means of the reusable function 'checkDocumentValid()' to sort out (critical) typos first;
-      checkDocumentValid(document) ||
-        s`
-                Items parsed successfully
-            `,
-    ).toBe(s`
-            Items parsed successfully
-        `)
+    expect(checkDocumentValid(document)).toBeUndefined()
   })
 
   test('parse nested object with methods', async () => {
     document = await parse(`
             myObj = {
-                add(a, b) => a add b,
-                sub(a, b) => a sub b
+                add(a, b) => a + b,
+                sub(a, b) => a - b
             };
         `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
-  test('parse complex message chain with pipes', async () => {
+  test('parse pipe with lambda 参数类型', async () => {
     document = await parse(`
-            result = 'hello' length | x . x add 5;
+            result = 'hello' length | x: number => x + 5;
         `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
   test('parse object with mixed method and property definitions', async () => {
     document = await parse(`
             calc = {
-                value := 42,
+                value = 42,
                 getValue() => value,
-                add(x) => value add x,
-                sub(x) => value sub x
+                add(x) => value + x
             };
         `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
-  test('parse async method with #async notation', async () => {
+  test('parse #import 语句', async () => {
     document = await parse(`
-            asyncObj = {
-                fetch(url) #async { 'dummy'; }
+            math = '#import' 'math-lib';
+            helper = '#import' 'helper-lib';
+        `)
+    expect(checkDocumentValid(document)).toBeUndefined()
+  })
+
+  test('parse #type 类型别名', async () => {
+    document = await parse(`
+            Point #type {
+                x: number,
+                y: number
             };
         `)
-
-    expect(checkDocumentValid(document)).toBeUndefined()
-  })
-
-  test('parse union type construction', async () => {
-    document = await parse(`
-            success = $ ok 100;
-            error = $ fail 'something wrong';
-        `)
-
-    expect(checkDocumentValid(document)).toBeUndefined()
-  })
-
-  test('parse import and export statements', async () => {
-    document = await parse(`
-            import math 'math-lib';
-            export add(a, b) => a add b;
-            export result = 10;
-        `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
@@ -110,7 +76,6 @@ describe('Parsing tests', () => {
     document = await parse(`
             x = obj method1 10 20 / method2 30 / method3;
         `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
@@ -122,15 +87,13 @@ describe('Parsing tests', () => {
             fl = 3.14;
             s = 'string';
         `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
   test('parse parenthesized expressions', async () => {
     document = await parse(`
-            result = (x add y) add a sub b;
+            result = (x + y) + a - b;
         `)
-
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 })

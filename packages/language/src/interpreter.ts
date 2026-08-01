@@ -72,7 +72,7 @@ export class ObjectValue {
       }
     })
   }
-  send(name: string, responser: any, args: any[]) {
+  send(name: string, responser: any, args: any[]): any {
     for (let i = 0; i < this.methods.length; i++) {
       const pair = this.methods[i]
       if (pair.name == name) {
@@ -120,6 +120,10 @@ export class ObjectValue {
         }
       }
     }
+    //继承：自身没有，向上查找父对象
+    if (this.parent) {
+      return this.parent.send(name, responser, args)
+    }
     //通用对象方法
     const fun = objectDefine[name as '&&']
     if (fun) {
@@ -162,6 +166,9 @@ async function interpret(
         scope = addScope(scope, e.name, value)
         importIndex++
         return
+      case 'TypeDef':
+        //类型声明只是装饰，运行时无副作用
+        return
       default:
         last = interpretExpression(e, scope)
         return
@@ -201,15 +208,8 @@ function interpretExpression(e: Expression, scope: Scope): any {
               )
             default:
               scope = addScope(scope, rv.param, obj)
-              const re = rv.expression
-              switch (re.$type) {
-                case 'MessageChain':
-                  const o = interpretPrimary(re.primary, scope)
-                  return sendMessageWith(o, re.message, scope)
-                default:
-                  return interpretPrimary(re, scope)
-              }
-          }
+              return interpretExpression(rv.expression, scope)
+            }
         default:
           return sendMessage(obj, r.infix, [interpretPrimary(r.value, scope)])
       }
@@ -261,6 +261,11 @@ function sendMessage(
 
   const fun = o[value]
   if (fun) {
+    if (typeof fun !== 'function') {
+      throw new TypeError(
+        `'${value}' 是 ${o.constructor?.name ?? '对象'} 上的属性，不是方法。属性请用 @${value} 访问`,
+      )
+    }
     //能找到对象方法定义，包括proxy其实也在里面
     return fun.apply(o, args)
   }

@@ -5,11 +5,24 @@ entry Model:
 
 
 TopStatement:
-    ImportStatement | Statement
+    ImportStatement | TypeDef | Statement
 ;
 
 ImportStatement:
     name=ID '=' '#import' path=STRING
+;
+
+//类型别名（#type 指令）：成员只声明签名，无实现
+TypeDef:
+    name=ID '#type' body=TypeMemberList;
+
+TypeMemberList:
+    '{' (members+=TypeMember (',' members+=TypeMember)*)? '}';
+
+TypeMember:
+    name=MethodDefName 
+        ('(' ((params+=Param (',' params+=Param)*)?) ')')? 
+        (':' typeAnnotation=Type)?
 ;
 
 Statement:
@@ -17,7 +30,7 @@ Statement:
 
 //绑定
 Assignment:
-    name=ID '=' expression=Expression;
+    name=ID (':' typeAnnotation=Type)? '=' expression=Expression;
 
 //object的方法
 Method:
@@ -26,11 +39,12 @@ Method:
 MethodAll:
     name=MethodDefName 
         ('(' 
-            ( (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)
-             |('...' restParam=Param)
+            ( (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)?
+             | ('...' restParam=Param)
             ) 
           ')' 
         )? 
+        (':' returnType=Type)?
         (
             ('{' 
                 ('#guard' guardExpression=Expression ';')?
@@ -42,13 +56,13 @@ MethodAll:
 
 
 MethodBind:
-    name=MethodDefName '=' expression=Expression;
+    name=MethodDefName (':' typeAnnotation=Type)? '=' expression=Expression;
 
 MethodDefName:
     name=(Ref|Str|StID);
 
 Param:
-    name=ID;
+    name=ID (':' typeAnnotation=Type)?;
 
 Expression:
     PipeExpression;
@@ -71,7 +85,7 @@ MessageInfixRight:
     infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'//'|'%') value=Primary;
 
 NamedExpression:
-    param=ID '=>' expression=(MessageChain| ComplexPrimary);
+    param=ID (':' typeAnnotation=Type)? '=>' expression=Expression;
 
 MessageChain:
     primary=Primary message=Message;
@@ -83,9 +97,16 @@ Message:
 MethodCallName:
     value=(Ref|StID|Str|ProId);
 
+//类型表达式：目前仅支持具名类型与联合
+Type:
+    parts+=TypeName ('|' parts+=TypeName)*;
+
+TypeName:
+    name=(ID | Nil | Bool);
+
 ObjectDef:
     '{' 
-        ('...' extends=(Ref|Expression) ',' )?
+        ('...' extends=Ref ',' )?
         methods+=Method (',' methods+=Method)*  
     '}';
 
