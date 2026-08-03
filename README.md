@@ -42,7 +42,7 @@ await ooc.interpretPath('src/main.ooc')
 - `//` 是注释，**不是**除法（除法暂未提供）
 - 字符串只能用单引号：`'hi'`
 - 调用方法用空格，不用括号：`calc add 3 4`，不是 `calc.add(3, 4)`
-- JS 对象的**属性**要加 `@`：`'abcdef' @length`（6），直接写 `'abcdef' length` 会报错
+- JS 对象的属性直接访问：`'abcdef' length`（6）；带参数则写入属性：`Math _answer 42`
 
 ## 文档
 

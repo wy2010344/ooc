@@ -18,7 +18,10 @@ x + 3;
 'abcdef' slice 1 3;
 'abc' + 'def';
 
-// 字符串属性用 @ 读取
-'abcdef' @length;
+// 字符串属性直接读取
+'abcdef' length;
+
+// JS 对象属性访问
+Math PI;
 
 // 注释：// 单行、/* 多行 */

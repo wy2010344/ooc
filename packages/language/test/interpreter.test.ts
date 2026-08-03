@@ -115,14 +115,43 @@ describe('OOC Interpreter', () => {
     expect(result).toBe('pet')
   })
 
-  test('JS 对象属性用 @ 访问', async () => {
-    const result = await interpreter.interpret(`'abcdef' @length`)
+  test('原生类型属性读取', async () => {
+    const result = await interpreter.interpret(`'abcdef' length`)
     expect(result).toBe(6)
   })
 
-  test('JS 对象属性当方法调用给出提示', async () => {
-    await expect(interpreter.interpret(`'abcdef' length`)).rejects.toThrow(
-      '属性，不是方法',
-    )
+  test('原生类型方法执行', async () => {
+    const result = await interpreter.interpret(`'abcdef' slice 1 3`)
+    expect(result).toBe('bc')
+  })
+
+  test('原生类型属性设置', async () => {
+    process.env._OOC_TEST_PROP = 'x'
+    try {
+      const result = await interpreter.interpret(`
+            e = process env;
+            e _OOC_TEST_PROP 42;
+            e _OOC_TEST_PROP
+        `)
+      expect(result).toBe('42')
+    } finally {
+      delete process.env._OOC_TEST_PROP
+    }
+  })
+
+  test('原生类型未绑定走 methodNotFound', async () => {
+    await expect(
+      interpreter.interpret(`Math _ooc_notexist_method`),
+    ).rejects.toThrow('没有定义该方法')
+  })
+
+  test('自定义对象未绑定触发 methodNotFound 方法', async () => {
+    const result = await interpreter.interpret(`
+            obj = {
+                methodNotFound(name) { 'fallback:' + name }
+            };
+            obj foo
+        `)
+    expect(result).toBe('fallback:foo')
   })
 })

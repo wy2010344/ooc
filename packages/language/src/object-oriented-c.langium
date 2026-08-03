@@ -85,7 +85,7 @@ MessageInfixRight:
     infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'//'|'%') value=Primary;
 
 NamedExpression:
-    param=ID (':' typeAnnotation=Type)? '=>' expression=Expression;
+    param=ID '=>' expression=Expression;
 
 MessageChain:
     primary=Primary message=Message;
@@ -95,7 +95,7 @@ Message:
     name=MethodCallName args+=Primary*;
 
 MethodCallName:
-    value=(Ref|StID|Str|ProId);
+    value=(Ref|StID|Str);
 
 //类型表达式：目前仅支持具名类型与联合
 Type:
@@ -129,8 +129,6 @@ Num:
     value=NUMBER;
 Nil:
     value='nil';
-ProId:
-    value=PropertyID;
 
 hidden terminal WS: /\s+/;
 terminal BOOL: /true|false/;
@@ -139,7 +137,6 @@ terminal STRING: /'(\\.|[^'\\])*'/;
 terminal STID: /"[^\s]*/;
 terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;
-terminal PropertyID: /@[_a-zA-Z][_a-zA-Z0-9]*/;
 
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;

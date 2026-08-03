@@ -200,12 +200,7 @@ function interpretExpression(e: Expression, scope: Scope): any {
               )
               args.unshift(obj)
               const main = interpretPrimary(rv.primary, scope)
-              return sendMessage(
-                main,
-                getMethodCallName(rv.message.name),
-                args,
-                rv.message.name.value.$type == 'ProId',
-              )
+              return sendMessage(main, getMethodCallName(rv.message.name), args)
             default:
               scope = addScope(scope, rv.param, obj)
               return interpretExpression(rv.expression, scope)
@@ -219,18 +214,11 @@ function interpretExpression(e: Expression, scope: Scope): any {
 function sendMessageWith(o: any, message: Message, scope: Scope) {
   const name = message.name
   const args = message.args.map((arg) => interpretPrimary(arg, scope))
-  return sendMessage(
-    o,
-    getMethodCallName(name),
-    args,
-    name.value.$type == 'ProId',
-  )
+  return sendMessage(o, getMethodCallName(name), args)
 }
 
 function getMethodCallName({ value }: MethodCallName) {
   switch (value.$type) {
-    case 'ProId':
-      return value.value.slice(1)
     case 'StID':
       return value.value.slice(1)
     case 'Str':
@@ -239,35 +227,24 @@ function getMethodCallName({ value }: MethodCallName) {
       return value.value
   }
 }
-function sendMessage(
-  o: any,
-  value: string,
-  args: any[],
-  isProd?: boolean,
-): any {
+function sendMessage(o: any, value: string, args: any[]): any {
   if (o instanceof ObjectValue) {
-    if (isProd) {
-      console.log('自定义对象不需要property')
-    }
     return o.send(value, o, args)
   }
-  if (isProd) {
-    //属性值读取与设置
+  const fun = o[value]
+  if (typeof fun === 'function') {
+    //能找到对象方法定义，包括proxy其实也在里面
+    return fun.apply(o, args)
+  }
+  if (value === 'methodNotFound') {
+    throw new TypeError(`没有定义该方法${value}`)
+  }
+  if (value in Object(o)) {
+    //属性读取与设置
     if (args.length) {
       o[value] = args[0]
     }
     return o[value]
-  }
-
-  const fun = o[value]
-  if (fun) {
-    if (typeof fun !== 'function') {
-      throw new TypeError(
-        `'${value}' 是 ${o.constructor?.name ?? '对象'} 上的属性，不是方法。属性请用 @${value} 访问`,
-      )
-    }
-    //能找到对象方法定义，包括proxy其实也在里面
-    return fun.apply(o, args)
   }
   const num = numDef[value as '<']
   if (num) {
@@ -277,7 +254,7 @@ function sendMessage(
   if (obj) {
     return obj(o, args[0])
   }
-  throw new TypeError(`未找到方法${value}`)
+  return sendMessage(o, 'methodNotFound', [value, ...args])
 }
 
 function getStId(e: StID) {

@@ -58,9 +58,9 @@ describe('类型注解语法解析', () => {
     expect(doc.parseResult.parserErrors).toHaveLength(0)
   })
 
-  test('管道 lambda 参数类型', async () => {
+  test('管道命名参数', async () => {
     const doc = await parse(`
-        data | x: number => x + 1
+        data | x => x + 1
     `)
     expect(doc.parseResult.parserErrors).toHaveLength(0)
   })

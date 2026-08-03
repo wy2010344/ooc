@@ -17,7 +17,6 @@ import {
   isObjectDef,
   isPiplingExpression,
   isPrimary,
-  isProId,
   isRef,
   isStID,
   isStr,
@@ -449,19 +448,9 @@ export class ObjectOrientedCTypeChecker {
     if (isMessagePipRight(right)) {
       const value = right.value
       if (isNamedExpression(value)) {
-        // 管道 lambda：x | p => expr
+        // 管道命名：x | p => expr，p 的类型就是左侧结果
         const pipeEnv = env.child()
-        const paramType = value.typeAnnotation
-          ? this.resolveAnnotation(value.typeAnnotation, accept)
-          : left
-        if (value.typeAnnotation && !isSubtype(left, paramType)) {
-          accept(
-            'warning',
-            `管道参数类型不匹配：期望 ${describeType(paramType)}，却得到了 ${describeType(left)}`,
-            { node: value.typeAnnotation, property: 'parts' },
-          )
-        }
-        pipeEnv.define(value.param, paramType)
+        pipeEnv.define(value.param, left)
         return this.inferNamedExpressionBody(value, pipeEnv, accept)
       }
       // 管道调用：x | main args 等价于 main 的 (x, ...args)
@@ -735,9 +724,6 @@ export class ObjectOrientedCTypeChecker {
 
   private getMessageName(m: Message): string {
     const v = m.name.value
-    if (isProId(v)) {
-      return v.value.slice(1)
-    }
     if (isRef(v)) {
       return v.value
     }

@@ -36,9 +36,9 @@ describe('Parsing tests', () => {
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
-  test('parse pipe with lambda 参数类型', async () => {
+  test('parse pipe with named expression', async () => {
     document = await parse(`
-            result = 'hello' length | x: number => x + 5;
+            result = 'hello' length | x => x + 5;
         `)
     expect(checkDocumentValid(document)).toBeUndefined()
   })
