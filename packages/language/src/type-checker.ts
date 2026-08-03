@@ -1,4 +1,5 @@
 import type { AstNode, ValidationAcceptor } from 'langium'
+import { AstUtils } from 'langium'
 import {
   isAssignment,
   isBool,
@@ -9,11 +10,13 @@ import {
   isMessagePipRight,
   isMethodAll,
   isMethodBind,
+  isModel,
   isNamedExpression,
   isNil,
   isNum,
   isObjectDef,
   isPiplingExpression,
+  isPrimary,
   isProId,
   isRef,
   isStID,
@@ -67,6 +70,29 @@ export class ObjectOrientedCTypeChecker {
     for (const stmt of model.expressions) {
       this.checkTopStatement(stmt, env, accept)
     }
+  }
+
+  /**
+   * 供 hover 等只读场景使用：推断表达式的类型，不产生任何诊断。
+   * 类型环境按顶层语句顺序建立，与检查器一致。Expression 与 Primary 均可。
+   */
+  inferType(node: AstNode): TypeInfo {
+    const env = new TypeEnv()
+    const model = AstUtils.getContainerOfType(node, isModel)
+    const accept: ValidationAcceptor = () => undefined
+    this.typedefs.clear()
+    if (model) {
+      for (const stmt of model.expressions) {
+        this.checkTopStatement(stmt, env, accept)
+      }
+    }
+    if (isPiplingExpression(node) || isMessageOrChain(node)) {
+      return this.inferExpression(node, env, accept)
+    }
+    if (isPrimary(node)) {
+      return this.inferPrimary(node, env, accept)
+    }
+    return anyType
   }
 
   private checkTopStatement(

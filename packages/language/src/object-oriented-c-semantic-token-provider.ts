@@ -8,6 +8,7 @@ import {
   isBool,
   isImportStatement,
   isMessage,
+  isMessageInfixRight,
   isMethod,
   isNamedExpression,
   isNil,
@@ -15,6 +16,8 @@ import {
   isParam,
   isRef,
   isStID,
+  isTypeDef,
+  isTypeName,
 } from './generated/ast.js'
 
 import { SemanticTokenTypes } from 'vscode-languageserver-protocol'
@@ -64,6 +67,24 @@ export class ObjectOrientedCSemanticTokenProvider extends AbstractSemanticTokenP
         node,
         property: 'value',
         type: SemanticTokenTypes.number,
+      })
+    } else if (isTypeName(node)) {
+      acceptor({
+        node,
+        property: 'name',
+        type: SemanticTokenTypes.type,
+      })
+    } else if (isTypeDef(node)) {
+      acceptor({
+        node,
+        property: 'name',
+        type: SemanticTokenTypes.type,
+      })
+    } else if (isMessageInfixRight(node)) {
+      acceptor({
+        node,
+        property: 'infix',
+        type: SemanticTokenTypes.operator,
       })
     }
   }

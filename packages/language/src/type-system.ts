@@ -53,6 +53,7 @@ const builtinMethods: Record<string, Map<string, MethodSig[]>> = {
   ]),
   string: new Map([
     ['length', [builtinMethod([], numberType)]],
+    ['slice', [builtinMethod([numberType, numberType], stringType)]],
     ['+', [builtinMethod([anyType], stringType)]],
     ['==', [builtinMethod([anyType], booleanType)]],
     ['!=', [builtinMethod([anyType], booleanType)]],
