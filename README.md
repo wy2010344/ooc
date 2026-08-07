@@ -51,3 +51,4 @@ await ooc.interpretPath('src/main.ooc')
 - [03 管道](docs/03-pipeline.md) —— `/` 与 `|`
 - [04 类型注解](docs/04-types.md) —— `:`、`#type`、联合类型
 - [05 模块](docs/05-modules.md) —— `#import`
+- [06 Lambda](docs/06-lambda.md) —— `[...]` 匿名函数

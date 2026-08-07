@@ -154,4 +154,70 @@ describe('OOC Interpreter', () => {
         `)
     expect(result).toBe('fallback:foo')
   })
+
+  test('lambda 表达式函数体', async () => {
+    const result = await interpreter.interpret(`
+            f = [x -> x + 1];
+            f apply 41
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 多参数', async () => {
+    const result = await interpreter.interpret(`
+            f = [a, b -> a + b];
+            f apply 20 22
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 参数类型注解', async () => {
+    const result = await interpreter.interpret(`
+            f = [x: number -> x + 1];
+            f apply 41
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 无参', async () => {
+    const result = await interpreter.interpret(`
+            f = [42];
+            f apply
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 函数体以标识符开头（无参）', async () => {
+    const result = await interpreter.interpret(`
+            n = 2;
+            f = [n * 21];
+            f apply
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 多语句函数体', async () => {
+    const result = await interpreter.interpret(`
+            f = [x -> y = x + 1; y * 2];
+            f apply 20
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 闭包捕获', async () => {
+    const result = await interpreter.interpret(`
+            n = 1;
+            f = [x -> x + n];
+            f apply 41
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('lambda 作为消息参数', async () => {
+    const result = await interpreter.interpret(`
+            obj = { call(f) => f apply 42 };
+            obj call [x -> x * 2]
+        `)
+    expect(result).toBe(84)
+  })
 })

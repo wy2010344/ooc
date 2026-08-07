@@ -1,5 +1,10 @@
 import type { ValidationAcceptor, ValidationChecks } from 'langium'
-import type { ObjectOrientedCAstType, ObjectDef } from './generated/ast.js'
+import type {
+  ObjectOrientedCAstType,
+  ObjectDef,
+  LambdaDef,
+  MethodAll,
+} from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import { ObjectOrientedCTypeChecker } from './type-checker.js'
 
@@ -11,6 +16,7 @@ export function registerValidationChecks(services: ObjectOrientedCServices) {
   const validator = services.validation.ObjectOrientedCValidator
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     ObjectDef: validator.checkObjectDef,
+    LambdaDef: validator.checkLambdaDef,
     Model: validator.checkModel,
   }
   registry.register(checks, validator)
@@ -40,27 +46,39 @@ export class ObjectOrientedCValidator {
         })
       }
       if (method.$type == 'MethodAll') {
-        const reported = new Set()
-        method.params.forEach((param) => {
-          if (reported.has(param.name)) {
-            accept('error', `参数里已经定义了 '${param.name}'.`, {
-              node: param,
-              property: 'name',
-            })
-          }
-          reported.add(param.name)
-        })
-        if (method.restParam) {
-          if (reported.has(method.restParam.name)) {
-            accept('error', `参数里已经定义了 '${method.restParam.name}'.`, {
-              node: method.restParam,
-              property: 'name',
-            })
-            reported.add(method.restParam.name)
-          }
-        }
+        checkParamDuplicates(method, accept)
       }
       methodNames.add(method.name)
     })
+  }
+
+  checkLambdaDef(lambda: LambdaDef, accept: ValidationAcceptor): void {
+    checkParamDuplicates(lambda, accept)
+  }
+}
+
+/** 检查参数重名（lambda 与 MethodAll 共用） */
+function checkParamDuplicates(
+  owner: MethodAll | LambdaDef,
+  accept: ValidationAcceptor,
+): void {
+  const reported = new Set<string>()
+  owner.params.forEach((param) => {
+    if (reported.has(param.name)) {
+      accept('error', `参数里已经定义了 '${param.name}'.`, {
+        node: param,
+        property: 'name',
+      })
+    }
+    reported.add(param.name)
+  })
+  if (owner.$type === 'MethodAll' && owner.restParam) {
+    if (reported.has(owner.restParam.name)) {
+      accept('error', `参数里已经定义了 '${owner.restParam.name}'.`, {
+        node: owner.restParam,
+        property: 'name',
+      })
+      reported.add(owner.restParam.name)
+    }
   }
 }

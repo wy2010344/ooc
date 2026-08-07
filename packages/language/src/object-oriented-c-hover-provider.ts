@@ -4,6 +4,7 @@ import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
   isAssignment,
   isExpression,
+  isLambdaDef,
   isMethodAll,
   isMethodBind,
   isPrimary,
@@ -34,6 +35,10 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     }
     if (isMethodBind(node)) {
       return `绑定 ${node.name}`
+    }
+    if (isLambdaDef(node)) {
+      const params = node.params?.map((p) => p.name).join(', ') || ''
+      return `λ(${params}) => 函数`
     }
     if (isAssignment(node)) {
       const t = this.checker.inferType(node.expression)

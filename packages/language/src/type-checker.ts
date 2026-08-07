@@ -5,6 +5,7 @@ import {
   isBool,
   isComplexPrimary,
   isImportStatement,
+  isLambdaDef,
   isMessageChainExt,
   isMessageOrChain,
   isMessagePipRight,
@@ -659,6 +660,22 @@ export class ObjectOrientedCTypeChecker {
       this.collectObject(e, env, accept, t.methods)
       this.checkObjectBody(e, env, t, accept)
       return t
+    }
+    if (isLambdaDef(e)) {
+      // lambda 等价于 { apply(...) { ... } }，类型上记为函数。
+      // 函数体内仍按方法体检查：参数入作用域、赋值与表达式推断。
+      const bodyEnv = env.child()
+      for (const p of e.params) {
+        this.bindParam(p, bodyEnv, accept)
+      }
+      for (const stmt of e.expressions) {
+        if (isAssignment(stmt)) {
+          this.checkAssignment(stmt, bodyEnv, accept)
+        } else {
+          this.inferExpression(stmt, bodyEnv, accept)
+        }
+      }
+      return { kind: 'function' }
     }
     return this.inferExpression(e, env, accept)
   }

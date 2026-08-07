@@ -54,6 +54,18 @@ describe('Parsing tests', () => {
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
+  test('parse lambda expressions', async () => {
+    document = await parse(`
+            f1 = [x -> x + 1];
+            f2 = [a, b -> a + b];
+            f3 = [x -> y = x + 1; y * 2];
+            f4 = [42];
+            f5 = [n * 21];
+            f6 = [x: number -> x * 2];
+        `)
+    expect(checkDocumentValid(document)).toBeUndefined()
+  })
+
   test('parse #import 语句', async () => {
     document = await parse(`
             math = '#import' 'math-lib';

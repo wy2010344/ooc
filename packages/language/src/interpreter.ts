@@ -14,7 +14,7 @@ import {
 } from 'object-oriented-c-language'
 import path from 'path'
 import { KVPair, run } from 'wy-helper'
-import { MethodAll, Str } from './generated/ast.js'
+import { MethodAll, Str, LambdaDef } from './generated/ast.js'
 import { objectDefine } from './library/object.js'
 import { numDef } from './library/num.js'
 // 定义值类型
@@ -288,6 +288,9 @@ function interpretPrimary(e: Primary, scope: Scope): any {
         scope,
         e.extends ? interpretPrimary(e.extends, scope) : undefined,
       )
+    case 'LambdaDef':
+      // lambda 等价于 { apply(...) { ... } }，合成一个 apply 方法
+      return createLambdaValue(e, scope)
     case 'StID':
       return getStId(e)
     case 'Str':
@@ -295,6 +298,25 @@ function interpretPrimary(e: Primary, scope: Scope): any {
     default:
       return interpretExpression(e, scope)
   }
+}
+
+/**
+ * lambda `[x -> body]` 与对象 `{ apply(x) { body } }` 语义相同：
+ * 生成一个只包含 apply 方法的 ObjectValue。
+ */
+function createLambdaValue(e: LambdaDef, scope: Scope): ObjectValue {
+  // 合成的 apply 方法节点：运行时只读取 name/params/restParam/guardExpression/expressions，
+  // $container 等链接信息由 Langium 在真实解析时填充，此处不需要。
+  const applyMethod = {
+    $type: 'MethodAll',
+    name: {
+      $type: 'MethodDefName',
+      name: { $type: 'Ref', value: 'apply' },
+    },
+    params: e.params,
+    expressions: e.expressions,
+  } as unknown as MethodAll
+  return new ObjectValue([applyMethod], scope, undefined)
 }
 
 interface RootScope {

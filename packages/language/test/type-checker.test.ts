@@ -286,4 +286,19 @@ describe('真实示例无类型告警', () => {
     `)
     expect(messages(diags)[0]).toContain('类型不匹配：期望 Animal')
   })
+
+  test('lambda 推断为函数类型，无多余告警', async () => {
+    const diags = await diagnostics(`
+        f = [x -> x + 1];
+        f apply 41
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('lambda 未知参数类型告警', async () => {
+    const diags = await diagnostics(`
+        f = [x: Foo -> x + 1]
+    `)
+    expect(messages(diags).join('\n')).toContain("未知类型 'Foo'")
+  })
 })

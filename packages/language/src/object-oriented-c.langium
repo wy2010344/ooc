@@ -112,7 +112,18 @@ ObjectDef:
 
 
 ComplexPrimary:
-    ObjectDef | '(' Expression ')';
+    ObjectDef | LambdaDef | '(' Expression ')';
+
+//lambda，等价于 { apply(...) { ... } }
+//  [x -> x + 1]          带参 lambda，函数体为表达式
+//  [a, b -> a + b]       多参数，逗号分割，参数可带类型注解
+//  [x -> y = x + 1; y*2] 函数体为分号分割的多条语句（与方法体一致）
+//  [42]                  无参 lambda，函数体为表达式
+LambdaDef:
+    '['
+        (params+=Param (',' params+=Param)* '->')?
+        (expressions+=Statement (';' expressions+=Statement)* ';'?)?
+    ']';
 
 Primary:
     Num | Str | StID | Bool | Nil | Ref | ComplexPrimary;
