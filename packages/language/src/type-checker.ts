@@ -7,6 +7,7 @@ import {
   isImportStatement,
   isLambdaDef,
   isMessageChainExt,
+  isMessageInfixRight,
   isMessageOrChain,
   isMessagePipRight,
   isMethodAll,
@@ -45,10 +46,10 @@ import {
   describeType,
   getBuiltinMethods,
   isSubtype,
+  literalBaseName,
   nilType,
   numberType,
   stringType,
-  typeNameToString,
   unionOf,
   TypeEnv,
   type MethodSig,
@@ -326,6 +327,10 @@ export class ObjectOrientedCTypeChecker {
       ? this.resolveAnnotation(method.returnType, accept)
       : anyType
     if (method.guardExpression) {
+      // 可区分联合的判别收窄：
+      //   #guard (x kind) == 'circle'  → x 收窄为 kind 返回 'circle' 的成员
+      //   #guard (x kind) != 'circle'  → x 收窄为其余成员
+      this.narrowByTag(method.guardExpression, methodEnv)
       const guardType = this.inferExpression(
         method.guardExpression,
         methodEnv,
@@ -372,6 +377,131 @@ export class ObjectOrientedCTypeChecker {
     return t
   }
 
+  // ----- 可区分联合：guard 判别收窄 -----
+
+  /**
+   * 从 guard 表达式中提取判别测试：
+   *   #guard (x kind) == 'circle' / #guard x kind != 'square'
+   * 返回 { target: 被判别变量, method: 判别方法, value: 字面量, negate: 是否 != }
+   */
+  private extractTagTest(
+    e: Expression,
+  ): {
+    target: string
+    method: string
+    value: TypeInfo
+    negate: boolean
+  } | undefined {
+    if (!isPiplingExpression(e)) {
+      return undefined
+    }
+    const right = e.right
+    if (
+      !isMessageInfixRight(right) ||
+      (right.infix !== '==' && right.infix !== '!=')
+    ) {
+      return undefined
+    }
+    const value = this.literalOfPrimary(right.value)
+    if (!value) {
+      return undefined
+    }
+    const call = this.extractMethodCall(e.left)
+    if (!call) {
+      return undefined
+    }
+    return {
+      target: call.target,
+      method: call.method,
+      value,
+      negate: right.infix === '!='
+    }
+  }
+
+  private literalOfPrimary(p: Primary): TypeInfo | undefined {
+    if (isStr(p)) {
+      return { kind: 'literal', value: p.value }
+    }
+    if (isNum(p)) {
+      return { kind: 'literal', value: p.value }
+    }
+    if (isBool(p)) {
+      return { kind: 'literal', value: p.value === 'true' }
+    }
+    return undefined
+  }
+
+  /** 提取 (x kind) 或 x kind 形式的无参方法调用 */
+  private extractMethodCall(
+    e: Expression,
+  ): { target: string; method: string } | undefined {
+    if (!isMessageOrChain(e)) {
+      return undefined
+    }
+    if (e.message) {
+      if (!isRef(e.primary) || e.message.args.length > 0) {
+        return undefined
+      }
+      return {
+        target: e.primary.value,
+        method: this.getMessageName(e.message),
+      }
+    }
+    // (x kind)：括号包一层 ComplexPrimary
+    const p = e.primary
+    if (isComplexPrimary(p)) {
+      if (isObjectDef(p) || isLambdaDef(p)) {
+        return undefined
+      }
+      return this.extractMethodCall(p)
+    }
+    return undefined
+  }
+
+  /** 按判别测试收窄联合变量 */
+  private narrowByTag(guardExpr: Expression, env: TypeEnv): void {
+    const test = this.extractTagTest(guardExpr)
+    if (!test) {
+      return
+    }
+    const current = env.lookup(test.target)
+    if (!current || current.kind !== 'union') {
+      return
+    }
+    const narrowed = current.types.filter((member) => {
+      const match = this.memberTagMatches(member, test.method, test.value)
+      return test.negate ? !match : match
+    })
+    if (narrowed.length === 0) {
+      return
+    }
+    env.define(
+      test.target,
+      narrowed.length === 1 ? narrowed[0] : unionOf(narrowed),
+    )
+  }
+
+  /** 联合成员的方法签名是否返回该字面量（判别匹配） */
+  private memberTagMatches(
+    member: TypeInfo,
+    method: string,
+    value: TypeInfo,
+  ): boolean {
+    if (member.kind !== 'object') {
+      return false
+    }
+    const sigs = member.methods.get(method)
+    if (!sigs) {
+      return false
+    }
+    return sigs.some(
+      (s) =>
+        s.returns.kind === 'literal' &&
+        value.kind === 'literal' &&
+        s.returns.value === value.value,
+    )
+  }
+
   private resolveParamAnnotation(
     param: Param | undefined,
     accept: ValidationAcceptor,
@@ -393,8 +523,24 @@ export class ObjectOrientedCTypeChecker {
   }
 
   private resolveTypeName(part: TypeName, accept: ValidationAcceptor): TypeInfo {
-    const name = typeNameToString(part)
-    switch (name) {
+    const n = part.name
+    // 字面量类型：'circle' / 42 / true，用于可区分联合的判别
+    if (typeof n !== 'string') {
+      if (isNil(n)) {
+        return nilType
+      }
+      if (isBool(n)) {
+        return { kind: 'literal', value: n.value === 'true' }
+      }
+      if (isStr(n)) {
+        return { kind: 'literal', value: n.value }
+      }
+      if (isNum(n)) {
+        return { kind: 'literal', value: n.value }
+      }
+      return anyType
+    }
+    switch (n) {
       case 'any':
         return anyType
       case 'number':
@@ -405,15 +551,12 @@ export class ObjectOrientedCTypeChecker {
         return booleanType
       case 'nil':
         return nilType
-      case 'true':
-      case 'false':
-        return booleanType
     }
-    const named = this.typedefs.get(name)
+    const named = this.typedefs.get(n)
     if (named) {
       return named
     }
-    accept('warning', `未知类型 '${name}'`, {
+    accept('warning', `未知类型 '${n}'`, {
       node: part,
       property: 'name',
     })
@@ -499,20 +642,12 @@ export class ObjectOrientedCTypeChecker {
     ) {
       return booleanType
     }
-    if (
-      left.kind === 'name' &&
-      left.name === 'number' &&
-      right.kind === 'name' &&
-      right.name === 'number'
-    ) {
+    const lb = baseNameOf(left)
+    const rb = baseNameOf(right)
+    if (lb === 'number' && rb === 'number') {
       return numberType
     }
-    if (
-      infix === '+' &&
-      left.kind === 'name' &&
-      right.kind === 'name' &&
-      (left.name === 'string' || right.name === 'string')
-    ) {
+    if (infix === '+' && (lb === 'string' || rb === 'string')) {
       return stringType
     }
     return anyType
@@ -547,7 +682,20 @@ export class ObjectOrientedCTypeChecker {
       case 'any':
         return anyType
       case 'union': {
-        const results = receiver.types.map((sub) =>
+        const { withMethod, without } = this.splitByMethod(receiver.types, name)
+        if (withMethod.length === 0) {
+          return anyType
+        }
+        if (without.length > 0) {
+          // 可区分联合：只有部分成员有该方法，需要先判别收窄
+          accept(
+            'warning',
+            `消息 '${name}' 只定义在部分联合成员上（${withMethod.map(describeType).join(' | ')}），${without.map(describeType).join(' | ')} 上没有，需要先判别（如 #guard (x kind) == '...'）`,
+            { node },
+          )
+          return anyType
+        }
+        const results = withMethod.map((sub) =>
           this.dispatch(sub, name, args, accept, node),
         )
         if (results.some((r) => r.kind === 'any')) {
@@ -569,6 +717,15 @@ export class ObjectOrientedCTypeChecker {
           `类型 ${receiver.name}`,
         )
       }
+      case 'literal':
+        // 字面量按基础类型派发：'circle' length 等价于 string length
+        return this.dispatch(
+          { kind: 'name', name: literalBaseName(receiver.value) },
+          name,
+          args,
+          accept,
+          node,
+        )
       case 'object': {
         const sigs = receiver.methods.get(name)
         if (!sigs) {
@@ -585,6 +742,40 @@ export class ObjectOrientedCTypeChecker {
       }
       default:
         return anyType
+    }
+  }
+
+  /** 联合成员按是否定义消息 name 分组 */
+  private splitByMethod(
+    members: TypeInfo[],
+    name: string,
+  ): { withMethod: TypeInfo[]; without: TypeInfo[] } {
+    const withMethod: TypeInfo[] = []
+    const without: TypeInfo[] = []
+    for (const m of members) {
+      if (this.hasMethod(m, name)) {
+        withMethod.push(m)
+      } else {
+        without.push(m)
+      }
+    }
+    return { withMethod, without }
+  }
+
+  /** 类型是否定义了消息 name（any/function 视为都有，鸭辨） */
+  private hasMethod(t: TypeInfo, name: string): boolean {
+    switch (t.kind) {
+      case 'any':
+      case 'function':
+        return true
+      case 'name':
+        return getBuiltinMethods(t.name).has(name)
+      case 'literal':
+        return getBuiltinMethods(literalBaseName(t.value)).has(name)
+      case 'object':
+        return (t.methods.get(name)?.length ?? 0) > 0
+      case 'union':
+        return t.types.every((sub) => this.hasMethod(sub, name))
     }
   }
 
@@ -662,20 +853,28 @@ export class ObjectOrientedCTypeChecker {
       return t
     }
     if (isLambdaDef(e)) {
-      // lambda 等价于 { apply(...) { ... } }，类型上记为函数。
-      // 函数体内仍按方法体检查：参数入作用域、赋值与表达式推断。
+      // 同像性：lambda 就是 { apply(...) { ... } }，类型即只有一个 apply 方法的对象。
+      // 参数注解收集为 MethodSig，函数体最后一条表达式推断为返回类型。
       const bodyEnv = env.child()
+      const params: (TypeInfo | undefined)[] = []
       for (const p of e.params) {
-        this.bindParam(p, bodyEnv, accept)
+        params.push(this.bindParam(p, bodyEnv, accept))
       }
+      let returns: TypeInfo = nilType
       for (const stmt of e.expressions) {
         if (isAssignment(stmt)) {
           this.checkAssignment(stmt, bodyEnv, accept)
         } else {
-          this.inferExpression(stmt, bodyEnv, accept)
+          returns = this.inferExpression(stmt, bodyEnv, accept)
         }
       }
-      return { kind: 'function' }
+      const t: ObjectTypeInfo = {
+        kind: 'object',
+        methods: new Map([
+          ['apply', [{ params, rest: undefined, returns }]],
+        ]),
+      }
+      return t
     }
     return this.inferExpression(e, env, accept)
   }
@@ -686,19 +885,22 @@ export class ObjectOrientedCTypeChecker {
     accept: ValidationAcceptor,
   ): TypeInfo {
     if (isBool(p)) {
-      return booleanType
+      return { kind: 'literal', value: p.value === 'true' }
     }
     if (isNil(p)) {
       return nilType
     }
     if (isNum(p)) {
-      return numberType
+      return { kind: 'literal', value: p.value }
     }
     if (isRef(p)) {
       return env.lookup(p.value) ?? anyType
     }
     if (isStr(p) || isStID(p)) {
-      return stringType
+      return {
+        kind: 'literal',
+        value: isStr(p) ? p.value : p.value.slice(1),
+      }
     }
     if (isComplexPrimary(p)) {
       return this.inferComplexPrimary(p, env, accept)
@@ -748,5 +950,17 @@ export class ObjectOrientedCTypeChecker {
       return v.value.slice(1)
     }
     return v.value
+  }
+}
+
+/** name / literal 都归到基础类型名，用于运算符推断 */
+function baseNameOf(t: TypeInfo): string | undefined {
+  switch (t.kind) {
+    case 'name':
+      return t.name
+    case 'literal':
+      return literalBaseName(t.value)
+    default:
+      return undefined
   }
 }

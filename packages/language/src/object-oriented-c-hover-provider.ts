@@ -37,8 +37,18 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
       return `绑定 ${node.name}`
     }
     if (isLambdaDef(node)) {
-      const params = node.params?.map((p) => p.name).join(', ') || ''
-      return `λ(${params}) => 函数`
+      // 同像：lambda 的类型就是 { apply(...) }，直接展示签名
+      const t = this.checker.inferType(node)
+      if (t.kind === 'object') {
+        const sig = t.methods.get('apply')?.[0]
+        if (sig) {
+          const params = (sig.params ?? [])
+            .map((p) => (p ? describeType(p) : 'any'))
+            .join(', ')
+          return `λ(${params}) => ${describeType(sig.returns)}`
+        }
+      }
+      return 'λ'
     }
     if (isAssignment(node)) {
       const t = this.checker.inferType(node.expression)

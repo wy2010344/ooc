@@ -6,6 +6,7 @@ import type { Type, TypeName } from './generated/ast.js'
 export type TypeInfo =
   | { kind: 'any' }
   | { kind: 'name'; name: string }
+  | { kind: 'literal'; value: string | number | boolean }
   | { kind: 'union'; types: TypeInfo[] }
   | ObjectTypeInfo
   | { kind: 'function' }
@@ -128,6 +129,19 @@ export function isSubtype(a: TypeInfo, b: TypeInfo): boolean {
   if (b.kind === 'union') {
     return b.types.some((t) => isSubtype(a, t))
   }
+  // 字面量：'circle' 是 string 的子类型；同值字面量相等
+  if (a.kind === 'literal') {
+    if (b.kind === 'literal') {
+      return a.value === b.value
+    }
+    if (b.kind === 'name') {
+      return b.name === literalBaseName(a.value)
+    }
+    return false
+  }
+  if (b.kind === 'literal') {
+    return false
+  }
   if (a.kind === 'name' && b.kind === 'name') {
     if (a.name === b.name) {
       return true
@@ -186,6 +200,8 @@ export function describeType(t: TypeInfo): string {
       return 'any'
     case 'name':
       return t.name
+    case 'literal':
+      return typeof t.value === 'string' ? `'${t.value}'` : String(t.value)
     case 'union':
       return t.types.map(describeType).join(' | ')
     case 'object':
@@ -199,7 +215,18 @@ export function typeNameToString(typeName: TypeName): string {
   if (typeof typeName.name === 'string') {
     return typeName.name
   }
-  return typeName.name.value
+  return String(typeName.name.value)
+}
+
+/** 字面量值对应的基础类型名 */
+export function literalBaseName(
+  value: string | number | boolean,
+): string {
+  return typeof value === 'string'
+    ? 'string'
+    : typeof value === 'number'
+      ? 'number'
+      : 'boolean'
 }
 
 export function typeToString(type: Type): string {

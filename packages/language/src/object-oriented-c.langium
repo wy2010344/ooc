@@ -101,8 +101,9 @@ MethodCallName:
 Type:
     parts+=TypeName ('|' parts+=TypeName)*;
 
+//类型名：具名类型 / 内置 / 字面量（用于可区分联合的判别，如 kind(): 'circle'）
 TypeName:
-    name=(ID | Nil | Bool);
+    name=(ID | Nil | Bool | Str | Num);
 
 ObjectDef:
     '{' 

@@ -301,4 +301,141 @@ describe('真实示例无类型告警', () => {
     `)
     expect(messages(diags).join('\n')).toContain("未知类型 'Foo'")
   })
+
+  test('lambda 与 apply 对象双向兼容（同像）', async () => {
+    const diags = await diagnostics(`
+        f = [x -> x + 1];
+        f = { apply(x) { x + 1 } };
+        f apply 1
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('apply 对象重新赋值为 lambda 无警告（同像）', async () => {
+    const diags = await diagnostics(`
+        f = { apply(x) { x + 1 } };
+        f = [x -> x + 1];
+        f apply 1
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('lambda 的 apply 调用参数检查生效', async () => {
+    const diags = await diagnostics(`
+        f = [x: number -> x + 1];
+        f apply 'str'
+    `)
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
+  })
+
+  test('lambda 的 apply 调用参数正确无警告', async () => {
+    const diags = await diagnostics(`
+        f = [x: number -> x + 1];
+        f apply 42
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('lambda 传给需要 apply 方法的对象参数无告警', async () => {
+    const diags = await diagnostics(`
+        obj = { call(f) => f apply 42 };
+        obj call [x -> x * 2]
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+})
+
+describe('字面量类型与可区分联合', () => {
+  test('字面量类型解析', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        c: 'circle' | 'square' = 'circle';
+        n: 1 | 2 | 3 = 2;
+        b: true | false = true
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('字面量是基础类型的子类型', async () => {
+    const diags = await diagnostics(`
+        s: string = 'circle';
+        n: number = 42;
+        b: boolean = true
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('字面量不匹配告警', async () => {
+    const diags = await diagnostics(`
+        s: 'circle' = 'square'
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('判别方法返回字面量：对象字面量符合 typedef', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        c: Circle = { kind() { 'circle' }, radius() { 3 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('判别方法返回非对应字面量告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        c: Circle = { kind() { 'square' }, radius() { 3 } }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('guard 判别收窄：访问成员专属方法无告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        area = {
+            calc(s: Circle | Square) {
+                #guard (s kind) == 'circle';
+                (s radius) * (s radius)
+            },
+            calc(s: Circle | Square) {
+                #guard (s kind) == 'square';
+                (s side) * (s side)
+            }
+        };
+        area calc { kind() { 'circle' }, radius() { 3 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('guard != 判别收窄', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        isSquare = {
+            calc(s: Circle | Square) {
+                #guard (s kind) != 'circle';
+                s side
+            }
+        }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('未判别直接访问成员专属方法告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        bad = { calc(s: Circle | Square) { s radius } }
+    `)
+    expect(messages(diags).join('\n')).toContain("消息 'radius' 只定义在部分联合成员上")
+  })
+
+  test('联合的公共方法调用无告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        getKind = { calc(s: Circle | Square) { s kind } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
 })
