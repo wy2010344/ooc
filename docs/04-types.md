@@ -51,6 +51,53 @@ area calc { kind() { 'circle' }, radius() { 3 } }   // 28.26
 - 联合的公共方法（如 `kind`）可直接调用，无需判别
 - 字面量是基础类型的子类型：`'circle'` 可赋给 `string`，`42` 可赋给 `number`
 
+## 泛型
+
+`#type` 别名可以声明类型参数，实例化时替换：
+
+```ooc
+Box #type<T> { get(): T, set(x: T) };
+
+b: Box<number> = { get() { 42 }, set(x) { x } };
+b get    // 42
+```
+
+- 声明用 `Name<T>`，多参数用 `Name<A, B>`；body 里的 `T` 是占位，实例化时替换
+- 实例化支持嵌套与联合：`Pair<Box<number>, string>`、`Shape<Circle | Square>`
+- 缺少类型参数、参数个数不匹配、给非泛型类型传参数都会警告，并按 `any` 处理（不影响运行）
+- 实例化后的类型照常做子类型检查：`Box<number>` 会检查 `get` 返回 `number`，`set` 参数为 `number`
+
+## 上下文类型回填
+
+有注解的赋值会把声明类型带回对象字面量方法体：**无注解参数按声明签名自动回填**，方法体内部不用重复标注。
+
+```ooc
+Box #type<T> { get(): T, set(x: T) };
+
+// set(x) 的参数 x 自动回填为 number，方法体内可直接运算
+b: Box<number> = { get() { 42 }, set(x) { x + 1 } }
+```
+
+- 显式参数注解优先于回填；回填后参数照常参与重新赋值、方法调用等类型检查
+- 无注解的对象（如 `b = { set(x) {...} }`）没有上下文，参数保持 `any` 不检查
+
+## 回调实参回填
+
+方法调用的实参里如果直接写匿名对象或 lambda，且被调用方法的对应参数是对象类型（回调），实参内的参数也会按回调签名自动回填：
+
+```ooc
+Callback #type { apply(x: number) };
+Processor #type { run(cb: Callback) };
+
+p: Processor = { run(cb) { cb apply 1 } };
+p run { apply(x) { x * 2 } }   // 匿名回调对象：x 自动是 number
+p run [x -> x + 1]             // lambda 回调：x 自动是 number
+```
+
+- 支持泛型实例化的回调签名（`forEach(cb: T)` 实例化为 `Callback` 时同样回填）
+- 回调方法体内参数照常参与类型检查（如 `x = 'str'` 对 `number` 警告）
+- 没有回调上下文时（如参数是 `any`），实参内参数保持 `any` 不检查
+
 ## 检查对象是否符合类型
 
 ```ooc

@@ -12,9 +12,12 @@ ImportStatement:
     name=ID '=' '#import' path=STRING
 ;
 
-//类型别名（#type 指令）：成员只声明签名，无实现
+//类型别名（#type 指令）：成员只声明签名，无实现；#type 后用 <> 声明泛型类型参数
 TypeDef:
-    name=ID '#type' body=TypeMemberList;
+    name=ID '#type' ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')? body=TypeMemberList;
+
+TypeParam:
+    name=ID;
 
 TypeMemberList:
     '{' (members+=TypeMember (',' members+=TypeMember)*)? '}';
@@ -102,8 +105,9 @@ Type:
     parts+=TypeName ('|' parts+=TypeName)*;
 
 //类型名：具名类型 / 内置 / 字面量（用于可区分联合的判别，如 kind(): 'circle'）
+//泛型实例化：Box<number>、Pair<A, B>
 TypeName:
-    name=(ID | Nil | Bool | Str | Num);
+    name=(ID | Nil | Bool | Str | Num) ('<' typeArgs+=Type (',' typeArgs+=Type)* '>')?;
 
 ObjectDef:
     '{' 

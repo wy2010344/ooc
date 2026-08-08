@@ -439,3 +439,193 @@ describe('字面量类型与可区分联合', () => {
     expect(messages(diags)).toEqual([])
   })
 })
+
+describe('泛型', () => {
+  test('泛型 typedef 声明解析', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, set(x: T) }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('泛型实例化正确无警告', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, set(x: T) };
+        b: Box<number> = { get() { 42 }, set(x) { x } };
+        b get
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('泛型实例化类型不符告警', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T };
+        b: Box<number> = { get() { 'x' } }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('泛型方法调用参数检查', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, set(x: T) };
+        b: Box<number> = { get() { 42 }, set(x) { x } };
+        b set 'str'
+    `)
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
+  })
+
+  test('泛型缺少类型参数告警', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T };
+        b: Box = { get() { 1 } }
+    `)
+    expect(messages(diags).join('\n')).toContain('缺少类型参数')
+  })
+
+  test('多参数泛型', async () => {
+    const diags = await diagnostics(`
+        Pair #type<A, B> { first(): A, second(): B };
+        p: Pair<number, string> = { first() { 1 }, second() { 'x' } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('泛型参数个数不匹配告警', async () => {
+    const diags = await diagnostics(`
+        Pair #type<A, B> { first(): A, second(): B };
+        p: Pair<number> = { first() { 1 }, second() { 2 } }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型参数')
+  })
+
+  test('非泛型类型带参数告警', async () => {
+    const diags = await diagnostics(`
+        Point #type { x: number };
+        p: Point<number> = { x() { 1 } }
+    `)
+    expect(messages(diags).join('\n')).toContain('不是泛型')
+  })
+
+  test('嵌套泛型', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T };
+        Pair #type<A, B> { first(): A, second(): B };
+        inner = { get() { 1 } };
+        p: Pair<Box<number>, string> = {
+            first() { inner },
+            second() { 'x' }
+        }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('泛型联合实例化', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        box: 'circle' | 'square' = 'circle'
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+})
+
+describe('上下文类型回填', () => {
+  test('泛型注解回填方法参数：方法体内直接使用无警告', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, set(x: T) };
+        b: Box<number> = { get() { 42 }, set(x) { x + 1 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('回填后参数按声明类型检查', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, set(x: T) };
+        b: Box<number> = { get() { 42 }, set(x) { x = 'str' } }
+    `)
+    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+  })
+
+  test('无注解对象不回填：参数保持 any', async () => {
+    const diags = await diagnostics(`
+        b = { set(x) { x = 'str' } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('非泛型注解也回填参数', async () => {
+    const diags = await diagnostics(`
+        Mapper #type { map(x: number): string };
+        m: Mapper = { map(x) { x = 'str' } }
+    `)
+    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+  })
+
+  test('显式参数注解优先于回填', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, set(x: T) };
+        b: Box<number> = { get() { 42 }, set(x: string) { x } }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+})
+
+describe('回调实参回填', () => {
+  test('匿名对象回调参数回填：方法体内直接使用无警告', async () => {
+    const diags = await diagnostics(`
+        Callback #type { apply(x: number) };
+        Processor #type { run(cb: Callback) };
+        p: Processor = { run(cb) { cb apply 1 } };
+        p run { apply(x) { x * 2 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('匿名对象回调参数回填：参数按声明类型检查', async () => {
+    const diags = await diagnostics(`
+        Callback #type { apply(x: number) };
+        Processor #type { run(cb: Callback) };
+        p: Processor = { run(cb) { cb apply 1 } };
+        p run { apply(x) { x = 'str' } }
+    `)
+    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+  })
+
+  test('lambda 回调参数回填', async () => {
+    const diags = await diagnostics(`
+        Callback #type { apply(x: number) };
+        Processor #type { run(cb: Callback) };
+        p: Processor = { run(cb) { cb apply 1 } };
+        p run [x -> x + 1]
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('lambda 回调参数回填：参数按声明类型检查', async () => {
+    const diags = await diagnostics(`
+        Callback #type { apply(x: number) };
+        Processor #type { run(cb: Callback) };
+        p: Processor = { run(cb) { cb apply 1 } };
+        p run [x -> x = 'str']
+    `)
+    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+  })
+
+  test('泛型实例化的回调参数回填', async () => {
+    const diags = await diagnostics(`
+        Callback #type { apply(x: number) };
+        Box #type<T> { forEach(cb: T) };
+        b: Box<Callback> = { forEach(cb) { cb apply 1 } };
+        b forEach { apply(x) { x * 2 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('无回调上下文时不回填', async () => {
+    const diags = await diagnostics(`
+        n = { run(cb) { 1 } };
+        n run { apply(x) { x = 'str' } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+})
