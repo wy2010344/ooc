@@ -14,6 +14,10 @@ export type TypeInfo =
 export interface ObjectTypeInfo {
   kind: 'object'
   name?: string
+  /** 继承的父类型名：对象字面量 '...' 单继承（运行时是方法路由的策略链） */
+  parent?: string
+  /** 继承的父类型（泛型占位等尚未实例化的形式保留在这里，实例化时展开/合并） */
+  extendsType?: TypeInfo
   methods: Map<string, MethodSig[]>
 }
 

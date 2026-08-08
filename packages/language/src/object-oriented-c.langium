@@ -20,7 +20,7 @@ TypeParam:
     name=ID;
 
 TypeMemberList:
-    '{' (members+=TypeMember (',' members+=TypeMember)*)? '}';
+    '{' ('...' extends=Type ',')? (members+=TypeMember (',' members+=TypeMember)*)? '}';
 
 TypeMember:
     name=MethodDefName 

@@ -1,0 +1,51 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 760px;
+  padding: 2rem 1.5rem;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+.sub {
+  color: #888;
+  margin-top: 0;
+}
+
+section {
+  margin-top: 2rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+}
+
+pre {
+  background: #111;
+  color: #eee;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+
+button {
+  font-size: 1rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid #555;
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}

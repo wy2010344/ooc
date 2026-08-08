@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OOC 浏览器示例</title>
+  </head>
+  <body>
+    <main>
+      <h1>OOC 浏览器示例</h1>
+      <p class="sub">
+        用 <code>object-oriented-c-language</code> 包在浏览器里解析并解释执行
+        <code>.ooc</code> 源码（类型注解纯装饰，不影响运行）
+      </p>
+
+      <section>
+        <h2>源码 demo.ooc</h2>
+        <pre id="source"></pre>
+      </section>
+
+      <section>
+        <h2>运行结果</h2>
+        <button id="run" type="button">解释执行</button>
+        <pre id="output">点击按钮运行</pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

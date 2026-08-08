@@ -1,0 +1,20 @@
+{
+    "name": "object-oriented-c-example",
+    "description": "A web example that runs OOC source through the language package",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview"
+    },
+    "dependencies": {
+        "object-oriented-c-language": "0.0.1",
+        "langium": "~4.2.1"
+    },
+    "devDependencies": {
+        "typescript": "~6.0.2",
+        "vite": "^8.2.0"
+    }
+}

@@ -15,6 +15,8 @@ import {
   ObjectOrientedCValidator,
   registerValidationChecks,
 } from './object-oriented-c-validator.js'
+import type { OocConfig } from './diagnostics-config.js'
+import { ConfigAwareDocumentValidator } from './diagnostics-config.js'
 import { ObjectOrientedCSemanticTokenProvider } from './object-oriented-c-semantic-token-provider.js'
 import { ObjectOrientedCHoverProvider } from './object-oriented-c-hover-provider.js'
 
@@ -44,7 +46,10 @@ export const ObjectOrientedCModule: Module<
   PartialLangiumServices & ObjectOrientedCAddedServices
 > = {
   validation: {
-    ObjectOrientedCValidator: () => new ObjectOrientedCValidator(),
+    ObjectOrientedCValidator: (services) =>
+      new ObjectOrientedCValidator(services),
+    DocumentValidator: (services) =>
+      new ConfigAwareDocumentValidator(services),
   },
   lsp: {
     HoverProvider: (service) => new ObjectOrientedCHoverProvider(service),
@@ -70,6 +75,7 @@ export const ObjectOrientedCModule: Module<
  */
 export function createObjectOrientedCServices(
   context: DefaultSharedModuleContext,
+  config?: OocConfig,
 ): {
   shared: LangiumSharedServices
   ObjectOrientedC: ObjectOrientedCServices
@@ -84,7 +90,7 @@ export function createObjectOrientedCServices(
     ObjectOrientedCModule,
   )
   shared.ServiceRegistry.register(ObjectOrientedC)
-  registerValidationChecks(ObjectOrientedC)
+  registerValidationChecks(ObjectOrientedC, config)
   if (!context.connection) {
     // We don't run inside a language server
     // Therefore, initialize the configuration provider instantly

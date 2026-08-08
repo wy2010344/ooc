@@ -1,5 +1,6 @@
-import type { AstNode, ValidationAcceptor } from 'langium'
-import { AstUtils } from 'langium'
+import type { AstNode, LangiumDocuments, ValidationAcceptor } from 'langium'
+import { AstUtils, URI } from 'langium'
+import { diagnosticData } from './diagnostics-config.js'
 import {
   isAssignment,
   isBool,
@@ -26,6 +27,7 @@ import {
   type Assignment,
   type ComplexPrimary,
   type Expression,
+  type ImportStatement,
   type Message,
   type Method,
   type MethodAll,
@@ -56,8 +58,62 @@ import {
   type ObjectTypeInfo,
   type TypeInfo,
 } from './type-system.js'
+import { resolveModuleName } from './module-path.js'
 
 const objectDesc = '对象'
+
+/**
+ * 被导入模块的静态信息：result 是模块最后一条表达式的结果类型
+ * （与运行时 interpret 返回 last 一致）；typedefs 是该模块及其导入链里
+ * 声明的全部类型别名，合并进导入方后跨文档可见。
+ */
+export interface ImportedModuleType {
+  result: TypeInfo
+  typedefs: Map<string, TypeInfo>
+  typedefParams: Map<string, string[]>
+}
+
+/**
+ * 解析 #import 路径到模块静态信息：从已加载文档取被导入模块。
+ * 返回 undefined 表示文档不可见（尚未加载/构建），调用方回退到 anyType。
+ */
+export type ImportResolver = (
+  importPath: string,
+  fromPath: string,
+) => ImportedModuleType | undefined
+
+/**
+ * 构造 import 类型解析器。文档必须已加载（LSP 由 DocumentBuilder 全量构建；
+ * 解释器路径由 execDocument 预加载导入文档树），这里只做同步查找。
+ * visiting 用于环形导入去重：A→B→A 时回退 anyType，避免无限递归。
+ */
+export function createImportResolver(
+  documents: LangiumDocuments,
+  extensions: readonly string[],
+): ImportResolver {
+  const visiting = new Set<string>()
+  const resolve: ImportResolver = (importPath, fromPath) => {
+    const fileName = resolveModuleName(importPath, fromPath, extensions)
+    if (visiting.has(fileName)) {
+      return undefined
+    }
+    const doc = documents.getDocument(URI.file(fileName))
+    if (!doc) {
+      return undefined
+    }
+    const model = doc.parseResult.value
+    if (!isModel(model)) {
+      return undefined
+    }
+    visiting.add(fileName)
+    try {
+      return new ObjectOrientedCTypeChecker(resolve).inferModuleResult(model)
+    } finally {
+      visiting.delete(fileName)
+    }
+  }
+  return resolve
+}
 
 /**
  * 静态类型检查器：类型只是装饰，全部以 warning 形式报告，不阻断执行。
@@ -66,8 +122,11 @@ export class ObjectOrientedCTypeChecker {
   private readonly typedefs = new Map<string, TypeInfo>()
   private readonly typedefParams = new Map<string, string[]>()
 
+  constructor(private readonly importResolver?: ImportResolver) {}
+
   checkModel(model: Model, accept: ValidationAcceptor): void {
     this.typedefs.clear()
+    this.typedefParams.clear()
     const env = new TypeEnv()
     for (const stmt of model.expressions) {
       this.checkTopStatement(stmt, env, accept)
@@ -83,6 +142,7 @@ export class ObjectOrientedCTypeChecker {
     const model = AstUtils.getContainerOfType(node, isModel)
     const accept: ValidationAcceptor = () => undefined
     this.typedefs.clear()
+    this.typedefParams.clear()
     if (model) {
       for (const stmt of model.expressions) {
         this.checkTopStatement(stmt, env, accept)
@@ -91,10 +151,70 @@ export class ObjectOrientedCTypeChecker {
     if (isPiplingExpression(node) || isMessageOrChain(node)) {
       return this.inferExpression(node, env, accept)
     }
+    if (isImportStatement(node)) {
+      return env.lookup(node.name) ?? anyType
+    }
     if (isPrimary(node)) {
       return this.inferPrimary(node, env, accept)
     }
     return anyType
+  }
+
+  /**
+   * 推断被导入模块的静态信息：#import 模块的绑定类型 = 模块最后一条表达式的结果
+   * （与运行时 interpret 返回 last 表达式一致），并收集模块内全部 typedef 供导入方跨文档使用。
+   */
+  inferModuleResult(model: Model): ImportedModuleType {
+    this.typedefs.clear()
+    this.typedefParams.clear()
+    const env = new TypeEnv()
+    const accept: ValidationAcceptor = () => undefined
+    let last: TypeInfo = nilType
+    for (const stmt of model.expressions) {
+      if (isImportStatement(stmt)) {
+        this.applyImport(stmt, env)
+        continue
+      }
+      if (isTypeDef(stmt)) {
+        this.checkTypeDef(stmt, env, accept)
+        continue
+      }
+      if (isAssignment(stmt)) {
+        this.checkAssignment(stmt, env, accept)
+        continue
+      }
+      last = this.inferExpression(stmt, env, accept)
+    }
+    return {
+      result: last,
+      typedefs: new Map(this.typedefs),
+      typedefParams: new Map(this.typedefParams),
+    }
+  }
+
+  /**
+   * 处理 #import：把被导入模块的 typedef 合并进当前文档（跨模块 typedef 引用），
+   * 绑定名类型 = 模块结果类型；文档不可见时回退 anyType。
+   */
+  private applyImport(stmt: ImportStatement, env: TypeEnv): void {
+    let imported: ImportedModuleType | undefined
+    if (this.importResolver) {
+      const fromPath = AstUtils.getDocument(stmt)?.uri.path
+      if (fromPath) {
+        imported = this.importResolver(stmt.path, fromPath)
+      }
+    }
+    if (!imported) {
+      env.define(stmt.name, anyType)
+      return
+    }
+    for (const [name, t] of imported.typedefs) {
+      if (!this.typedefs.has(name)) {
+        this.typedefs.set(name, t)
+        this.typedefParams.set(name, imported.typedefParams.get(name) ?? [])
+      }
+    }
+    env.define(stmt.name, imported.result)
   }
 
   private checkTopStatement(
@@ -103,7 +223,7 @@ export class ObjectOrientedCTypeChecker {
     accept: ValidationAcceptor,
   ): void {
     if (isImportStatement(stmt)) {
-      env.define(stmt.name, anyType)
+      this.applyImport(stmt, env)
       return
     }
     if (isTypeDef(stmt)) {
@@ -126,6 +246,7 @@ export class ObjectOrientedCTypeChecker {
       accept('warning', `类型 '${stmt.name}' 已经定义过了`, {
         node: stmt,
         property: 'name',
+        data: diagnosticData('duplicateType'),
       })
     }
     // 泛型类型参数名：body 里出现的这些名字是占位，实例化时替换
@@ -150,6 +271,69 @@ export class ObjectOrientedCTypeChecker {
       placeholder.methods.set(name, sigs)
     }
     placeholder.name = stmt.name
+    // 继承：'...' 父类型（单继承，父类型联合时 A 本身变成联合）
+    const parent = stmt.body.extends
+      ? this.resolveAnnotation(stmt.body.extends, accept, typeParams)
+      : undefined
+    if (!parent) {
+      this.registerTypeDef(stmt.name, placeholder, typeParams, env)
+      return
+    }
+    if (parent.kind === 'object') {
+      // 单继承：合并父类型形状，自己的方法覆盖同名
+      this.mergeParentMethods(placeholder, parent)
+      this.registerTypeDef(stmt.name, placeholder, typeParams, env)
+      return
+    }
+    if (parent.kind === 'union') {
+      // A 变成联合：每个分支 = 父联合成员 + 自己的方法
+      const ownMethods = new Map(placeholder.methods)
+      const branches = parent.types.map((m) => {
+        if (m.kind !== 'object') {
+          return m
+        }
+        const branch: ObjectTypeInfo = {
+          kind: 'object',
+          name: stmt.name,
+          methods: new Map(m.methods),
+        }
+        for (const [k, sigs] of ownMethods) {
+          branch.methods.set(k, sigs)
+        }
+        branch.parent = m.name ?? describeType(m)
+        return branch
+      })
+      this.registerTypeDef(stmt.name, unionOf(branches), typeParams, env)
+      return
+    }
+    // 其余（类型参数占位、内置名等）：保留 extendsType，实例化时处理
+    placeholder.extendsType = parent
+    placeholder.parent = describeType(parent)
+    this.registerTypeDef(stmt.name, placeholder, typeParams, env)
+  }
+
+  private mergeParentMethods(
+    target: ObjectTypeInfo,
+    parent: ObjectTypeInfo,
+  ): void {
+    for (const [k, v] of parent.methods) {
+      if (!target.methods.has(k)) {
+        target.methods.set(k, v)
+      }
+    }
+    target.parent = parent.name ?? describeType(parent)
+    target.extendsType = parent
+  }
+
+  private registerTypeDef(
+    name: string,
+    type: TypeInfo,
+    params: string[],
+    env: TypeEnv,
+  ): void {
+    this.typedefs.set(name, type)
+    this.typedefParams.set(name, params)
+    env.define(name, type)
   }
 
   private checkAssignment(
@@ -165,7 +349,7 @@ export class ObjectOrientedCTypeChecker {
         ? this.resolveAnnotation(stmt.typeAnnotation, accept)
         : undefined
       env.define(stmt.name, t)
-      this.collectObject(objDef, env, accept, t.methods)
+      this.collectObject(objDef, env, accept, t)
       // 注解类型作为上下文传入对象字面量方法体：无注解参数按声明签名回填
       this.checkObjectBody(objDef, env, t, accept, expected)
       const declared = this.checkAnnotation(
@@ -185,7 +369,7 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `重新赋值类型不匹配：'${stmt.name}' 期望 ${describeType(prev)}，却得到了 ${describeType(declared)}`,
-          { node: stmt, property: 'name' },
+          { node: stmt, property: 'name', data: diagnosticData('reassignmentMismatch') },
         )
       }
     }
@@ -206,7 +390,7 @@ export class ObjectOrientedCTypeChecker {
       accept(
         'warning',
         `类型不匹配：期望 ${describeType(exp)}，却得到了 ${describeType(inferred)}`,
-        { node: annotation, property: 'parts' },
+        { node: annotation, property: 'parts', data: diagnosticData('typeMismatch') },
       )
     }
     // 注解类型获胜：后续按声明类型检查
@@ -217,17 +401,18 @@ export class ObjectOrientedCTypeChecker {
     objDef: ObjectDef,
     env: TypeEnv,
     accept: ValidationAcceptor,
-    into: Map<string, MethodSig[]> = new Map(),
+    objType: ObjectTypeInfo = { kind: 'object', methods: new Map() },
   ): ObjectTypeInfo {
     if (objDef.extends) {
       const parent = env.lookup(objDef.extends.value) ?? anyType
       if (parent.kind === 'object') {
+        // 单继承：父类型的方法合并进类型形状，运行时是方法路由的策略链
+        objType.parent = objDef.extends.value
         for (const [k, v] of parent.methods) {
-          into.set(k, v)
+          objType.methods.set(k, v)
         }
       }
     }
-    const objType: ObjectTypeInfo = { kind: 'object', methods: into }
     for (const method of objDef.methods) {
       this.collectMethod(method, objType, accept)
     }
@@ -332,7 +517,7 @@ export class ObjectOrientedCTypeChecker {
           accept(
             'warning',
             `方法 '${this.getMethodName(a.method.name)}' 的重载返回类型不一致：${describeType(a.returns)} 与 ${describeType(b.returns)}`,
-            { node: b.method, property: 'name' },
+            { node: b.method, property: 'name', data: diagnosticData('overloadReturnMismatch') },
           )
         }
       }
@@ -376,7 +561,7 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `#guard 条件应该是布尔值，却得到了 ${describeType(guardType)}`,
-          { node: method.guardExpression },
+          { node: method.guardExpression, data: diagnosticData('guardNotBoolean') },
         )
       }
     }
@@ -606,7 +791,7 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `类型 '${n}' 不是泛型，不需要类型参数`,
-          { node: part },
+          { node: part, data: diagnosticData('notGeneric') },
         )
         return anyType
       }
@@ -617,7 +802,7 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `类型 '${n}' 期望 ${params.length} 个类型参数，却给了 ${args.length} 个`,
-          { node: part },
+          { node: part, data: diagnosticData('typeArgCount') },
         )
         return anyType
       }
@@ -629,7 +814,7 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `泛型类型 '${n}' 缺少类型参数，按 any 处理`,
-          { node: part, property: 'name' },
+          { node: part, property: 'name', data: diagnosticData('missingTypeArg') },
         )
         return anyType
       }
@@ -638,6 +823,7 @@ export class ObjectOrientedCTypeChecker {
     accept('warning', `未知类型 '${n}'`, {
       node: part,
       property: 'name',
+      data: diagnosticData('unknownType'),
     })
     return anyType
   }
@@ -821,7 +1007,7 @@ export class ObjectOrientedCTypeChecker {
           accept(
             'warning',
             `消息 '${name}' 只定义在部分联合成员上（${withMethod.map(describeType).join(' | ')}），${without.map(describeType).join(' | ')} 上没有，需要先判别（如 #guard (x kind) == '...'）`,
-            { node },
+            { node, data: diagnosticData('partialUnionMessage') },
           )
           return anyType
         }
@@ -931,7 +1117,7 @@ export class ObjectOrientedCTypeChecker {
     accept(
       'warning',
       `调用参数不匹配：${receiverDesc} 期望 ${expected}，实际参数类型为 ${args.map(describeType).join(', ')}`,
-      { node },
+      { node, data: diagnosticData('callArgsMismatch') },
     )
     return sigs[0]?.returns ?? anyType
   }
@@ -978,8 +1164,8 @@ export class ObjectOrientedCTypeChecker {
     context?: TypeInfo,
   ): TypeInfo {
     if (isObjectDef(e)) {
-      const t: TypeInfo = { kind: 'object', methods: new Map() }
-      this.collectObject(e, env, accept, t.methods)
+      const t: ObjectTypeInfo = { kind: 'object', methods: new Map() }
+      this.collectObject(e, env, accept, t)
       this.checkObjectBody(e, env, t, accept, context)
       return t
     }
@@ -1131,6 +1317,50 @@ function instantiate(
             returns: instantiate(s.returns, params, args),
           })),
         )
+      }
+      if (t.extendsType) {
+        const parent = instantiate(t.extendsType, params, args)
+        if (parent.kind === 'object') {
+          // 单继承：合并父类型形状，自己的方法覆盖同名
+          for (const [k, v] of parent.methods) {
+            if (!methods.has(k)) {
+              methods.set(k, v)
+            }
+          }
+          return {
+            kind: 'object',
+            name: t.name,
+            methods,
+            parent: parent.name ?? describeType(parent),
+            extendsType: parent,
+          }
+        }
+        if (parent.kind === 'union') {
+          // 父类型实例化为联合：A 本身变成联合（每个分支 = 父成员 + 自己的方法）
+          const branches = parent.types.map((m) => {
+            if (m.kind !== 'object') {
+              return m
+            }
+            const branch: ObjectTypeInfo = {
+              kind: 'object',
+              name: t.name,
+              methods: new Map(m.methods),
+            }
+            for (const [k, sigs] of methods) {
+              branch.methods.set(k, sigs)
+            }
+            branch.parent = m.name ?? describeType(m)
+            return branch
+          })
+          return unionOf(branches)
+        }
+        return {
+          kind: 'object',
+          name: t.name,
+          methods,
+          parent: describeType(parent),
+          extendsType: parent,
+        }
       }
       return { kind: 'object', name: t.name, methods }
     }

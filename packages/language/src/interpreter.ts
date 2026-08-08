@@ -12,11 +12,28 @@ import {
   MethodDefName,
   MethodCallName,
 } from 'object-oriented-c-language'
-import path from 'path'
 import { KVPair, run } from 'wy-helper'
-import { MethodAll, Str, LambdaDef } from './generated/ast.js'
+import {
+  isModel,
+  MethodAll,
+  Str,
+  LambdaDef,
+  ImportStatement,
+} from './generated/ast.js'
 import { objectDefine } from './library/object.js'
 import { numDef } from './library/num.js'
+import {
+  codeOfDiagnostic,
+  filterDiagnostic,
+  loadOocConfig,
+  type OocConfig,
+} from './diagnostics-config.js'
+import {
+  dirnameOf,
+  extnameOf,
+  joinPath,
+  resolveModuleName,
+} from './module-path.js'
 // 定义值类型
 export type Value = number | string | boolean | null | ObjectValue
 
@@ -147,7 +164,7 @@ async function interpret(
   // 处理导入（支持动态加载模块）
   const out = await Promise.all(
     imports.map((importStmt) =>
-      interpretAction(path.join(rootPath, '../', importStmt.path)),
+      interpretAction(joinPath(dirnameOf(rootPath), importStmt.path)),
     ),
   )
   let last: any = null
@@ -369,24 +386,54 @@ function executeOOC(
   model: Model,
   path: string,
   interpretAction: InterpretAction,
+  globals: Globals,
 ) {
-  return interpret(model, undefined, path, interpretAction)
+  return interpret(model, withGlobals(undefined, globals), path, interpretAction)
 }
 
 const cacheInterpret = new Map<string, Promise<any>>()
-export function createInterpretAction(context: DefaultSharedModuleContext) {
+/**
+ * 宿主注入的 JS 全局对象（如 storage），OOC 源码直接按名字引用，无需 #import。
+ */
+export type Globals = Record<string, unknown>
+/**
+ * 配置来源：显式传入，或 'auto'（从根目录 ooc.json 读取）。
+ */
+export type ConfigSource = OocConfig | 'auto' | undefined
+export function createInterpretAction(
+  context: DefaultSharedModuleContext,
+  globals: Globals = {},
+  config: ConfigSource = 'auto',
+) {
   const services = createObjectOrientedCServices(context).ObjectOrientedC
   const parse = parseHelper(services)
   const fs = context.fileSystemProvider(services.shared)
-  function interpretPath(fileName: string) {
-    let value = cacheInterpret.get(fileName)
+  // ooc.json 配置：按根目录缓存
+  let cachedConfig: OocConfig | undefined
+  let cachedConfigRoot: string | undefined
+  async function resolveConfig(rootPath: string): Promise<OocConfig> {
+    if (config && config !== 'auto') {
+      return config
+    }
+    if (cachedConfigRoot === rootPath) {
+      return cachedConfig ?? {}
+    }
+    cachedConfigRoot = rootPath
+    cachedConfig = await loadOocConfig(fs, rootPath)
+    return cachedConfig ?? {}
+  }
+  function interpretPath(rawName: string) {
+    let value = cacheInterpret.get(rawName)
     if (!value) {
       value = run(async () => {
         const extensions = services.LanguageMetaData.fileExtensions
-        if (!extensions.includes(path.extname(fileName))) {
+        // 统一为 posix 路径；无扩展名的虚拟路径补默认扩展（Langium 按扩展名注册语言服务）
+        const fileName = resolveModuleName(rawName, '', extensions)
+        const ext = extnameOf(fileName)
+        if (ext && !extensions.includes(ext)) {
           throw `Please choose a file with one of these extensions: ${extensions}.`
         }
-        const uri = URI.file(path.resolve(fileName))
+        const uri = URI.file(fileName)
         if (!fs.exists(uri)) {
           throw `File ${fileName} does not exist.`
         }
@@ -396,21 +443,64 @@ export function createInterpretAction(context: DefaultSharedModuleContext) {
           )
         return execDocument(document, fileName)
       })
-      cacheInterpret.set(fileName, value)
+      cacheInterpret.set(rawName, value)
     }
     return value
+  }
+
+  /**
+   * 预加载导入文档树（含递归导入），让静态类型解析器在文档校验期间
+   * 能同步取到被导入模块的 AST。路径解析与校验器 createImportResolver 完全一致，
+   * 都以 document.uri.path 为基准目录。
+   */
+  async function preloadImportTree(
+    document: LangiumDocument<AstNode>,
+    seen = new Set<string>(),
+  ): Promise<void> {
+    const model = document.parseResult.value
+    if (!isModel(model)) {
+      return
+    }
+    const docs = services.shared.workspace.LangiumDocuments
+    const extensions = services.LanguageMetaData.fileExtensions
+    for (const stmt of model.expressions) {
+      if (stmt.$type !== 'ImportStatement') {
+        continue
+      }
+      const importStmt = stmt as ImportStatement
+      const fileName = resolveModuleName(
+        importStmt.path,
+        document.uri.path,
+        extensions,
+      )
+      const ext = extnameOf(fileName)
+      if (ext && !extensions.includes(ext)) {
+        continue
+      }
+      if (seen.has(fileName) || !fs.existsSync(URI.file(fileName))) {
+        continue
+      }
+      seen.add(fileName)
+      const imported = await docs.getOrCreateDocument(URI.file(fileName))
+      await preloadImportTree(imported, seen)
+    }
   }
 
   async function execDocument(
     document: LangiumDocument<AstNode>,
     fileName: string,
   ) {
+    await preloadImportTree(document)
     await services.shared.workspace.DocumentBuilder.build([document], {
       validation: true,
     })
 
+    const resolved = await resolveConfig(dirnameOf(fileName))
     const validationErrors = (document.diagnostics ?? []).filter(
-      (e) => e.severity === 1,
+      (e) => {
+        const next = filterDiagnostic(resolved, e.severity, codeOfDiagnostic(e))
+        return next === 1
+      },
     )
     if (validationErrors.length > 0) {
       throw (
@@ -424,7 +514,7 @@ export function createInterpretAction(context: DefaultSharedModuleContext) {
       )
     }
     const model = document.parseResult.value as Model
-    return executeOOC(model, fileName, interpretPath)
+    return executeOOC(model, fileName, interpretPath, globals)
   }
 
   return {
@@ -434,4 +524,16 @@ export function createInterpretAction(context: DefaultSharedModuleContext) {
       return execDocument(document, fileName)
     },
   }
+}
+
+/**
+ * 注入的全局对象作为最外层作用域：getScope 优先在作用域链里命中，
+ * 找不到再回退到 globalRoot。
+ */
+function withGlobals(scope: Scope, globals: Globals): Scope {
+  let s = scope
+  for (const key of Object.keys(globals)) {
+    s = addScope(s, key, globals[key])
+  }
+  return s
 }

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from 'vitest'
-import { EmptyFileSystem } from 'langium'
+import { EmptyFileSystem, URI } from 'langium'
 import { parseHelper } from 'langium/test'
 import type { Diagnostic } from 'vscode-languageserver-types'
 import type { Model } from 'object-oriented-c-language'
@@ -626,6 +626,208 @@ describe('回调实参回填', () => {
         n = { run(cb) { 1 } };
         n run { apply(x) { x = 'str' } }
     `)
+    expect(messages(diags)).toEqual([])
+  })
+})
+
+describe('跨模块 #import 类型', () => {
+  // 每个用例用独立的模块 URI 加载，避免 parseHelper 重复注册同名文档。
+  // 被导入文档必须解析到其 documentUri 对应路径，静态解析器才找得到。
+  async function loadImport(
+    name: string,
+    source: string,
+  ): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(
+    uri: string,
+    source: string,
+  ): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  test('导入模块返回对象：类型可见，参数不匹配会告警（不再是 any）', async () => {
+    await loadImport(
+      'math',
+      `{ add(a: number, b: number): number { a + b }, double(x: number): number { x * 2 } }`,
+    )
+    const diags = await checkModule(
+      'demo.ooc',
+      `math = #import 'math';
+       result: number = math add 1 'x';
+       result`,
+    )
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
+  })
+
+  test('导入模块返回对象：参数正确无告警，返回类型参与赋值检查', async () => {
+    await loadImport(
+      'math2',
+      `{ add(a: number, b: number): number { a + b } }`,
+    )
+    const diags = await checkModule(
+      'demo2.ooc',
+      `math = #import 'math2';
+       result: number = math add 1 2;
+       result`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('被导入模块的 typedef 跨文档可见', async () => {
+    await loadImport('types', `Point #type { x: number, y: number }`)
+    const diags = await checkModule(
+      'demo3.ooc',
+      `types = #import 'types';
+       p: Point = { x() { 1 }, y() { 2 } }`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('被导入模块的 typedef 跨文档不匹配会告警', async () => {
+    await loadImport('types2', `Point #type { x: number, y: number }`)
+    const diags = await checkModule(
+      'demo4.ooc',
+      `types = #import 'types2';
+       p: Point = { x() { 'bad' }, y() { 2 } }`,
+    )
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+})
+
+describe('typedef 继承', () => {
+  async function loadImport(
+    name: string,
+    source: string,
+  ): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(
+    uri: string,
+    source: string,
+  ): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  test("语法：'...' extends 子句可解析", async () => {
+    const doc = await parse(`
+        Animal #type { speak(): string };
+        Dog #type { ...Animal, bark(): string }
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('单继承：继承父类型方法，自有方法覆盖同名', async () => {
+    const diags = await diagnostics(`
+        Animal #type { speak(): string, move(): number };
+        Dog #type { ...Animal, bark(): string, move(): number };
+        d: Dog = { speak() { 'wang' }, bark() { 'bow' }, move() { 4 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('单继承：缺少父类型方法告警', async () => {
+    const diags = await diagnostics(`
+        Animal #type { speak(): string };
+        Dog #type { ...Animal, bark(): string };
+        d: Dog = { bark() { 'bow' } }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('联合父类型：A 变成联合，只有部分分支的方法调用告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        Shape #type { ...Circle | Square, m1(): number };
+        use = { calc(s: Shape) { s radius } }
+    `)
+    expect(messages(diags).join('\n')).toContain("消息 'radius' 只定义在部分联合成员上")
+  })
+
+  test('联合父类型：公共方法无告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        Shape #type { ...Circle | Square, m1(): number };
+        use = { calc(s: Shape) { s kind } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('联合父类型：#guard 判别后可访问成员专属方法', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        Shape #type { ...Circle | Square, m1(): number };
+        area = {
+            calc(s: Shape) {
+                #guard (s kind) == 'circle';
+                s radius
+            }
+        }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('联合父类型：对象字面量匹配任一分支（含自有方法）', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        Shape #type { ...Circle | Square, m1(): number };
+        c: Shape = { kind() { 'circle' }, radius() { 3 }, m1() { 1 } };
+        s: Shape = { kind() { 'square' }, side() { 4 }, m1() { 1 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('联合父类型：对象字面量缺少自有方法告警', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        Shape #type { ...Circle | Square, m1(): number };
+        bad: Shape = { kind() { 'circle' }, radius() { 3 } }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('泛型继承：实例化为对象', async () => {
+    const diags = await diagnostics(`
+        Named #type { name(): string };
+        Box #type<T> { ...T, m1(): number };
+        b: Box<Named> = { name() { 'box' }, m1() { 1 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('泛型继承：实例化为联合', async () => {
+    const diags = await diagnostics(`
+        Circle #type { kind(): 'circle', radius: number };
+        Square #type { kind(): 'square', side: number };
+        Box #type<T> { ...T, m1(): number };
+        use = { calc(s: Box<Circle | Square>) { s radius } }
+    `)
+    expect(messages(diags).join('\n')).toContain("消息 'radius' 只定义在部分联合成员上")
+  })
+
+  test('继承跨模块 typedef', async () => {
+    await loadImport('base', `Animal #type { speak(): string }`)
+    const diags = await checkModule(
+      'demo5.ooc',
+      `base = #import 'base';
+       Dog #type { ...Animal, bark(): string };
+       d: Dog = { speak() { 'wang' }, bark() { 'bow' } }`,
+    )
     expect(messages(diags)).toEqual([])
   })
 })

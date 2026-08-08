@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from 'vitest'
 import { EmptyFileSystem } from 'langium'
+import type { FileSystemProvider } from 'langium'
 import { createInterpretAction } from 'object-oriented-c-language'
 
 let interpreter: ReturnType<typeof createInterpretAction>
@@ -219,5 +220,190 @@ describe('OOC Interpreter', () => {
             obj call [x -> x * 2]
         `)
     expect(result).toBe(84)
+  })
+
+  test('宿主注入的全局对象（storage 可变引用）', async () => {
+    const withStorage = createInterpretAction(EmptyFileSystem, {
+      storage: {
+        ref(initial: number) {
+          let v = initial
+          return {
+            get() {
+              return v
+            },
+            set(x: number) {
+              v = x
+              return v
+            },
+          }
+        },
+      },
+    })
+    const result = await withStorage.interpret(`
+            counter = storage ref 0;
+            counter set 3;
+            counter set (counter get + 2);
+            counter get
+        `)
+    expect(result).toBe(5)
+  })
+})
+
+/** 内存文件系统：可注入 ooc.json 与虚拟模块 */
+function memoryFs(files: Record<string, string>): {
+  provider: FileSystemProvider
+  set: (name: string, content: string) => void
+} {
+  const map = new Map<string, string>()
+  for (const [k, v] of Object.entries(files)) {
+    map.set(k, v)
+  }
+  function read(uri: import('langium').URI): string {
+    const name = decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+    const content = map.get(name)
+    if (content === undefined) {
+      throw new Error(`不存在: ${name}`)
+    }
+    return content
+  }
+  const provider: FileSystemProvider = {
+    stat(uri) {
+      return Promise.resolve({ isFile: true, isDirectory: false, uri })
+    },
+    statSync(uri) {
+      return { isFile: true, isDirectory: false, uri }
+    },
+    exists(uri) {
+      const name = decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+      return Promise.resolve(map.has(name))
+    },
+    existsSync(uri) {
+      const name = decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+      return map.has(name)
+    },
+    readBinary() {
+      return Promise.resolve(new Uint8Array())
+    },
+    readBinarySync() {
+      return new Uint8Array()
+    },
+    readFile(uri) {
+      return Promise.resolve(read(uri))
+    },
+    readFileSync(uri) {
+      return read(uri)
+    },
+    readDirectory() {
+      return Promise.resolve([])
+    },
+    readDirectorySync() {
+      return []
+    },
+  }
+  return {
+    provider,
+    set(name, content) {
+      map.set(name, content)
+    },
+  }
+}
+
+describe('OOC 项目配置 ooc.json', () => {
+  const source = `
+            calc = {
+                add(a: number, b: number) { a + b }
+            };
+            calc add 1 'x'
+        `
+
+  test('配置 callArgsMismatch 为 off 时不阻断执行', async () => {
+    const fs = memoryFs({
+      'ooc.json': JSON.stringify({
+        diagnostics: { callArgsMismatch: 'off' },
+      }),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(source, '/proj/demo.ooc')
+    expect(result).toBe('1x')
+  })
+
+  test('配置 callArgsMismatch 为 error 时阻断执行', async () => {
+    const fs = memoryFs({
+      'ooc.json': JSON.stringify({
+        diagnostics: { callArgsMismatch: 'error' },
+      }),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    await expect(interpret(source, '/proj/demo.ooc')).rejects.toThrow(
+      'There are validation errors',
+    )
+  })
+
+  test('无 ooc.json 时保持默认（warning 不阻断）', async () => {
+    const fs = memoryFs({})
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(source, '/proj/demo.ooc')
+    expect(result).toBe('1x')
+  })
+})
+
+describe('OOC #import 模块', () => {
+  test('预加载导入模块：类型可见且运行时正常执行', async () => {
+    const fs = memoryFs({
+      'math.ooc': `{ add(a: number, b: number): number { a + b } }`,
+      'ooc.json': JSON.stringify({}),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(
+      `math = #import 'math';
+       math add 2 3`,
+      'demo.ooc',
+    )
+    expect(result).toBe(5)
+  })
+
+  test('导入模块结果类型参与校验：类型不符会阻断', async () => {
+    const fs = memoryFs({
+      'math.ooc': `{ add(a: number, b: number): number { a + b } }`,
+      'ooc.json': JSON.stringify({
+        diagnostics: { callArgsMismatch: 'error' },
+      }),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    await expect(
+      interpret(
+        `math = #import 'math';
+         result: number = math add 1 'x';
+         result`,
+        'demo.ooc',
+      ),
+    ).rejects.toThrow('There are validation errors')
+  })
+
+  test('被导入模块的 typedef 参与当前模块校验', async () => {
+    const fs = memoryFs({
+      'types.ooc': `Point #type { x: number, y: number }`,
+      'ooc.json': JSON.stringify({}),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(
+      `types = #import 'types';
+       p: Point = { x() { 1 }, y() { 2 } };
+       p x`,
+      'demo.ooc',
+    )
+    expect(result).toBe(1)
   })
 })
