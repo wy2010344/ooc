@@ -1,4 +1,4 @@
-import oocGrammar from '../packages/language/syntaxes/object-oriented-c.tmLanguage.json'
+import oocGrammar from './grammars/object-oriented-c.tmLanguage.json'
 import type { LanguageRegistration } from 'shiki'
 import { defineConfig } from '@rspress/core'
 

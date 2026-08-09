@@ -1,0 +1,61 @@
+{
+  "name": "object-oriented-c",
+  "scopeName": "source.object-oriented-c",
+  "fileTypes": [
+    "ooc"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "name": "keyword.control.object-oriented-c",
+      "match": "\\b(nil)\\b|\\B(#guard|#import|#type)\\b"
+    },
+    {
+      "name": "string.quoted.single.object-oriented-c",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "include": "#string-character-escape"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.object-oriented-c",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.object-oriented-c"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.object-oriented-c"
+            }
+          }
+        },
+        {
+          "begin": "//",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.whitespace.comment.leading.object-oriented-c"
+            }
+          },
+          "end": "(?=$)",
+          "name": "comment.line.object-oriented-c"
+        }
+      ]
+    },
+    "string-character-escape": {
+      "name": "constant.character.escape.object-oriented-c",
+      "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\\{[0-9A-Fa-f]+\\}|[0-2][0-7]{0,2}|3[0-6][0-7]?|37[0-7]?|[4-7][0-7]?|.|$)"
+    }
+  }
+}
