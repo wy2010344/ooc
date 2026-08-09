@@ -46,9 +46,19 @@ await ooc.interpretPath('src/main.ooc')
 
 ## 文档
 
-- [01 基础语法](docs/01-basics.md) —— 变量、类型、运算符、消息
-- [02 对象与方法](docs/02-objects.md) —— 对象、this、守卫、继承
-- [03 管道](docs/03-pipeline.md) —— `/` 与 `|`
-- [04 类型注解](docs/04-types.md) —— `:`、`#type`、联合类型
-- [05 模块](docs/05-modules.md) —— `#import`
-- [06 Lambda](docs/06-lambda.md) —— `[...]` 匿名函数
+在线文档站（Rspress）：<https://wy2010344.github.io/ooc/>
+
+- [01 基础语法](docs/guide/01-basics.md) —— 变量、类型、运算符、消息
+- [02 对象与方法](docs/guide/02-objects.md) —— 对象、this、守卫、继承
+- [03 管道](docs/guide/03-pipeline.md) —— `/` 与 `|`
+- [04 类型注解](docs/guide/04-types.md) —— `:`、`#type`、联合类型
+- [05 模块](docs/guide/05-modules.md) —— `#import`
+- [06 Lambda](docs/guide/06-lambda.md) —— `[...]` 匿名函数
+
+本地开发文档站：
+
+```bash
+cd docs
+npm install
+npm run dev
+```

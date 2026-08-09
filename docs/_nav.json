@@ -1,0 +1,11 @@
+[
+  {
+    "text": "文档",
+    "link": "/guide/01-basics",
+    "activeMatch": "/guide/"
+  },
+  {
+    "text": "GitHub",
+    "link": "https://github.com/wy2010344/ooc"
+  }
+]
