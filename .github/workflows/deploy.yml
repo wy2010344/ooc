@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'packages/language/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,7 +28,13 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Generate ooc grammar
+        run: npm run langium:generate
+
+      - name: Install docs dependencies
         working-directory: docs
         run: npm ci
 
