@@ -1,6 +1,7 @@
 {
   "diagnostics": {
     "unknownType": "off",
-    "typeMismatch": "warning"
+    "typeMismatch": "error",
+    "noImplicitAny": "error"
   }
 }

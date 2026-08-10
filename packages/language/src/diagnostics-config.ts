@@ -42,7 +42,16 @@ export const DIAGNOSTIC_CODES = {
   callArgsMismatch: 'callArgsMismatch',
   duplicateMethod: 'duplicateMethod',
   duplicateParam: 'duplicateParam',
+  noImplicitAny: 'noImplicitAny',
 } as const
+
+/**
+ * 未在 ooc.json 里显式配置时的默认级别（类 TS 的 noImplicitAny：
+ * 默认关闭，只有显式配置为 warning/error 才报告隐式 any）。
+ */
+const DEFAULT_DIAGNOSTIC_LEVELS: Partial<Record<DiagnosticCode, DiagLevel>> = {
+  noImplicitAny: 'off',
+}
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES]
 
@@ -83,6 +92,15 @@ export function filterDiagnostic(
   }
   const level = config?.diagnostics?.[code]
   if (level === undefined) {
+    // 未显式配置时：有项目配置对象才套用 code 默认级别（如 noImplicitAny
+    // 默认 off）；config 为 undefined 表示尚未读取项目配置，原样放行，
+    // 交给上层按最近 ooc.json 决定。
+    if (config !== undefined) {
+      const def = DEFAULT_DIAGNOSTIC_LEVELS[code as DiagnosticCode]
+      if (def === 'off') {
+        return undefined
+      }
+    }
     return severity
   }
   if (level === 'off') {
@@ -195,9 +213,13 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
       this.fs,
       dirnameForConfig(uriToPath(document.uri)),
     )
-    return diagnostics.filter((d) => {
+    return diagnostics.flatMap((d) => {
       const next = filterDiagnostic(config, d.severity, codeOfDiagnostic(d))
-      return next !== undefined
+      if (next === undefined) {
+        return []
+      }
+      // 应用配置后的严重级别（warning -> error / 保持原级）
+      return [{ ...d, severity: next as DiagnosticSeverity }]
     })
   }
 }

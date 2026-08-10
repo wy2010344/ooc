@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest'
+import { URI } from 'langium'
+import { parseHelper } from 'langium/test'
+import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import type { OocConfig } from 'object-oriented-c-language'
+import { createObjectOrientedCServices } from 'object-oriented-c-language'
 import {
   parseOocConfig,
   filterDiagnostic,
@@ -78,6 +82,41 @@ describe('filterDiagnostic', () => {
   })
 })
 
+describe('filterDiagnostic 默认级别（类 TS noImplicitAny）', () => {
+  test('noImplicitAny 未显式配置时默认 off（有配置对象）', () => {
+    expect(filterDiagnostic({}, 'warning', 'noImplicitAny')).toBeUndefined()
+    expect(filterDiagnostic({}, 2, 'noImplicitAny')).toBeUndefined()
+    expect(
+      filterDiagnostic(
+        { diagnostics: { unknownType: 'off' } },
+        2,
+        'noImplicitAny',
+      ),
+    ).toBeUndefined()
+  })
+
+  test('noImplicitAny 未读取配置（undefined）时原样放行', () => {
+    expect(filterDiagnostic(undefined, 'warning', 'noImplicitAny')).toBe(
+      'warning',
+    )
+    expect(filterDiagnostic(undefined, 2, 'noImplicitAny')).toBe(2)
+  })
+
+  test('noImplicitAny 显式配置为 warning/error 时生效', () => {
+    expect(
+      filterDiagnostic({ diagnostics: { noImplicitAny: 'warning' } }, 2, 'noImplicitAny'),
+    ).toBe(2)
+    expect(
+      filterDiagnostic({ diagnostics: { noImplicitAny: 'error' } }, 2, 'noImplicitAny'),
+    ).toBe(1)
+  })
+
+  test('其他 code 未配置时仍保持原 severity', () => {
+    expect(filterDiagnostic({}, 2, 'typeMismatch')).toBe(2)
+    expect(filterDiagnostic({}, 1, 'typeMismatch')).toBe(1)
+  })
+})
+
 describe('codeOfDiagnostic / diagnosticData', () => {
   test('diagnosticData 挂 code，codeOfDiagnostic 可提取', () => {
     const data = diagnosticData('typeMismatch')
@@ -115,5 +154,118 @@ describe('loadOocConfig', () => {
       },
     }
     expect(await loadOocConfig(fs, '/root')).toEqual({})
+  })
+})
+
+describe('ConfigAwareDocumentValidator 升降级', () => {
+  function fsWithSources(sources: Record<string, string>) {
+    const nameOf = (uri: URI) =>
+      decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+    return {
+      stat(uri: URI) {
+        return Promise.resolve({ isFile: true, isDirectory: false, uri })
+      },
+      statSync(uri: URI) {
+        return { isFile: true, isDirectory: false, uri }
+      },
+      exists(uri: URI) {
+        return Promise.resolve(nameOf(uri).toLowerCase() in sources)
+      },
+      existsSync(uri: URI) {
+        return nameOf(uri).toLowerCase() in sources
+      },
+      async readBinary() {
+        return new Uint8Array()
+      },
+      readBinarySync() {
+        return new Uint8Array()
+      },
+      readFile(uri: URI) {
+        const key = nameOf(uri).toLowerCase()
+        const source = sources[key]
+        if (source == null) {
+          throw new Error(`模块不存在: ${uri.path}`)
+        }
+        return Promise.resolve(source)
+      },
+      readFileSync() {
+        throw new Error('不支持同步读文件')
+      },
+      readDirectory() {
+        return Promise.resolve([])
+      },
+      readDirectorySync() {
+        return []
+      },
+    }
+  }
+
+  test("ooc.json 中 typeMismatch:'error' 将诊断提升为错误", async () => {
+    const services = createObjectOrientedCServices({
+      fileSystemProvider: () =>
+        fsWithSources({
+          'ooc.json': JSON.stringify({
+            diagnostics: { typeMismatch: 'error' },
+          }),
+        }),
+    })
+    const parse = parseHelper(services.ObjectOrientedC)
+    const doc = await parse(`x: number = 'hello'`, {
+      documentUri: URI.file('/proj/demo.ooc').toString(),
+      validation: true,
+    })
+    const mismatch = (doc.diagnostics ?? []).find((d) =>
+      d.message.includes('类型不匹配'),
+    )
+    expect(mismatch?.severity).toBe(DiagnosticSeverity.Error)
+  })
+
+  test("ooc.json 中 unknownType:'off' 隐藏诊断", async () => {
+    const services = createObjectOrientedCServices({
+      fileSystemProvider: () =>
+        fsWithSources({
+          'ooc.json': JSON.stringify({
+            diagnostics: { unknownType: 'off' },
+          }),
+        }),
+    })
+    const parse = parseHelper(services.ObjectOrientedC)
+    const doc = await parse(`x: Foo = 33`, {
+      documentUri: URI.file('/proj/demo.ooc').toString(),
+      validation: true,
+    })
+    expect(doc.diagnostics ?? []).toEqual([])
+  })
+
+  test("noImplicitAny 未配置时默认 off，无诊断", async () => {
+    const services = createObjectOrientedCServices({
+      fileSystemProvider: () => fsWithSources({}),
+    })
+    const parse = parseHelper(services.ObjectOrientedC)
+    const doc = await parse(`calc = { add(n) { n + 1 } }`, {
+      documentUri: URI.file('/proj/demo.ooc').toString(),
+      validation: true,
+    })
+    expect(doc.diagnostics ?? []).toEqual([])
+  })
+
+  test("ooc.json 中 noImplicitAny:'error' 将隐式 any 参数提升为错误", async () => {
+    const services = createObjectOrientedCServices({
+      fileSystemProvider: () =>
+        fsWithSources({
+          'ooc.json': JSON.stringify({
+            diagnostics: { noImplicitAny: 'error' },
+          }),
+        }),
+    })
+    const parse = parseHelper(services.ObjectOrientedC)
+    const doc = await parse(`calc = { add(n) { n + 1 } }`, {
+      documentUri: URI.file('/proj/demo.ooc').toString(),
+      validation: true,
+    })
+    const implicit = (doc.diagnostics ?? []).find(
+      (d) => d.message.includes('隐式 any'),
+    )
+    expect(implicit?.severity).toBe(DiagnosticSeverity.Error)
   })
 })

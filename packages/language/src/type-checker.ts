@@ -588,6 +588,16 @@ export class ObjectOrientedCTypeChecker {
     if (!param) {
       return undefined
     }
+    if (!param.typeAnnotation && !contextType) {
+      // 隐式 any：既无注解也无调用上下文可回填，参数类型退化为 any。
+      // 默认不报告（noImplicitAny 默认 off），在 ooc.json 中配置为
+      // warning/error 后才会提示。
+      accept('warning', `参数 '${param.name}' 缺少类型注解，推断为隐式 any`, {
+        node: param,
+        property: 'name',
+        data: diagnosticData('noImplicitAny'),
+      })
+    }
     const t = param.typeAnnotation
       ? this.resolveAnnotation(param.typeAnnotation, accept)
       : contextType ?? anyType

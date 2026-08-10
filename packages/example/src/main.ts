@@ -2,7 +2,6 @@ import './style.css'
 import { createInterpretAction } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
-import source from './demo.ooc?raw'
 import oocJsonRaw from './ooc/ooc.json?raw'
 
 // #import 模块：eager 预加载所有 .ooc 进内存。
@@ -21,10 +20,7 @@ moduleSources.set('ooc.json', oocJsonRaw)
 
 function moduleNameOf(uri: URI): string {
   return (
-    decodeURIComponent(uri.path)
-      .split('/')
-      .filter(Boolean)
-      .pop() ?? ''
+    decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
   ).toLowerCase()
 }
 
@@ -85,10 +81,8 @@ const storage = {
 // 通用入口：context 注入浏览器虚拟文件系统，其余（解析/校验/执行）与 Node 完全一致
 const interpret = createInterpretAction(
   { fileSystemProvider: () => fileSystemProvider },
-  { storage },
-).interpret
-
-document.querySelector<HTMLPreElement>('#source')!.textContent = source
+  { storage, console },
+)
 
 const output = document.querySelector<HTMLPreElement>('#output')!
 document
@@ -96,7 +90,7 @@ document
   .addEventListener('click', async () => {
     output.textContent = '运行中...'
     try {
-      const value = await interpret(source, 'demo.ooc')
+      const value = await interpret.interpretPath('./demo.ooc')
       output.textContent = formatValue(value)
     } catch (err) {
       output.textContent = String(err)

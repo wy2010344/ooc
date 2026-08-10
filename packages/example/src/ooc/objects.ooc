@@ -11,8 +11,8 @@ calc inc 3;
 
 // 守卫与重载：guard 不满足时找下一个同名方法
 size = {
-    check(n) { #guard n > 100; 'big' },
-    check(n) { 'small' }
+    check(n):string { #guard n > 100; 'big' },
+    check(n):string { 'small' }
 };
 size check 200;
 size check 5;

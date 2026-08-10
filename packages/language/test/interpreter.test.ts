@@ -351,6 +351,36 @@ describe('OOC 项目配置 ooc.json', () => {
     const result = await interpret(source, '/proj/demo.ooc')
     expect(result).toBe('1x')
   })
+
+  test('配置 noImplicitAny 为 error 时隐式 any 参数阻断执行', async () => {
+    const fs = memoryFs({
+      'ooc.json': JSON.stringify({
+        diagnostics: { noImplicitAny: 'error' },
+      }),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    await expect(
+      interpret(`calc = { add(n) { n + 1 } }`, '/proj/demo.ooc'),
+    ).rejects.toThrow('There are validation errors')
+  })
+
+  test('配置 noImplicitAny 为 off 时不阻断执行', async () => {
+    const fs = memoryFs({
+      'ooc.json': JSON.stringify({
+        diagnostics: { noImplicitAny: 'off' },
+      }),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(
+      `calc = { add(n) { n + 1 } }; calc add 41`,
+      '/proj/demo.ooc',
+    )
+    expect(result).toBe(42)
+  })
 })
 
 describe('OOC #import 模块', () => {

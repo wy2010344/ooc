@@ -59,6 +59,10 @@ function getObjDefineName(n: MethodDefName) {
       return getStrValue(v)
   }
 }
+
+/***
+ * 好像并不能和js的原型对象一一匹配，主要是guard的策略，可以路由到父节点去处理。
+ */
 export class ObjectValue {
   readonly methods: ObjectMethod[]
   private scope: Scope
@@ -221,7 +225,7 @@ function interpretExpression(e: Expression, scope: Scope): any {
             default:
               scope = addScope(scope, rv.param, obj)
               return interpretExpression(rv.expression, scope)
-            }
+          }
         default:
           return sendMessage(obj, r.infix, [interpretPrimary(r.value, scope)])
       }
@@ -354,23 +358,9 @@ function getScope(scope: Scope, key: string) {
   }
   return globalRoot.get(key)
 }
-const extendGlobalObject = {
-  JSAttr: {
-    get(obj: any, name: string) {
-      return obj[name]
-    },
-    set(obj: any, name: string, value: any) {
-      obj[name] = value
-      return value
-    },
-  },
-}
 
 const globalRoot: RootScope = {
   get(key: string): any {
-    if (key in extendGlobalObject) {
-      return extendGlobalObject[key as 'JSAttr']
-    }
     if (key in global) {
       return global[key as 'Object']
     }
@@ -388,7 +378,12 @@ function executeOOC(
   interpretAction: InterpretAction,
   globals: Globals,
 ) {
-  return interpret(model, withGlobals(undefined, globals), path, interpretAction)
+  return interpret(
+    model,
+    withGlobals(undefined, globals),
+    path,
+    interpretAction,
+  )
 }
 
 const cacheInterpret = new Map<string, Promise<any>>()
@@ -496,12 +491,10 @@ export function createInterpretAction(
     })
 
     const resolved = await resolveConfig(dirnameOf(fileName))
-    const validationErrors = (document.diagnostics ?? []).filter(
-      (e) => {
-        const next = filterDiagnostic(resolved, e.severity, codeOfDiagnostic(e))
-        return next === 1
-      },
-    )
+    const validationErrors = (document.diagnostics ?? []).filter((e) => {
+      const next = filterDiagnostic(resolved, e.severity, codeOfDiagnostic(e))
+      return next === 1
+    })
     if (validationErrors.length > 0) {
       throw (
         'There are validation errors:\n' +
@@ -520,7 +513,14 @@ export function createInterpretAction(
   return {
     interpretPath,
     async interpret(txt: string, fileName = '') {
-      const document = await parse(txt)
+      // 用真实文件名作为文档 URI，保证 ConfigAwareDocumentValidator 能
+      // 按文件目录找到最近的 ooc.json（否则默认 URI 下找不到，默认 off
+      // 的规则如 noImplicitAny 会被提前丢弃）。
+      const document = await parse(txt, {
+        documentUri: fileName
+          ? URI.file(fileName).toString()
+          : undefined,
+      })
       return execDocument(document, fileName)
     },
   }
