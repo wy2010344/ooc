@@ -2,6 +2,6 @@
   "diagnostics": {
     "unknownType": "off",
     "typeMismatch": "error",
-    "noImplicitAny": "error"
+    "noImplicitAny": "off"
   }
 }

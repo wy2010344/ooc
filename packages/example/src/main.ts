@@ -104,14 +104,18 @@ function formatValue(value: Value): string {
   if (typeof value !== 'object') {
     return JSON.stringify(value)
   }
-  const lines = value.methods.map((m) => {
+  // 新对象模型就是普通 JS 对象（原型链继承），方法/数据属性都是可枚举属性：
+  // 函数为方法，对象为嵌套对象，其余为值。
+  const lines: string[] = []
+  for (const key in value as Record<string, unknown>) {
+    const item = (value as Record<string, unknown>)[key]
     const rendered =
-      m.type === 'bind' && m.value && typeof m.value === 'object'
-        ? '(对象)'
-        : m.type === 'bind'
-          ? JSON.stringify(m.value)
-          : '(方法)'
-    return `  ${m.name}: ${rendered}`
-  })
+      typeof item === 'function'
+        ? '(方法)'
+        : item && typeof item === 'object'
+          ? '(对象)'
+          : JSON.stringify(item)
+    lines.push(`  ${key}: ${rendered}`)
+  }
   return `{\n${lines.join('\n')}\n}`
 }

@@ -18,7 +18,7 @@ features:
     icon: ⚡
     link: /guide/01-basics
   - title: 对象与方法
-    details: 对象、this、守卫 #guard、继承与嵌套对象，覆盖面向对象核心能力。
+    details: 对象、responser、守卫 #guard、继承与嵌套对象，覆盖面向对象核心能力。
     icon: 📚
     link: /guide/02-objects
   - title: 类型与模块

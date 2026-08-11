@@ -1,6 +1,6 @@
 import type { DiagnosticSeverity } from 'vscode-languageserver-types'
 import type { ValidationSeverity } from 'langium'
-import { URI } from 'langium'
+import { URI, UriUtils } from 'langium'
 import {
   DefaultDocumentValidator,
   type ValidationOptions,
@@ -57,7 +57,8 @@ export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_C
 
 export function parseOocConfig(text: string): OocConfig {
   try {
-    const json = JSON.parse(text)
+    // Windows 编辑器保存的 UTF-8 BOM 会让 JSON.parse 直接失败，先剥掉
+    const json = JSON.parse(text.replace(/^\uFEFF/, ''))
     const diags = json?.diagnostics
     if (diags && typeof diags === 'object') {
       const normalized: Record<string, DiagLevel> = {}
@@ -143,7 +144,9 @@ export async function loadOocConfig(
   rootPath: string,
 ): Promise<OocConfig> {
   try {
-    const uri = URI.file(rootPath ? `${rootPath}/ooc.json` : 'ooc.json')
+    // 用 joinPath 拼接而不是字符串 `${rootPath}/ooc.json`：rootPath 为 '/' 时
+    // 会拼出 '//ooc.json'（URI.file 解析成 file://ooc.json/，fsPath 变成根目录）。
+    const uri = UriUtils.joinPath(URI.file(rootPath), 'ooc.json')
     if (!(await fs.exists(uri))) {
       return {}
     }

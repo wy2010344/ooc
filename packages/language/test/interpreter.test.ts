@@ -1,6 +1,10 @@
 import { beforeAll, describe, expect, test } from 'vitest'
 import { EmptyFileSystem } from 'langium'
 import type { FileSystemProvider } from 'langium'
+import { NodeFileSystem } from 'langium/node'
+import * as nodeFs from 'node:fs/promises'
+import * as nodeOs from 'node:os'
+import * as nodePath from 'node:path'
 import { createInterpretAction } from 'object-oriented-c-language'
 
 let interpreter: ReturnType<typeof createInterpretAction>
@@ -107,10 +111,91 @@ describe('OOC Interpreter', () => {
     expect(result).toBe('wang')
   })
 
+  test('继承 guard 不通过时向上查找父方法', async () => {
+    const result = await interpreter.interpret(`
+            base = { foo(x) { #guard x > 10; 'big' } };
+            child = { ...base, foo(x) { #guard x < 5; 'small' } };
+            child foo 12
+        `)
+    expect(result).toBe('big')
+  })
+
+  test('继承双方 guard 都不通过时方法未定义', async () => {
+    await expect(
+      interpreter.interpret(`
+                base = { foo(x) { #guard x > 10; 'big' } };
+                child = { ...base, foo(x) { #guard x < 5; 'small' } };
+                child foo 7
+            `),
+    ).rejects.toThrow('没有定义该方法')
+  })
+
+  test('顶层对象 guard 不通过时方法未定义', async () => {
+    await expect(
+      interpreter.interpret(`
+                obj = { foo(x) { #guard x > 10; x } };
+                obj foo 3
+            `),
+    ).rejects.toThrow('没有定义该方法')
+  })
+
+  test('bind 属性可读取', async () => {
+    const result = await interpreter.interpret(`
+            obj = { value = 42 };
+            obj value
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('bind 属性继承', async () => {
+    const result = await interpreter.interpret(`
+            base = { value = 'pet' };
+            child = { ...base, extra() { 'ok' } };
+            child value
+        `)
+    expect(result).toBe('pet')
+  })
+
+  test('bind 是方法函数：消息带参不覆盖绑定值', async () => {
+    const result = await interpreter.interpret(`
+            obj = { value = 42 };
+            obj value 99;
+            obj value
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('对象即 JS 对象：属性均为方法函数', async () => {
+    const result = await interpreter.interpret(`
+            obj = { value = 42, f() { 'f' } };
+            obj
+        `)
+    expect(typeof result.value).toBe('function')
+    expect(result.value()).toBe(42)
+    expect(typeof result.f).toBe('function')
+    expect(result.f()).toBe('f')
+    expect(Object.keys(result)).toEqual(['value', 'f'])
+  })
+
+  test('继承通过 JS 原型链实现', async () => {
+    const child = await interpreter.interpret(`
+            base = { value = 'pet', speak() { 'voice' } };
+            child = { ...base, extra() { 'ok' } };
+            child
+        `)
+    expect(Object.getPrototypeOf(child).speak).toBeTypeOf('function')
+    expect(child.speak()).toBe('voice')
+  })
+
+  test('顶层对象为普通 JS 对象（保留 Object.prototype）', async () => {
+    const result = await interpreter.interpret(`{ value = 42 }`)
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+  })
+
   test('父方法 this 访问父字段', async () => {
     const result = await interpreter.interpret(`
             base = { name = 'pet' };
-            child = { ...base, greet() { this name } };
+            child = { ...base, greet() { responser name } };
             child greet
         `)
     expect(result).toBe('pet')
@@ -249,6 +334,26 @@ describe('OOC Interpreter', () => {
   })
 })
 
+describe('interpretPath 相对路径（Node/CLI）', () => {
+  test('相对路径以当前工作目录为基准解析', async () => {
+    const tmp = await nodeFs.mkdtemp(nodePath.join(nodeOs.tmpdir(), 'ooc-rel-'))
+    const prevCwd = process.cwd()
+    try {
+      await nodeFs.writeFile(
+        nodePath.join(tmp, 'demo.ooc'),
+        'x = 40; x + 2',
+        'utf8',
+      )
+      process.chdir(tmp)
+      const { interpretPath } = createInterpretAction(NodeFileSystem)
+      await expect(interpretPath('./demo.ooc')).resolves.toBe(42)
+    } finally {
+      process.chdir(prevCwd)
+      await nodeFs.rm(tmp, { recursive: true, force: true })
+    }
+  })
+})
+
 /** 内存文件系统：可注入 ooc.json 与虚拟模块 */
 function memoryFs(files: Record<string, string>): {
   provider: FileSystemProvider
@@ -259,7 +364,8 @@ function memoryFs(files: Record<string, string>): {
     map.set(k, v)
   }
   function read(uri: import('langium').URI): string {
-    const name = decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+    const name =
+      decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
     const content = map.get(name)
     if (content === undefined) {
       throw new Error(`不存在: ${name}`)
@@ -274,11 +380,13 @@ function memoryFs(files: Record<string, string>): {
       return { isFile: true, isDirectory: false, uri }
     },
     exists(uri) {
-      const name = decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+      const name =
+        decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
       return Promise.resolve(map.has(name))
     },
     existsSync(uri) {
-      const name = decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+      const name =
+        decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
       return map.has(name)
     },
     readBinary() {

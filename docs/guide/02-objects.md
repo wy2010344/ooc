@@ -6,7 +6,7 @@
 calc = {
     add(a, b) => a + b,      // 单表达式方法
     sub(a, b) { a - b },     // 方法体，最后一行是返回值
-    cached = 1 + 2           // 绑定：创建时计算一次，之后直接取缓存
+    cached = 1 + 2           // 绑定：创建时求值一次，之后发消息取缓存（也是方法）
 };
 ```
 
@@ -17,14 +17,14 @@ calc add 3 4     // 7
 calc cached      // 3
 ```
 
-## this
+## responser
 
-方法内的 `this` 指向对象自己，用来访问自己的方法 / 绑定：
+方法体内**没有 `this`**。需要访问触发消息的对象时用 `responser`：它始终指向最终收到消息的对象（继承时是子对象，不是定义方法的那一层）：
 
 ```ooc
 calc = {
     cached = 5,
-    inc(n) { this cached + n }
+    inc(n) { responser cached + n }
 };
 calc inc 3       // 8
 ```
@@ -38,7 +38,7 @@ obj apply 1 2 3 4    // [2, 3, 4]
 
 ## 守卫 #guard
 
-方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找下一个同名方法：
+方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找下一个同名方法（同一对象内，或继承链上的父对象）：
 
 ```ooc
 f = {
@@ -64,6 +64,14 @@ dog bark     // 'wang'（自己的方法）
 ```ooc
 dog = { ...animal, speak() => 'wang' };
 dog speak    // 'wang'
+```
+
+子方法 guard 不通过时，会继续向上找父对象的同名方法：
+
+```ooc
+base = { r(a) { #guard a > 10; 'big' } };
+child = { ...base, r(a) { #guard a < 5; 'small' } };
+child r 12    // 'big'（子 guard 不过，父 guard 过）
 ```
 
 ## 嵌套对象

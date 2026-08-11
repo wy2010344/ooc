@@ -42,6 +42,13 @@ describe('parseOocConfig', () => {
     expect(parseOocConfig('not json')).toEqual({})
     expect(parseOocConfig(JSON.stringify({}))).toEqual({})
   })
+
+  test('带 UTF-8 BOM 的内容也能解析', () => {
+    const config = parseOocConfig(
+      '\uFEFF' + JSON.stringify({ diagnostics: { typeMismatch: 'error' } }),
+    )
+    expect(config.diagnostics).toEqual({ typeMismatch: 'error' })
+  })
 })
 
 describe('filterDiagnostic', () => {
@@ -154,6 +161,19 @@ describe('loadOocConfig', () => {
       },
     }
     expect(await loadOocConfig(fs, '/root')).toEqual({})
+  })
+
+  test("rootPath 为 '/' 时 URI 拼接正确（不产生 //ooc.json）", async () => {
+    let seenPath = ''
+    const fs = {
+      exists: async (uri: URI) => {
+        seenPath = uri.path
+        return false
+      },
+      readFile: async () => '',
+    }
+    expect(await loadOocConfig(fs, '/')).toEqual({})
+    expect(seenPath).toBe('/ooc.json')
   })
 })
 

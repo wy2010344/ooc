@@ -1,6 +1,6 @@
 export * from './object-oriented-c-module.js'
 export * from './object-oriented-c-validator.js'
-export * from './interpreter.js'
+export * from './interpreter/index.js'
 export * from './type-system.js'
 export * from './type-checker.js'
 export * from './diagnostics-config.js'
