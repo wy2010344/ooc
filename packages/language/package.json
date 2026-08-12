@@ -32,14 +32,13 @@
         "build:clean": "npm run clean && npm run build",
         "langium:generate": "langium generate",
         "langium:watch": "langium generate --watch",
-        "test": "vitest run"
+        "test": "tsc -b tsconfig.test.json && node --test \"out/**/*.test.js\""
     },
     "dependencies": {
         "langium": "~4.2.1"
     },
     "devDependencies": {
-        "langium-cli": "~4.2.0",
-        "vitest": "~4.1.2"
+        "langium-cli": "~4.2.0"
     },
     "volta": {
         "node": "24.15.0",

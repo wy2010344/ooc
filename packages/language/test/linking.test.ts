@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, test } from 'vitest'
+import { afterEach, beforeAll, describe, expect, test } from './compat.js'
 import { EmptyFileSystem, type LangiumDocument } from 'langium'
 import { expandToString as s } from 'langium/generate'
 import { clearDocuments, parseHelper } from 'langium/test'

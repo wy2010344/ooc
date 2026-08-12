@@ -1,4 +1,4 @@
-import { test } from 'vitest'
+import { test } from './compat.js'
 import { EmptyFileSystem } from 'langium'
 import { parseHelper } from 'langium/test'
 import type { Model } from 'object-oriented-c-language'

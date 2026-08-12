@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test } from './compat.js'
 import { URI } from 'langium'
 import { parseHelper } from 'langium/test'
 import { DiagnosticSeverity } from 'vscode-languageserver-types'
