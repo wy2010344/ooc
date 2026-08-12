@@ -67,6 +67,27 @@ b get    // 42
 - 缺少类型参数、参数个数不匹配、给非泛型类型传参数都会警告，并按 `any` 处理（不影响运行）
 - 实例化后的类型照常做子类型检查：`Box<number>` 会检查 `get` 返回 `number`，`set` 参数为 `number`
 
+### 方法级泛型
+
+对象字面量方法（含 lambda 回调）和 `#type` 的方法签名都可以声明自己的类型参数 `<T>`，调用时从实参推断：
+
+```ooc
+list = {
+    map<T>(f: T): T { f }        // 调用 map 42 时 T 推断为 number
+};
+r: number = list map 42
+
+// #type 方法签名同样支持
+Container #type { wrap<T>(x: T): T };
+c: Container = { wrap(x) { x } };
+s: string = c wrap 42            // 警告：推断出 T=number，赋给 string
+```
+
+- 方法泛型参数只在方法签名内可见，方法体内可用（`y: T = x`）
+- 参数里的嵌套泛型会从实参对象反推：`make<T>(b: Box<T>): T` 传入 `{ value() { 42 } }` 时，从 `Box<T>` 的 `value(): T` 与实参的 `value(): number` 反推 `T=number`
+- 推断不出的占位按 `any` 处理（"未声明又不能推断，退回 any"），不误报
+- 泛型 typedef 实例化后，其上的方法级泛型签名保留，可继续独立推断
+
 ## 上下文类型回填
 
 有注解的赋值会把声明类型带回对象字面量方法体：**无注解参数按声明签名自动回填**，方法体内部不用重复标注。
