@@ -45,7 +45,7 @@ const builtinMethods: Record<string, Map<string, MethodSig[]>> = {
     ['+', [builtinMethod([numberType], numberType)]],
     ['-', [builtinMethod([numberType], numberType)]],
     ['*', [builtinMethod([numberType], numberType)]],
-    ['//', [builtinMethod([numberType], numberType)]],
+    ['/', [builtinMethod([numberType], numberType)]],
     ['%', [builtinMethod([numberType], numberType)]],
     ['>', [builtinMethod([numberType], booleanType)]],
     ['<', [builtinMethod([numberType], booleanType)]],
