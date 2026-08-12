@@ -14,7 +14,7 @@ OOC 是一门极简的消息传递语言：没有函数调用，只有「给对�
 | `packages/language` | 核心：Langium 语法、静态类型检查器、解释器、LSP 服务 |
 | `packages/cli` | CLI：`interpret`（解释执行）与 `generate`（JS 生成，未实现） |
 | `packages/extension` | VS Code 插件（LSP + hover + 语义高亮） |
-| `packages/example` | 浏览器 demo（Vite） |
+| `packages/example` | 浏览器 demo（esbuild 打包） |
 | `docs/` | Rspress 文档站 |
 
 ## 构建与测试
@@ -39,7 +39,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
   - 消息派发顺序（`sendMessage`）：方法函数 → `methodNotFound` → JS 属性读/写 → `numDef` → `objectDefine` → `methodNotFound`。
 - **类型注解纯装饰**：`type-checker.ts`（~1400 行）实现联合类型、字面量、可区分联合 guard 收窄、泛型实例化、上下文类型回填。**类型检查与运行是独立分支**：解释器（`interpreter/host.ts` 的 `createInterpretAction`）从不因类型诊断而中断，只拦语法错误；类型检查走 IDE/LSP 校验，或 `interpreter/host.ts` 的 `createTypeCheckAction`（CLI `type-check` 指令用）。
 - **模块**：`.ooc` 文件最后一条表达式是导出值；`#import` 相对路径解析（`module-path.ts` 纯字符串实现，Node/浏览器一致）。
-- **运算符无优先级**（左结合、同优先级），需要先算就加括号；`//` 是注释不是除法，除法用消息形式：`12 '/' 3` 或 `12 "/ 3`。
+- **运算符无优先级**（左结合、同优先级），需要先算就加括号；`//` 是注释不是除法，除法用消息形式：`12 "/ 3`。
 - **作用域**：`KVPair` 链式作用域；未定义标识符回退到 `globalThis`（浏览器/Node 通用），因此能裸用 `Math`、`Object`。
 
 ## 常用任务
