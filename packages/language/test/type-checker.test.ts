@@ -748,6 +748,120 @@ describe('跨模块 #import 类型', () => {
   })
 })
 
+describe('类型选择性导入', () => {
+  async function loadImport(
+    name: string,
+    source: string,
+  ): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(
+    uri: string,
+    source: string,
+  ): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  test('选择性导入：语法解析不报错', async () => {
+    const doc = await parse(`
+        math = #import 'math' { Circle }
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('选择性导入：只导入指定类型', async () => {
+    await loadImport('shapes', `
+        Circle #type { radius(): number };
+        Square #type { side(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'sel-import1.ooc',
+      `shapes = #import 'shapes' { Circle };
+       c: shapes#Circle = shapes make;
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('选择性导入：未导入的类型不可见', async () => {
+    await loadImport('shapes2', `
+        Circle #type { radius(): number };
+        Square #type { side(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'sel-import2.ooc',
+      `shapes = #import 'shapes2' { Circle };
+       s: Square = { side() { 4 } }`,
+    )
+    expect(messages(diags).join('\n')).toContain('未知类型')
+  })
+
+  test('选择性导入：带别名导入', async () => {
+    await loadImport('shapes3', `
+        Circle #type { radius(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'sel-import3.ooc',
+      `shapes = #import 'shapes3' { Circle as Circle2D };
+       c: shapes#Circle2D = shapes make;
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('选择性导入：混合导入运行时对象 + 类型', async () => {
+    await loadImport('m5', `
+        Circle #type { radius(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'sel-import4.ooc',
+      `m = #import 'm5' { Circle };
+       c: m#Circle = m make;
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('选择性导入：导入多个类型', async () => {
+    await loadImport('shapes4', `
+        Circle #type { radius(): number };
+        Square #type { side(): number };
+        { circle(): Circle { { radius() { 1 } } }, square(): Square { { side() { 2 } } } }
+    `)
+    const diags = await checkModule(
+      'sel-import5.ooc',
+      `shapes = #import 'shapes4' { Circle, Square };
+       c: shapes#Circle = shapes circle;
+       s: shapes#Square = shapes square;
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('选择性导入：导入不存在的类型告警', async () => {
+    await loadImport('shapes5', `
+        Circle #type { radius(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'sel-import6.ooc',
+      `shapes = #import 'shapes5' { Square };
+       c: shapes#Circle = shapes make;
+       c`,
+    )
+    expect(messages(diags).join('\n')).toContain('不存在')
+  })
+})
+
 describe('方法层泛型', () => {
   async function loadImport(
     name: string,
@@ -832,6 +946,66 @@ describe('方法层泛型', () => {
        b`,
     )
     expect(messages(diags)).toEqual([])
+  })
+
+  test('方法泛型：调用点显式类型参数解析', async () => {
+    const doc = await parse(`
+        list = { map<T>(f: T): T { f } };
+        r = list map<number> 42
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('方法泛型：调用点显式类型参数正确无告警', async () => {
+    const diags = await diagnostics(`
+        list = { map<T>(f: T): T { f } };
+        r: number = list map<number> 42
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('方法泛型：调用点显式类型参数错误告警', async () => {
+    const diags = await diagnostics(`
+        list = { map<T>(f: T): T { f } };
+        r: string = list map<number> 'str'
+    `)
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
+  })
+
+  test('方法泛型：调用点显式类型参数与推断等价', async () => {
+    const diags1 = await diagnostics(`
+        list = { map<T>(f: T): T { f } };
+        r1: number = list map 42
+    `)
+    const diags2 = await diagnostics(`
+        list = { map<T>(f: T): T { f } };
+        r2: number = list map<number> 42
+    `)
+    expect(messages(diags1)).toEqual(messages(diags2))
+  })
+
+  test('方法泛型：调用点多类型参数', async () => {
+    const diags = await diagnostics(`
+        fn = { test<A, B>(a: A, b: B): A { a } };
+        r: number = fn test<number, string> 42 'hello'
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('方法泛型：调用点类型参数个数不匹配告警', async () => {
+    const diags = await diagnostics(`
+        fn = { test<A, B>(a: A, b: B): A { a } };
+        r = fn test<number> 42 'hello'
+    `)
+    expect(messages(diags).join('\n')).toContain('类型参数')
+  })
+
+  test('方法泛型：调用点显式参数类型不符告警', async () => {
+    const diags = await diagnostics(`
+        fn = { id<T>(x: T): T { x } };
+        r = fn id<string> 42
+    `)
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
   })
 })
 
@@ -962,6 +1136,129 @@ describe('typedef 继承', () => {
       `base = #import 'base';
        Dog #type { ...Animal, bark(): string };
        d: Dog = { speak() { 'wang' }, bark() { 'bow' } }`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+})
+
+describe('typedef 方法级泛型', () => {
+  async function loadImport(
+    name: string,
+    source: string,
+  ): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(
+    uri: string,
+    source: string,
+  ): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  test('typedef 方法级泛型声明解析', async () => {
+    const doc = await parse(`
+        Container #type { wrap<T>(x: T): T }
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('typedef 方法级泛型：调用时从实参推断返回类型', async () => {
+    const diags = await diagnostics(`
+        Container #type { wrap<T>(x: T): T };
+        c: Container = { wrap(x) { x } };
+        r: number = c wrap 42;
+        r
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('typedef 方法级泛型：推断结果参与赋值检查', async () => {
+    const diags = await diagnostics(`
+        Container #type { wrap<T>(x: T): T };
+        c: Container = { wrap(x) { x } };
+        s: string = c wrap 42;
+        s
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('嵌套泛型推断：Box<T> 从实参对象方法签名反推 T', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { value(): T };
+        list = {
+            make<T>(b: Box<T>): T { b value }
+        };
+        r: number = list make { value() { 42 } };
+        r
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('嵌套泛型推断：反推的 T 参与返回类型检查（回退 any 会漏报）', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { value(): T };
+        list = {
+            make<T>(b: Box<T>): T { b value }
+        };
+        n: number = list make { value() { 'x' } };
+        n
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('泛型实例化保留方法级泛型签名', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T, map<U>(f: U): U };
+        b: Box<number> = { get() { 42 }, map(f) { f } };
+        r: string = b map 'x';
+        r
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('方法级泛型与泛型 typedef 共存', async () => {
+    const diags = await diagnostics(`
+        Box #type<T> { get(): T };
+        Util #type { open<U>(b: Box<U>): U };
+        u: Util = { open(b) { b get } };
+        n: number = u open { get() { 42 } };
+        n
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('统一：导出对象类型成员与方法共存', async () => {
+    await loadImport(
+      'geom4',
+      `Point #type { x: number };
+       { origin(): Point { { x() { 0 } } } }`,
+    )
+    const diags = await checkModule(
+      'ns-demo6.ooc',
+      `g = #import 'geom4';
+       p: g#Point = g origin;
+       q: g#Point = { x() { 1 } };
+       p x`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('统一：导出对象携带类型成员，跨文档泛型访问可用', async () => {
+    await loadImport(
+      'geom5',
+      `Box #type<T> { get(): T };
+       { fresh<T>(x: T): Box<T> { { get() { x } } } }`,
+    )
+    const diags = await checkModule(
+      'ns-demo7.ooc',
+      `g = #import 'geom5';
+       b: g#Box<string> = g fresh 'hi';
+       b get`,
     )
     expect(messages(diags)).toEqual([])
   })

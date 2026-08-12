@@ -43,6 +43,7 @@ export const DIAGNOSTIC_CODES = {
   duplicateMethod: 'duplicateMethod',
   duplicateParam: 'duplicateParam',
   noImplicitAny: 'noImplicitAny',
+  typeNotFound: 'typeNotFound',
 } as const
 
 /**

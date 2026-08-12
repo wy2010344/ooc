@@ -9,8 +9,13 @@ TopStatement:
 ;
 
 ImportStatement:
-    name=ID '=' '#import' path=STRING
-;
+    name=ID '=' '#import' path=STRING (ImportList)?;
+
+ImportList:
+    '{' (items+=ImportItem (',' items+=ImportItem)*)? '}';
+
+ImportItem:
+    name=ID ('as' alias=ID)?;
 
 //类型别名（#type 指令）：成员只声明签名，无实现；#type 后用 <> 声明泛型类型参数
 TypeDef:
@@ -24,6 +29,7 @@ TypeMemberList:
 
 TypeMember:
     name=MethodDefName 
+        ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')?
         ('(' ((params+=Param (',' params+=Param)*)?) ')')? 
         (':' typeAnnotation=Type)?
 ;
@@ -94,9 +100,9 @@ NamedExpression:
 MessageChain:
     primary=Primary message=Message;
 
-/**消息名 消息参数*/
+/**消息名 消息参数 消息类型参数（可选）*/
 Message:
-    name=MethodCallName args+=Primary*;
+    name=MethodCallName ('<' typeArgs+=Type (',' typeArgs+=Type)* '>')? args+=Primary*;
 
 MethodCallName:
     value=(Ref|StID|Str);

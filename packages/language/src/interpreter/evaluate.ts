@@ -27,8 +27,10 @@ export async function interpret(
   rootPath: string,
   interpretAction: InterpretAction,
 ) {
-  // 收集导入语句
-  const imports = model.expressions.filter((x) => x.$type == 'ImportStatement')
+  // 收集导入语句（ImportStatement 与 ImportList 均为导入）
+  const imports = model.expressions.filter(
+    (x) => x.$type === 'ImportStatement' || x.$type === 'ImportList',
+  ) as Array<{ path: string; name: string; $type: string }>
   // 处理导入（支持动态加载模块）
   const out = await Promise.all(
     imports.map((importStmt) =>
@@ -47,6 +49,7 @@ export async function interpret(
         )
         return
       case 'ImportStatement':
+      case 'ImportList':
         const value = out[importIndex]
         scope = addScope(scope, e.name, value)
         importIndex++

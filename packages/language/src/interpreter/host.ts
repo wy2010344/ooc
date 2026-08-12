@@ -191,7 +191,7 @@ export function createTypeCheckAction(context: DefaultSharedModuleContext) {
     }
     const extensions = services.LanguageMetaData.fileExtensions
     for (const stmt of model.expressions) {
-      if (stmt.$type !== 'ImportStatement') {
+      if (stmt.$type !== 'ImportStatement' && stmt.$type !== 'ImportList') {
         continue
       }
       const importStmt = stmt as ImportStatement
