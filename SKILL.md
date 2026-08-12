@@ -52,6 +52,6 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 
 ## 注意
 
-- 类型检查的 `//` 除法键值已改为 `'/'`；语法里 `MessageInfixRight` 仍保留 `'//'` 分支但被注释 token 遮蔽，不可达。
+- 类型检查的 `//` 除法键值已改为 `'/'`；`//` 是单行注释（`SL_COMMENT`），`MessageInfixRight` 里不再声明 `'//'` 中缀。
 - 测试/构建的 toolchain 必须能用纯 JS（或 esbuild 这种子进程可执行文件）跑：任何 dlopen 原生 `.node` 的库（vitest4/rolldown、vite/rollup、SWC 等）在 Android/Termux 都不可用，别引入。
 - 本项目使用了 `.agents/skills/langium/SKILL.md`（由 `skills-lock.json` 记录的已安装 Langium skill），涉及 Langium 机制细节时阅读它。

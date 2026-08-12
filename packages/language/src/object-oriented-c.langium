@@ -85,7 +85,7 @@ MessagePipRight:
     '|' value=(NamedExpression | MessageChain);
 
 MessageInfixRight:
-    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'//'|'%') value=Primary;
+    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'%') value=Primary;
 
 NamedExpression:
     param=ID '=>' expression=Expression;
