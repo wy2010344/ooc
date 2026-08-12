@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "computedHash": "f361db4e15e6bfd562a9282b1dccda513910a50061f9e838ce017be9c69dde3f"
+    },
+    "langium": {
+      "source": "eclipse-langium/langium-ai",
+      "sourceType": "github",
+      "skillPath": "skills/langium/SKILL.md",
+      "computedHash": "e4a200591c6938b9c3b5382ec54f046044db1352f767b037781642b3042d0215"
+    }
+  }
+}
