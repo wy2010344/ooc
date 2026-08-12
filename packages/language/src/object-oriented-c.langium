@@ -41,6 +41,7 @@ Method:
 
 MethodAll:
     name=MethodDefName 
+        ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')?
         ('(' 
             ( (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)?
              | ('...' restParam=Param)
@@ -106,8 +107,9 @@ Type:
 
 //类型名：具名类型 / 内置 / 字面量（用于可区分联合的判别，如 kind(): 'circle'）
 //泛型实例化：Box<number>、Pair<A, B>
+//命名空间访问：#import 导入的模块类型成员，如 math#Circle、math#area（方法返回类型）
 TypeName:
-    name=(ID | Nil | Bool | Str | Num) ('<' typeArgs+=Type (',' typeArgs+=Type)* '>')?;
+    ((ns=ID '#')? name=(ID | Nil | Bool | Str | Num)) ('<' typeArgs+=Type (',' typeArgs+=Type)* '>')?;
 
 ObjectDef:
     '{' 

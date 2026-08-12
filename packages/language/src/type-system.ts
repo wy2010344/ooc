@@ -19,12 +19,19 @@ export interface ObjectTypeInfo {
   /** 继承的父类型（泛型占位等尚未实例化的形式保留在这里，实例化时展开/合并） */
   extendsType?: TypeInfo
   methods: Map<string, MethodSig[]>
+  /**
+   * 类型成员（同像性：#import 模块顶层 typedef 挂载为导出对象的类型成员）。
+   * 导入方用 math#Circle 访问；泛型 typedef 存模板，params 用于 math#Box<number> 实例化。
+   */
+  typeMembers?: Map<string, { type: TypeInfo; params: string[] }>
 }
 
 export interface MethodSig {
   params: (TypeInfo | undefined)[]
   rest?: TypeInfo
   returns: TypeInfo
+  /** 方法级泛型参数名（如 { map<T>(...) }）：签名里的占位在调用时推断/实例化 */
+  typeParams?: string[]
 }
 
 export const anyType: TypeInfo = { kind: 'any' }
@@ -173,8 +180,15 @@ export function isSubtype(a: TypeInfo, b: TypeInfo): boolean {
 /**
  * 方法签名兼容性：a 的方法能被当作 b 的方法使用。
  * 无注解的参数/返回即 any，天然兼容；参数协变，返回协变。
+ * 含方法级泛型参数（typeParams）的签名占位无法静态精确比较，宽松放行（只比参数个数）。
  */
 function sigCompatible(a: MethodSig, b: MethodSig): boolean {
+  if (a.typeParams || b.typeParams) {
+    if (!a.rest && b.params.length > a.params.length) {
+      return false
+    }
+    return true
+  }
   if (!a.rest && b.params.length > a.params.length) {
     return false
   }

@@ -64,13 +64,13 @@ const objectDesc = '对象'
 
 /**
  * 被导入模块的静态信息：result 是模块最后一条表达式的结果类型
- * （与运行时 interpret 返回 last 一致）；typedefs 是该模块及其导入链里
- * 声明的全部类型别名，合并进导入方后跨文档可见。
+ * （与运行时 interpret 返回 last 一致）；typeMembers 是该模块及其导入链里
+ * 声明的全部类型别名，作为模块导出对象的类型成员（math#Circle），
+ * 同时为兼容也平铺合并进导入方文档（直接按名引用）。
  */
 export interface ImportedModuleType {
   result: TypeInfo
-  typedefs: Map<string, TypeInfo>
-  typedefParams: Map<string, string[]>
+  typeMembers: Map<string, { type: TypeInfo; params: string[] }>
 }
 
 /**
@@ -187,14 +187,23 @@ export class ObjectOrientedCTypeChecker {
     }
     return {
       result: last,
-      typedefs: new Map(this.typedefs),
-      typedefParams: new Map(this.typedefParams),
+      typeMembers: this.exportedTypeMembers(),
     }
   }
 
+  /** 模块及其导入链里声明的全部 typedef，作为模块导出对象的类型成员 */
+  private exportedTypeMembers(): Map<string, { type: TypeInfo; params: string[] }> {
+    const members = new Map<string, { type: TypeInfo; params: string[] }>()
+    for (const [name, type] of this.typedefs) {
+      members.set(name, { type, params: this.typedefParams.get(name) ?? [] })
+    }
+    return members
+  }
+
   /**
-   * 处理 #import：把被导入模块的 typedef 合并进当前文档（跨模块 typedef 引用），
-   * 绑定名类型 = 模块结果类型；文档不可见时回退 anyType。
+   * 处理 #import：绑定名类型 = 模块结果类型（对象时挂上模块的类型成员，
+   * 支持 math#Circle 命名空间访问）；同时为兼容把模块 typedef 平铺合并进当前文档。
+   * 文档不可见时回退 anyType。
    */
   private applyImport(stmt: ImportStatement, env: TypeEnv): void {
     let imported: ImportedModuleType | undefined
@@ -208,13 +217,36 @@ export class ObjectOrientedCTypeChecker {
       env.define(stmt.name, anyType)
       return
     }
-    for (const [name, t] of imported.typedefs) {
+    for (const [name, member] of imported.typeMembers) {
       if (!this.typedefs.has(name)) {
-        this.typedefs.set(name, t)
-        this.typedefParams.set(name, imported.typedefParams.get(name) ?? [])
+        this.typedefs.set(name, member.type)
+        this.typedefParams.set(name, member.params)
       }
     }
-    env.define(stmt.name, imported.result)
+    env.define(stmt.name, this.withTypeMembers(imported.result, imported.typeMembers, stmt.name))
+  }
+
+  /** 把类型成员挂到模块绑定类型上：对象时复制合并，否则包成仅含类型成员的对象 */
+  private withTypeMembers(
+    result: TypeInfo,
+    members: Map<string, { type: TypeInfo; params: string[] }>,
+    moduleName: string,
+  ): TypeInfo {
+    if (members.size === 0) {
+      return result
+    }
+    const base: ObjectTypeInfo =
+      result.kind === 'object'
+        ? {
+            kind: 'object',
+            name: moduleName,
+            methods: new Map(result.methods),
+            parent: result.parent,
+            extendsType: result.extendsType,
+          }
+        : { kind: 'object', name: moduleName, methods: new Map() }
+    base.typeMembers = new Map(members)
+    return base
   }
 
   private checkTopStatement(
@@ -261,11 +293,11 @@ export class ObjectOrientedCTypeChecker {
       const sigs = placeholder.methods.get(name) ?? []
       sigs.push({
         params: member.params.map((p) =>
-          this.resolveParamAnnotation(p, accept, typeParams),
+          this.resolveParamAnnotation(p, accept, typeParams, env),
         ),
         rest: undefined,
         returns: member.typeAnnotation
-          ? this.resolveAnnotation(member.typeAnnotation, accept, typeParams)
+          ? this.resolveAnnotation(member.typeAnnotation, accept, typeParams, env)
           : anyType,
       })
       placeholder.methods.set(name, sigs)
@@ -273,7 +305,7 @@ export class ObjectOrientedCTypeChecker {
     placeholder.name = stmt.name
     // 继承：'...' 父类型（单继承，父类型联合时 A 本身变成联合）
     const parent = stmt.body.extends
-      ? this.resolveAnnotation(stmt.body.extends, accept, typeParams)
+      ? this.resolveAnnotation(stmt.body.extends, accept, typeParams, env)
       : undefined
     if (!parent) {
       this.registerTypeDef(stmt.name, placeholder, typeParams, env)
@@ -346,7 +378,7 @@ export class ObjectOrientedCTypeChecker {
       // 提前注册名字，让方法体可以通过变量名自引用
       const t: ObjectTypeInfo = { kind: 'object', methods: new Map() }
       const expected = stmt.typeAnnotation
-        ? this.resolveAnnotation(stmt.typeAnnotation, accept)
+        ? this.resolveAnnotation(stmt.typeAnnotation, accept, undefined, env)
         : undefined
       env.define(stmt.name, t)
       this.collectObject(objDef, env, accept, t)
@@ -357,12 +389,19 @@ export class ObjectOrientedCTypeChecker {
         t,
         accept,
         expected,
+        env,
       )
       env.define(stmt.name, declared)
       return
     }
     const inferred = this.inferExpression(stmt.expression, env, accept)
-    const declared = this.checkAnnotation(stmt.typeAnnotation, inferred, accept)
+    const declared = this.checkAnnotation(
+      stmt.typeAnnotation,
+      inferred,
+      accept,
+      undefined,
+      env,
+    )
     const prev = env.lookup(stmt.name)
     if (prev && prev.kind !== 'any' && declared.kind !== 'any') {
       if (!isSubtype(declared, prev)) {
@@ -381,11 +420,12 @@ export class ObjectOrientedCTypeChecker {
     inferred: TypeInfo,
     accept: ValidationAcceptor,
     expected?: TypeInfo,
+    env?: TypeEnv,
   ): TypeInfo {
     if (!annotation) {
       return inferred
     }
-    const exp = expected ?? this.resolveAnnotation(annotation, accept)
+    const exp = expected ?? this.resolveAnnotation(annotation, accept, undefined, env)
     if (!isSubtype(inferred, exp)) {
       accept(
         'warning',
@@ -414,7 +454,7 @@ export class ObjectOrientedCTypeChecker {
       }
     }
     for (const method of objDef.methods) {
-      this.collectMethod(method, objType, accept)
+      this.collectMethod(method, objType, accept, env)
     }
     return objType
   }
@@ -423,28 +463,43 @@ export class ObjectOrientedCTypeChecker {
     method: Method,
     objType: ObjectTypeInfo,
     accept: ValidationAcceptor,
+    env: TypeEnv,
   ): void {
     const name = this.getMethodName(method.name)
     const sigs = objType.methods.get(name) ?? []
     if (isMethodAll(method)) {
+      // 方法级泛型参数：map<T>(...) 里 T 是占位，调用时按实参推断
+      const methodTypeParams = method.typeParams.map((p) => p.name)
       sigs.push({
         params: method.params.map((p) =>
-          this.resolveParamAnnotation(p, accept),
+          this.resolveParamAnnotation(p, accept, methodTypeParams, env),
         ),
         rest: method.restParam
           ? (method.restParam.typeAnnotation
-              ? this.resolveAnnotation(method.restParam.typeAnnotation, accept)
+              ? this.resolveAnnotation(
+                  method.restParam.typeAnnotation,
+                  accept,
+                  methodTypeParams,
+                  env,
+                )
               : anyType)
           : undefined,
         returns: method.returnType
-          ? this.resolveAnnotation(method.returnType, accept)
+          ? this.resolveAnnotation(
+              method.returnType,
+              accept,
+              methodTypeParams,
+              env,
+            )
           : anyType,
+        typeParams:
+          methodTypeParams.length > 0 ? methodTypeParams : undefined,
       })
     } else {
       sigs.push({
         params: [],
         returns: method.typeAnnotation
-          ? this.resolveAnnotation(method.typeAnnotation, accept)
+          ? this.resolveAnnotation(method.typeAnnotation, accept, undefined, env)
           : anyType,
       })
     }
@@ -476,7 +531,7 @@ export class ObjectOrientedCTypeChecker {
           : undefined
       if (isMethodBind(method)) {
         const inferred = this.inferExpression(method.expression, bodyEnv, accept)
-        this.checkAnnotation(method.typeAnnotation, inferred, accept)
+        this.checkAnnotation(method.typeAnnotation, inferred, accept, undefined, bodyEnv)
         const sigs = objType.methods.get(name)
         if (sigs && sigs.length > 0) {
           const last = sigs[sigs.length - 1]
@@ -531,6 +586,11 @@ export class ObjectOrientedCTypeChecker {
     context?: MethodSig,
   ): MethodSig {
     const methodEnv = env.child()
+    // 方法级泛型参数：map<T>(...) 里 T 在方法体内是类型占位
+    const methodTypeParams = method.typeParams.map((p) => p.name)
+    for (const p of methodTypeParams) {
+      methodEnv.define(p, { kind: 'name', name: p })
+    }
     const params = method.params.map((p, i) =>
       this.bindParam(p, methodEnv, accept, context?.params[i]),
     )
@@ -541,7 +601,7 @@ export class ObjectOrientedCTypeChecker {
       context?.rest,
     )
     const declaredReturn = method.returnType
-      ? this.resolveAnnotation(method.returnType, accept)
+      ? this.resolveAnnotation(method.returnType, accept, undefined, methodEnv)
       : anyType
     if (method.guardExpression) {
       // 可区分联合的判别收窄：
@@ -574,9 +634,14 @@ export class ObjectOrientedCTypeChecker {
       }
     }
     if (method.returnType) {
-      this.checkAnnotation(method.returnType, returnType, accept)
+      this.checkAnnotation(method.returnType, returnType, accept, undefined, methodEnv)
     }
-    return { params, rest, returns: method.returnType ? declaredReturn : returnType }
+    return {
+      params,
+      rest,
+      returns: method.returnType ? declaredReturn : returnType,
+      typeParams: methodTypeParams.length > 0 ? methodTypeParams : undefined,
+    }
   }
 
   private bindParam(
@@ -599,7 +664,7 @@ export class ObjectOrientedCTypeChecker {
       })
     }
     const t = param.typeAnnotation
-      ? this.resolveAnnotation(param.typeAnnotation, accept)
+      ? this.resolveAnnotation(param.typeAnnotation, accept, undefined, env)
       : contextType ?? anyType
     env.define(param.name, t)
     return t
@@ -734,6 +799,7 @@ export class ObjectOrientedCTypeChecker {
     param: Param | undefined,
     accept: ValidationAcceptor,
     typeParams?: string[],
+    env?: TypeEnv,
   ): TypeInfo | undefined {
     if (!param) {
       return undefined
@@ -741,16 +807,17 @@ export class ObjectOrientedCTypeChecker {
     if (!param.typeAnnotation) {
       return anyType
     }
-    return this.resolveAnnotation(param.typeAnnotation, accept, typeParams)
+    return this.resolveAnnotation(param.typeAnnotation, accept, typeParams, env)
   }
 
   private resolveAnnotation(
     type: Type,
     accept: ValidationAcceptor,
     typeParams?: string[],
+    env?: TypeEnv,
   ): TypeInfo {
     const resolved = type.parts.map((part) =>
-      this.resolveTypeName(part, accept, typeParams),
+      this.resolveTypeName(part, accept, typeParams, env),
     )
     return unionOf(resolved)
   }
@@ -759,8 +826,13 @@ export class ObjectOrientedCTypeChecker {
     part: TypeName,
     accept: ValidationAcceptor,
     typeParams?: string[],
+    env?: TypeEnv,
   ): TypeInfo {
     const n = part.name
+    // 命名空间访问：math#Circle（模块导出对象的类型成员）或 math#add（方法返回类型）
+    if (part.ns) {
+      return this.resolveNamespaceMember(part, accept, typeParams, env)
+    }
     // 字面量类型：'circle' / 42 / true，用于可区分联合的判别
     if (typeof n !== 'string') {
       if (isNil(n)) {
@@ -780,6 +852,11 @@ export class ObjectOrientedCTypeChecker {
     // 当前 typedef 的类型参数占位：实例化时替换
     if (typeParams?.includes(n)) {
       return { kind: 'name', name: n }
+    }
+    // 环境中的类型参数占位（checkMethod 把方法级泛型参数 T 定义进方法环境）
+    const named = env?.lookup(n)
+    if (named?.kind === 'name' && named.name === n) {
+      return named
     }
     switch (n) {
       case 'any':
@@ -806,7 +883,7 @@ export class ObjectOrientedCTypeChecker {
         return anyType
       }
       const args = part.typeArgs.map((t) =>
-        this.resolveAnnotation(t, accept, typeParams),
+        this.resolveAnnotation(t, accept, typeParams, env),
       )
       if (params.length !== args.length) {
         accept(
@@ -833,6 +910,89 @@ export class ObjectOrientedCTypeChecker {
     accept('warning', `未知类型 '${n}'`, {
       node: part,
       property: 'name',
+      data: diagnosticData('unknownType'),
+    })
+    return anyType
+  }
+
+  /**
+   * math#Circle：模块导出对象类型下的类型成员（#import 挂载的 typedef）。
+   * math#add：对象类型下方法 add 的返回类型（同像性：方法与类型同处对象）。
+   * 泛型成员 math#Box<number> 按类型参数实例化。
+   */
+  private resolveNamespaceMember(
+    part: TypeName,
+    accept: ValidationAcceptor,
+    typeParams: string[] | undefined,
+    env: TypeEnv | undefined,
+  ): TypeInfo {
+    const nsName = part.ns!
+    const nsType = env?.lookup(nsName)
+    if (!nsType || nsType.kind !== 'object') {
+      accept(
+        'warning',
+        `命名空间 '${nsName}' 不是对象类型，无法访问 '${nsName}#${part.name}'`,
+        { node: part, property: 'ns', data: diagnosticData('unknownType') },
+      )
+      return anyType
+    }
+    const memberName =
+      typeof part.name === 'string' ? part.name : String(part.name.value)
+    const member = nsType.typeMembers?.get(memberName)
+    if (member) {
+      if (part.typeArgs && part.typeArgs.length > 0) {
+        if (member.params.length === 0) {
+          accept(
+            'warning',
+            `类型 '${part.ns}#${memberName}' 不是泛型，不需要类型参数`,
+            { node: part, data: diagnosticData('notGeneric') },
+          )
+          return anyType
+        }
+        const args = part.typeArgs.map((t) =>
+          this.resolveAnnotation(t, accept, typeParams, env),
+        )
+        if (args.length !== member.params.length) {
+          accept(
+            'warning',
+            `类型 '${part.ns}#${memberName}' 期望 ${member.params.length} 个类型参数，却给了 ${args.length} 个`,
+            { node: part, data: diagnosticData('typeArgCount') },
+          )
+          return anyType
+        }
+        return instantiate(member.type, member.params, args)
+      }
+      if (member.params.length > 0) {
+        accept(
+          'warning',
+          `泛型类型 '${part.ns}#${memberName}' 缺少类型参数，按 any 处理`,
+          {
+            node: part,
+            property: 'name',
+            data: diagnosticData('missingTypeArg'),
+          },
+        )
+        return anyType
+      }
+      return member.type
+    }
+    // 方法返回类型：math#add = add 方法的返回类型
+    const sigs = nsType.methods.get(memberName)
+    if (sigs && sigs.length > 0) {
+      const sig = sigs[sigs.length - 1]
+      if (sig.typeParams && sig.typeParams.length > 0) {
+        // 泛型方法未实例化：占位按 any
+        return instantiate(
+          sig.returns,
+          sig.typeParams,
+          sig.typeParams.map(() => anyType),
+        )
+      }
+      return sig.returns
+    }
+    accept('warning', `类型 '${part.ns}#${memberName}' 不存在`, {
+      node: part,
+      property: 'ns',
       data: diagnosticData('unknownType'),
     })
     return anyType
@@ -1113,9 +1273,20 @@ export class ObjectOrientedCTypeChecker {
     node: AstNode,
     receiverDesc: string,
   ): TypeInfo {
+    // 非泛型签名优先精确匹配
     for (const sig of sigs) {
-      if (this.argsCompatible(sig, args)) {
+      if (!sig.typeParams && this.argsCompatible(sig, args)) {
         return sig.returns
+      }
+    }
+    // 方法泛型：map<T>(f: T -> U): U 从实参推断 T，实例化签名后匹配
+    for (const sig of sigs) {
+      if (!sig.typeParams) {
+        continue
+      }
+      const inst = this.instantiateGenericSig(sig, args)
+      if (this.argsCompatible(inst, args)) {
+        return inst.returns
       }
     }
     const expected = sigs
@@ -1130,6 +1301,35 @@ export class ObjectOrientedCTypeChecker {
       { node, data: diagnosticData('callArgsMismatch') },
     )
     return sigs[0]?.returns ?? anyType
+  }
+
+  /**
+   * 方法泛型实例化：（调用方视角）从实参类型推断签名里的占位类型参数。
+   * 顶层占位参数直接绑定实参类型；无法由实参推断出的占位按 any 处理
+   * （“未声明又不能推断，退回 any”）。随后用推断结果实例化参数/返回类型。
+   */
+  private instantiateGenericSig(
+    sig: MethodSig,
+    args: TypeInfo[],
+  ): MethodSig {
+    const typeParams = sig.typeParams!
+    const mapping = new Map<string, TypeInfo>()
+    for (let i = 0; i < sig.params.length && i < args.length; i++) {
+      const p = sig.params[i]
+      if (p && p.kind === 'name' && typeParams.includes(p.name)) {
+        const prev = mapping.get(p.name)
+        // 多次出现取联合：T 同时需满足 number | string
+        mapping.set(p.name, prev ? unionOf([prev, args[i]]) : args[i])
+      }
+    }
+    const types = typeParams.map((t) => mapping.get(t) ?? anyType)
+    return {
+      params: sig.params.map((p) =>
+        p ? instantiate(p, typeParams, types) : undefined,
+      ),
+      rest: sig.rest ? instantiate(sig.rest, typeParams, types) : undefined,
+      returns: instantiate(sig.returns, typeParams, types),
+    }
   }
 
   private argsCompatible(sig: MethodSig, args: TypeInfo[]): boolean {

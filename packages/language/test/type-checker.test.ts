@@ -698,6 +698,141 @@ describe('跨模块 #import 类型', () => {
     )
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
+
+  test('命名空间访问：math#类型成员（混合在导出对象里）', async () => {
+    await loadImport(
+      'geom',
+      `Circle #type { area(): number, radius(): number };
+       { make(): Circle { { area() { 1 }, radius() { 2 } } } }`,
+    )
+    const diags = await checkModule(
+      'ns-demo1.ooc',
+      `geom = #import 'geom';
+       c: geom#Circle = geom make;
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('命名空间访问：math#类型成员不匹配会告警', async () => {
+    await loadImport('geom2', `Circle #type { area(): number }`)
+    const diags = await checkModule(
+      'ns-demo2.ooc',
+      `geom = #import 'geom2';
+       c: geom#Circle = { area() { 'x' } };
+       c`,
+    )
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('命名空间访问：math#方法名取返回类型', async () => {
+    await loadImport('m3', `{ add(a: number, b: number): number { a + b } }`)
+    const diags = await checkModule(
+      'ns-demo3.ooc',
+      `m = #import 'm3';
+       x: m#add = 1;
+       x`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('命名空间访问：math#未知成员告警', async () => {
+    await loadImport('m4', `{ add(a: number, b: number): number { a + b } }`)
+    const diags = await checkModule(
+      'ns-demo4.ooc',
+      `m = #import 'm4';
+       x: m#nope = 1;
+       x`,
+    )
+    expect(messages(diags).join('\n')).toContain("类型 'm#nope' 不存在")
+  })
+})
+
+describe('方法层泛型', () => {
+  async function loadImport(
+    name: string,
+    source: string,
+  ): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(
+    uri: string,
+    source: string,
+  ): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  test('方法泛型声明：map<T> 解析不报错', async () => {
+    const doc = await parse(`
+        list = {
+            map<T>(f) { f }
+        }
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('方法泛型：从实参推断返回类型，无告警', async () => {
+    const diags = await diagnostics(`
+        list = {
+            map<T>(f: T): T { f }
+        };
+        r = list map 42;
+        r
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('方法泛型：返回类型参与赋值检查（推断 T=number）', async () => {
+    const diags = await diagnostics(`
+        id = {
+            identity<T>(x: T): T { x }
+        };
+        n: number = id identity 42;
+        n
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('方法泛型：推断不出时退回 any，不误报参数不匹配', async () => {
+    const diags = await diagnostics(`
+        wrap = {
+            make<T>(): T { nil }
+        };
+        w: string = wrap make;
+        w
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('方法泛型：方法体内 T 可作为类型注解', async () => {
+    const diags = await diagnostics(`
+        box = {
+            set<T>(x: T) { y: T = x }
+        };
+        box set 42
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('方法泛型：混合方法与类型成员（同像性）', async () => {
+    await loadImport(
+      'util',
+      `Box #type<T> { value(): T };
+       { make<T>(x: T): Box<T> { { value() { x } } } }`,
+    )
+    const diags = await checkModule(
+      'demo9.ooc',
+      `util = #import 'util';
+       b: util#Box<number> = util make 42;
+       b`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
 })
 
 describe('typedef 继承', () => {
