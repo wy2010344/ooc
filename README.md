@@ -37,9 +37,16 @@ await ooc.interpretPath('src/main.ooc')
 
 解释器不绑定具体文件系统，按运行场合注入：内存执行用 `EmptyFileSystem`，Node 环境读写文件用 `NodeFileSystem`。
 
+## 类型检查与运行是两个独立分支
+
+类型注解纯装饰，解释器**从不因类型诊断而中断**（语法错误除外）。类型检查只发生在两处：
+
+- **IDE / 编辑器**：VS Code 插件通过 LSP 实时校验，`ooc.json`（类似 tsconfig）控制每条规则的显示级别（off / warning / error）
+- **独立指令**：`ooc type-check <file>` 静态检查并打印诊断，有 error 级诊断时以非零退出码结束（适合 CI）
+
 ## 三个最容易踩的坑
 
-- `//` 是注释，**不是**除法（除法暂未提供）
+- `//` 是注释，**不是**除法；除法用消息形式：`12 '/' 3`（直接 `12 / 3` 解析不了，`/` 后必须跟消息名）
 - 字符串只能用单引号：`'hi'`
 - 调用方法用空格，不用括号：`calc add 3 4`，不是 `calc.add(3, 4)`
 - JS 对象的属性直接访问：`'abcdef' length`（6）；带参数则写入属性：`Math _answer 42`

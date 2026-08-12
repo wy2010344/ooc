@@ -1,17 +1,10 @@
 import { AstNode, LangiumDocument, URI } from 'langium'
 import { DefaultSharedModuleContext } from 'langium/lsp'
-import { parseHelper } from 'langium/test'
+import type { Diagnostic } from 'vscode-languageserver-types'
 import { run } from 'wy-helper'
-import {
-  codeOfDiagnostic,
-  filterDiagnostic,
-  loadOocConfig,
-  type OocConfig,
-} from '../diagnostics-config.js'
 import { ImportStatement, isModel, Model } from '../generated/ast.js'
 import { createObjectOrientedCServices } from '../object-oriented-c-module.js'
 import {
-  dirnameOf,
   extnameOf,
   joinPath,
   resolveModuleName,
@@ -20,10 +13,29 @@ import {
 import { interpret, type InterpretAction } from './evaluate.js'
 import { type Globals, withGlobals } from './scope.js'
 
+let nextInMemoryId = 0
+
 /**
- * 配置来源：显式传入，或 'auto'（从根目录 ooc.json 读取）。
+ * 把字符串源码建成文档并构建（链接），返回可执行/可校验的 LangiumDocument。
+ * 不用 langium/test 的 parseHelper：那会拉进 node:assert，浏览器 bundle 里无法加载。
  */
-export type ConfigSource = OocConfig | 'auto' | undefined
+async function parseStringToDocument(
+  services: ReturnType<typeof createObjectOrientedCServices>['ObjectOrientedC'],
+  txt: string,
+  documentUri?: string,
+): Promise<LangiumDocument<AstNode>> {
+  const extensions = services.LanguageMetaData.fileExtensions
+  const uri = URI.parse(
+    documentUri ?? `file:///in-memory-${nextInMemoryId++}${extensions[0] ?? ''}`,
+  )
+  const document = services.shared.workspace.LangiumDocumentFactory.fromString(
+    txt,
+    uri,
+  )
+  services.shared.workspace.LangiumDocuments.addDocument(document)
+  await services.shared.workspace.DocumentBuilder.build([document], {})
+  return document
+}
 
 /**
  * Node/CLI 当前工作目录；浏览器没有 process，返回空串（虚拟 FS 按 basename 查找模块）。
@@ -75,29 +87,30 @@ function executeOOC(
   )
 }
 
+/**
+ * 语法级错误（词法 / 解析失败）转成可读信息；类型错误不在此列，
+ * 类型检查与运行是两个独立分支，解释器一律不因类型诊断而中断。
+ */
+function syntaxErrorText(document: LangiumDocument): string | undefined {
+  const parserErrors = document.parseResult.parserErrors ?? []
+  const lexerErrors = document.parseResult.lexerErrors ?? []
+  if (parserErrors.length === 0 && lexerErrors.length === 0) {
+    return undefined
+  }
+  const messages = [
+    ...parserErrors.map((e) => e.message),
+    ...lexerErrors.map((e) => e.message),
+  ]
+  return 'Syntax errors:\n' + messages.join('\n')
+}
+
 const cacheInterpret = new Map<string, Promise<any>>()
 export function createInterpretAction(
   context: DefaultSharedModuleContext,
   globals: Globals = {},
-  config: ConfigSource = 'auto',
 ) {
   const services = createObjectOrientedCServices(context).ObjectOrientedC
-  const parse = parseHelper(services)
   const fs = context.fileSystemProvider(services.shared)
-  // ooc.json 配置：按根目录缓存
-  let cachedConfig: OocConfig | undefined
-  let cachedConfigRoot: string | undefined
-  async function resolveConfig(rootPath: string): Promise<OocConfig> {
-    if (config && config !== 'auto') {
-      return config
-    }
-    if (cachedConfigRoot === rootPath) {
-      return cachedConfig ?? {}
-    }
-    cachedConfigRoot = rootPath
-    cachedConfig = await loadOocConfig(fs, rootPath)
-    return cachedConfig ?? {}
-  }
   function interpretPath(rawName: string) {
     let value = cacheInterpret.get(rawName)
     if (!value) {
@@ -124,6 +137,45 @@ export function createInterpretAction(
     return value
   }
 
+  async function execDocument(
+    document: LangiumDocument<AstNode>,
+    fileName: string,
+  ) {
+    const syntax = syntaxErrorText(document)
+    if (syntax) {
+      throw syntax
+    }
+    const model = document.parseResult.value as Model
+    return executeOOC(model, fileName, interpretPath, globals)
+  }
+
+  return {
+    interpretPath,
+    async interpret(txt: string, fileName = '') {
+      // 用真实文件名作为文档 URI，让 #import 等按文件目录解析相对路径
+      const resolved = fileName
+        ? resolveEntryFile(fileName, services.LanguageMetaData.fileExtensions)
+        : ''
+      const document = await parseStringToDocument(
+        services,
+        txt,
+        resolved ? URI.file(resolved).toString() : undefined,
+      )
+      return execDocument(document, resolved)
+    },
+  }
+}
+
+/**
+ * 静态类型检查（独立于解释器）：解析 + 校验，返回按最近 ooc.json 过滤后的
+ * 全部诊断（error / warning），不执行代码。与 IDE 里的 LSP 校验走同一套
+ * Langium 校验器（ConfigAwareDocumentValidator 按 ooc.json 升降级）。
+ */
+export function createTypeCheckAction(context: DefaultSharedModuleContext) {
+  const services = createObjectOrientedCServices(context).ObjectOrientedC
+  const fs = context.fileSystemProvider(services.shared)
+  const docs = services.shared.workspace.LangiumDocuments
+
   /**
    * 预加载导入文档树（含递归导入），让静态类型解析器在文档校验期间
    * 能同步取到被导入模块的 AST。路径解析与校验器 createImportResolver 完全一致，
@@ -137,7 +189,6 @@ export function createInterpretAction(
     if (!isModel(model)) {
       return
     }
-    const docs = services.shared.workspace.LangiumDocuments
     const extensions = services.LanguageMetaData.fileExtensions
     for (const stmt of model.expressions) {
       if (stmt.$type !== 'ImportStatement') {
@@ -162,49 +213,49 @@ export function createInterpretAction(
     }
   }
 
-  async function execDocument(
+  async function checkDocument(
     document: LangiumDocument<AstNode>,
     fileName: string,
-  ) {
+  ): Promise<Diagnostic[]> {
     await preloadImportTree(document)
     await services.shared.workspace.DocumentBuilder.build([document], {
       validation: true,
     })
+    return document.diagnostics ?? []
+  }
 
-    const resolved = await resolveConfig(dirnameOf(fileName))
-    const validationErrors = (document.diagnostics ?? []).filter((e) => {
-      const next = filterDiagnostic(resolved, e.severity, codeOfDiagnostic(e))
-      return next === 1
+  function checkPath(rawName: string): Promise<Diagnostic[]> {
+    return run(async () => {
+      const extensions = services.LanguageMetaData.fileExtensions
+      const fileName = resolveEntryFile(rawName, extensions)
+      const ext = extnameOf(fileName)
+      if (ext && !extensions.includes(ext)) {
+        throw `Please choose a file with one of these extensions: ${extensions}.`
+      }
+      const uri = URI.file(fileName)
+      if (!fs.exists(uri)) {
+        throw `File ${fileName} does not exist.`
+      }
+      const document =
+        await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
+          uri,
+        )
+      return checkDocument(document, fileName)
     })
-    if (validationErrors.length > 0) {
-      throw (
-        'There are validation errors:\n' +
-        validationErrors
-          .map(
-            (validationError) =>
-              `line ${validationError.range.start.line + 1}: ${validationError.message} [${document.textDocument.getText(validationError.range)}]`,
-          )
-          .join('.\n')
-      )
-    }
-    const model = document.parseResult.value as Model
-    return executeOOC(model, fileName, interpretPath, globals)
   }
 
   return {
-    interpretPath,
-    async interpret(txt: string, fileName = '') {
-      // 用真实文件名作为文档 URI，保证 ConfigAwareDocumentValidator 能
-      // 按文件目录找到最近的 ooc.json（否则默认 URI 下找不到，默认 off
-      // 的规则如 noImplicitAny 会被提前丢弃）。相对路径在 Node 下以
-      // 当前工作目录为基准解析。
+    checkPath,
+    async check(txt: string, fileName = '') {
       const resolved = fileName
         ? resolveEntryFile(fileName, services.LanguageMetaData.fileExtensions)
         : ''
-      const document = await parse(txt, {
-        documentUri: resolved ? URI.file(resolved).toString() : undefined,
-      })
-      return execDocument(document, resolved)
+      const document = await parseStringToDocument(
+        services,
+        txt,
+        resolved ? URI.file(resolved).toString() : undefined,
+      )
+      return checkDocument(document, resolved)
     },
   }
 }

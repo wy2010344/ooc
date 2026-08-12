@@ -2,21 +2,48 @@ import './style.css'
 import { createInterpretAction } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
-import oocJsonRaw from './ooc/ooc.json?raw'
 
-// #import 模块：eager 预加载所有 .ooc 进内存。
-// 类型校验需要完整工作区（跨模块 typedef 引用），不能按需动态导入。
-const rawModules = import.meta.glob('./ooc/*.ooc', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-})
-const moduleSources = new Map<string, string>()
-for (const [p, content] of Object.entries(rawModules)) {
-  moduleSources.set((p.split('/').pop() ?? '').toLowerCase(), content as string)
-}
-// 项目配置 ooc.json（类似 tsconfig.json）：虚拟 FS 也提供它
-moduleSources.set('ooc.json', oocJsonRaw)
+// #import 模块：esbuild 的 text loader 把每个 .ooc 源码打进 bundle，
+// 供解释器在浏览器里按路径递归解析执行
+import aaRaw from './ooc/aa.ooc'
+import abcRaw from './ooc/abc.ooc'
+import basicsRaw from './ooc/basics.ooc'
+import demoRaw from './ooc/demo.ooc'
+import errorsRaw from './ooc/errors.ooc'
+import genericsRaw from './ooc/generics.ooc'
+import helloRaw from './ooc/hello.ooc'
+import inheritanceRaw from './ooc/inheritance.ooc'
+import lambdaRaw from './ooc/lambda.ooc'
+import mathRaw from './ooc/math.ooc'
+import objectsRaw from './ooc/objects.ooc'
+import pipelineRaw from './ooc/pipeline.ooc'
+import typedefInheritanceRaw from './ooc/typedef-inheritance.ooc'
+import typedefRaw from './ooc/typedef.ooc'
+import typesRaw from './ooc/types.ooc'
+import unionRaw from './ooc/union.ooc'
+import xRaw from './ooc/x.ooc'
+
+const moduleSources = new Map<string, string>(
+  Object.entries({
+    'aa.ooc': aaRaw,
+    'abc.ooc': abcRaw,
+    'basics.ooc': basicsRaw,
+    'demo.ooc': demoRaw,
+    'errors.ooc': errorsRaw,
+    'generics.ooc': genericsRaw,
+    'hello.ooc': helloRaw,
+    'inheritance.ooc': inheritanceRaw,
+    'lambda.ooc': lambdaRaw,
+    'math.ooc': mathRaw,
+    'objects.ooc': objectsRaw,
+    'pipeline.ooc': pipelineRaw,
+    'typedef-inheritance.ooc': typedefInheritanceRaw,
+    'typedef.ooc': typedefRaw,
+    'types.ooc': typesRaw,
+    'union.ooc': unionRaw,
+    'x.ooc': xRaw,
+  }),
+)
 
 function moduleNameOf(uri: URI): string {
   return (

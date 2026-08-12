@@ -22,8 +22,8 @@ export function getScope(scope: Scope, key: string) {
 
 export const globalRoot: RootScope = {
   get(key: string): any {
-    if (key in global) {
-      return global[key as 'Object']
+    if (key in globalThis) {
+      return globalThis[key as 'Object']
     }
     throw new Error(`not found define for ${key}`)
   },

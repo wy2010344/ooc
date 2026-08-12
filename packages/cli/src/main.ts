@@ -3,6 +3,7 @@ type OOCModel = Model
 import {
   createInterpretAction,
   createObjectOrientedCServices,
+  createTypeCheckAction,
   ObjectOrientedCLanguageMetaData,
 } from 'object-oriented-c-language'
 import chalk from 'chalk'
@@ -41,6 +42,30 @@ export type GenerateOptions = {
 export const interpretAction =
   createInterpretAction(NodeFileSystem).interpretPath
 
+export const typeCheckAction = async (fileName: string): Promise<void> => {
+  const diagnostics = await createTypeCheckAction(NodeFileSystem).checkPath(
+    fileName,
+  )
+  if (diagnostics.length === 0) {
+    console.log(chalk.green('No type errors or warnings.'))
+    return
+  }
+  let hasError = false
+  for (const diagnostic of diagnostics) {
+    const severity = diagnostic.severity
+    if (severity === 1) {
+      hasError = true
+    }
+    const line = diagnostic.range.start.line + 1
+    const text = diagnostic.message
+    const prefix = severity === 1 ? chalk.red('error') : chalk.yellow('warning')
+    console.log(`${prefix} line ${line}: ${text}`)
+  }
+  if (hasError) {
+    process.exit(1)
+  }
+}
+
 export default function (): void {
   const program = new Command()
 
@@ -68,6 +93,15 @@ export default function (): void {
     )
     .description('interprets the source file')
     .action(interpretAction)
+
+  program
+    .command('type-check')
+    .argument(
+      '<file>',
+      `source file (possible file extensions: ${fileExtensions})`,
+    )
+    .description('static type checking, reports diagnostics without running')
+    .action(typeCheckAction)
 
   program.parse(process.argv)
 }

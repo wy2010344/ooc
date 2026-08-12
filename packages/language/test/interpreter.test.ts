@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test } from './compat.js'
 import { EmptyFileSystem } from 'langium'
 import type { FileSystemProvider } from 'langium'
 import { NodeFileSystem } from 'langium/node'
@@ -416,7 +416,7 @@ function memoryFs(files: Record<string, string>): {
   }
 }
 
-describe('OOC 项目配置 ooc.json', () => {
+describe('类型检查与运行是两个独立分支', () => {
   const source = `
             calc = {
                 add(a: number, b: number) { a + b }
@@ -424,34 +424,7 @@ describe('OOC 项目配置 ooc.json', () => {
             calc add 1 'x'
         `
 
-  test('配置 callArgsMismatch 为 off 时不阻断执行', async () => {
-    const fs = memoryFs({
-      'ooc.json': JSON.stringify({
-        diagnostics: { callArgsMismatch: 'off' },
-      }),
-    })
-    const { interpret } = createInterpretAction({
-      fileSystemProvider: () => fs.provider,
-    })
-    const result = await interpret(source, '/proj/demo.ooc')
-    expect(result).toBe('1x')
-  })
-
-  test('配置 callArgsMismatch 为 error 时阻断执行', async () => {
-    const fs = memoryFs({
-      'ooc.json': JSON.stringify({
-        diagnostics: { callArgsMismatch: 'error' },
-      }),
-    })
-    const { interpret } = createInterpretAction({
-      fileSystemProvider: () => fs.provider,
-    })
-    await expect(interpret(source, '/proj/demo.ooc')).rejects.toThrow(
-      'There are validation errors',
-    )
-  })
-
-  test('无 ooc.json 时保持默认（warning 不阻断）', async () => {
+  test('类型诊断（warning）不阻断执行', async () => {
     const fs = memoryFs({})
     const { interpret } = createInterpretAction({
       fileSystemProvider: () => fs.provider,
@@ -460,24 +433,23 @@ describe('OOC 项目配置 ooc.json', () => {
     expect(result).toBe('1x')
   })
 
-  test('配置 noImplicitAny 为 error 时隐式 any 参数阻断执行', async () => {
+  test('ooc.json 把诊断升为 error 也不阻断执行', async () => {
     const fs = memoryFs({
       'ooc.json': JSON.stringify({
-        diagnostics: { noImplicitAny: 'error' },
+        diagnostics: { callArgsMismatch: 'error' },
       }),
     })
     const { interpret } = createInterpretAction({
       fileSystemProvider: () => fs.provider,
     })
-    await expect(
-      interpret(`calc = { add(n) { n + 1 } }`, '/proj/demo.ooc'),
-    ).rejects.toThrow('There are validation errors')
+    const result = await interpret(source, '/proj/demo.ooc')
+    expect(result).toBe('1x')
   })
 
-  test('配置 noImplicitAny 为 off 时不阻断执行', async () => {
+  test('隐式 any 参数不阻断执行', async () => {
     const fs = memoryFs({
       'ooc.json': JSON.stringify({
-        diagnostics: { noImplicitAny: 'off' },
+        diagnostics: { noImplicitAny: 'error' },
       }),
     })
     const { interpret } = createInterpretAction({
@@ -488,6 +460,16 @@ describe('OOC 项目配置 ooc.json', () => {
       '/proj/demo.ooc',
     )
     expect(result).toBe(42)
+  })
+
+  test('语法错误仍然阻断执行', async () => {
+    const fs = memoryFs({})
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    await expect(
+      interpret(`x = 'abc`, '/proj/demo.ooc'),
+    ).rejects.toThrow('Syntax errors')
   })
 })
 
@@ -508,7 +490,7 @@ describe('OOC #import 模块', () => {
     expect(result).toBe(5)
   })
 
-  test('导入模块结果类型参与校验：类型不符会阻断', async () => {
+  test('导入模块的类型诊断不阻断执行', async () => {
     const fs = memoryFs({
       'math.ooc': `{ add(a: number, b: number): number { a + b } }`,
       'ooc.json': JSON.stringify({
@@ -518,14 +500,13 @@ describe('OOC #import 模块', () => {
     const { interpret } = createInterpretAction({
       fileSystemProvider: () => fs.provider,
     })
-    await expect(
-      interpret(
-        `math = #import 'math';
+    const result = await interpret(
+      `math = #import 'math';
          result: number = math add 1 'x';
          result`,
-        'demo.ooc',
-      ),
-    ).rejects.toThrow('There are validation errors')
+      'demo.ooc',
+    )
+    expect(result).toBe('1x')
   })
 
   test('被导入模块的 typedef 参与当前模块校验', async () => {
