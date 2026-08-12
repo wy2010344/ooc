@@ -18,6 +18,7 @@
 - 任何需要 dlopen 原生 `.node` 模块的库都不可用：vitest 4 / rolldown、vite / rollup、SWC、esbuild 的 native binding 等，在 Android/Termux 的 linker namespace 下加载失败。
 - 可用：纯 JS 库、Node 内置（`node:test`）、tsc、esbuild 子进程可执行文件。
 - 测试跑 `npm run test`（`node:test`，`test/compat.ts` 复刻 vitest 小面 API）。**别换回 vitest**。构建用 `npm run build`。
+- 例外：`packages/example` 用 vite 打包，不在 Termux 兼容范围——它的 `vite build` 在这里跑不了，root `npm run build` 会挂在 example，属预期；别把它再改回 esbuild，除非用户明确要求。
 
 ## 3. 语言事实（容易搞错）
 

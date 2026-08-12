@@ -5,9 +5,9 @@
     "version": "0.0.1",
     "type": "module",
     "scripts": {
-        "dev": "node esbuild.mjs --serve",
-        "build": "tsc --noEmit && node esbuild.mjs",
-        "preview": "node esbuild.mjs --serve"
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview"
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
@@ -15,6 +15,6 @@
     },
     "devDependencies": {
         "typescript": "~6.0.2",
-        "esbuild": "~0.27.4"
+        "vite": "^8.2.0"
     }
 }

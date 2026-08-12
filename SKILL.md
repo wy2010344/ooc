@@ -14,7 +14,7 @@ OOC 是一门极简的消息传递语言：没有函数调用，只有「给对�
 | `packages/language` | 核心：Langium 语法、静态类型检查器、解释器、LSP 服务 |
 | `packages/cli` | CLI：`interpret`（解释执行）与 `generate`（JS 生成，未实现） |
 | `packages/extension` | VS Code 插件（LSP + hover + 语义高亮） |
-| `packages/example` | 浏览器 demo（esbuild 打包） |
+| `packages/example` | 浏览器 demo（vite 打包，不在 Termux 兼容范围） |
 | `docs/` | Rspress 文档站 |
 
 ## 构建与测试
@@ -26,6 +26,8 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 ```
 
 测试跑在 **Node 内置的 node:test** 上：`test/compat.ts` 用 node:test + node:assert 复刻 vitest 的 describe/test/expect 小面 API。别换回 vitest——vitest 4 依赖 rolldown、vite 依赖 rollup，都要 dlopen 原生 `.node`，在 Android/Termux 的 linker namespace 下加载不了（esbuild 是子进程可执行文件，所以能用）。
+
+例外：`packages/example` 用 vite 打包（不在 Termux 兼容范围），其 `vite build` 在本机无法运行；`npm run build`（root）因此会挂在 example，属预期。
 
 `ooc.json`（`packages/language/src/diagnostics-config.ts`）类似 tsconfig，只控制**类型检查**的显示级别（off / warning / error），作用于 IDE/LSP 与 CLI `type-check` 指令，与运行无关。
 
