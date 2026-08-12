@@ -1,5 +1,5 @@
 import './style.css'
-import { createInterpretAction, invoke } from 'object-oriented-c-language'
+import { createInterpretAction, js, loop, storage } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
 
@@ -59,64 +59,8 @@ const fileSystemProvider: FileSystemProvider = {
   },
 }
 
-// storage：宿主注入的 JS 全局对象，提供可变更的引用（cell）
-const storage = {
-  ref(initial: unknown) {
-    let v = initial
-    return {
-      get() {
-        return v
-      },
-      set(x: unknown) {
-        v = x
-        return v
-      },
-    }
-  },
-}
-
-// loop：OOC 没有控制流关键字，用宿主对象补上。lambda 不是裸 JS 函数，
-// 执行要经过语言包的 invoke（等价于 OOC 里的 `fn apply …`）。
-const loop = {
-  // loop apply fn：只要 fn 返回真值就继续循环（至少调用一次）
-  apply(fn: unknown) {
-    while (invoke(fn)) {}
-    return null
-  },
-  // loop repeat n fn：恰好执行 fn n 次
-  repeat(n: unknown, fn: unknown) {
-    const times = Number(n)
-    if (!Number.isFinite(times) || times < 0 || Math.floor(times) !== times) {
-      throw new TypeError(`loop repeat 需要非负整数次数，收到 ${n}`)
-    }
-    for (let i = 0; i < times; i++) {
-      invoke(fn)
-    }
-    return null
-  },
-}
-
-// js：消息传递表达不了的 JS 能力桥接。
-//  - js throw 消息       → 抛 JS Error
-//  - js new 构造器 参数… → new 构造器(参数…)
-//  - js fn lambda        → 把 OOC lambda 包装成真 JS 函数（给定时器/事件回调用）
-const js = {
-  throw(message: unknown) {
-    throw new Error(String(message))
-  },
-  new(ctor: unknown, ...args: unknown[]) {
-    if (typeof ctor !== 'function') {
-      throw new TypeError(`js new 需要构造函数，收到 ${ctor}`)
-    }
-    return new (ctor as new (...a: unknown[]) => unknown)(...args)
-  },
-  fn(lambda: unknown) {
-    return (...args: unknown[]) => invoke(lambda, args)
-  },
-}
-
-// 通用入口：context 注入浏览器虚拟文件系统，其余（解析/校验/执行）与 Node 完全一致。
-// console、Math 等 JS 全局本来就挂在 globalThis 上（解释器会回退查找），无需注入。
+// storage/loop/js：宿主桥接对象，由语言包导出（与单元测试共用一份），
+// console、Math 等 JS 全局本来就挂在 globalThis 上，解释器会回退查找，无需注入。
 const interpret = createInterpretAction(
   { fileSystemProvider: () => fileSystemProvider },
   { storage, loop, js },
