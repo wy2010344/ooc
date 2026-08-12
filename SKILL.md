@@ -50,7 +50,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 - **加内置运算符** → `library/num.ts` 或 `library/object.ts` 加方法，同步 `type-system.ts` 的 `builtinMethods` 签名
 - **加诊断规则** → `type-checker.ts` 中 `accept('warning', ..., data: diagnosticData(code))`，code 注册进 `diagnostics-config.ts` 的 `DIAGNOSTIC_CODES`
 - **跑类型检查** → IDE 里由 LSP 实时校验；命令行用 `ooc type-check <file>`（返回诊断，有 error 级则 exit 1）
-- **浏览器运行** → 用 `EmptyFileSystem`；Node 读文件/`#import` 用 `NodeFileSystem`
+- **浏览器运行** → 用 `EmptyFileSystem`；Node 读文件/`#import` 用 `NodeFileSystem`。浏览器 demo 注入的宿主全局：`storage`（可变 cell）、`loop`（`apply`=lambda 返回真值就继续的 while、`repeat`=恰好 n 次）、`js`（`throw` 抛错 / `new` 实例化 JS 类 / `fn` 把 OOC lambda 包装成真 JS 函数）。`console`、`Math` 等 JS 全局走 `globalThis` 回退，无需注入。宿主侧调用 lambda 用语言包公开的 `invoke`（lambda 是带 apply 方法的 ObjectValue，不是裸 JS 函数）。
 
 ## 注意
 

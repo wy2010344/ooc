@@ -291,3 +291,12 @@ export function sendMessage(o: any, value: string, args: any[]): any {
   }
   return sendMessage(o, 'methodNotFound', [value, ...args])
 }
+
+/**
+ * 宿主侧调用 OOC lambda 的公开入口，等价于 OOC 里的 `fn apply …`。
+ * lambda 不是裸 JS 函数而是「带 apply 方法的 ObjectValue」，宿主注入的
+ * 全局对象（如 loop）要执行它必须走这里。
+ */
+export function invoke(fn: unknown, args: unknown[] = []): any {
+  return sendMessage(fn, 'apply', args)
+}
