@@ -1,4 +1,4 @@
-import { dirnameOf, joinPath } from '../module-path.js'
+import { dirnameOf } from '../module-path.js'
 import {
   Expression,
   LambdaDef,
@@ -19,7 +19,7 @@ import {
 } from './runtime.js'
 import { addScope, getScope, type Scope } from './scope.js'
 
-export type InterpretAction = (name: string) => Promise<any>
+export type InterpretAction = (name: string, basePath?: string) => Promise<any>
 
 export async function interpret(
   model: Model,
@@ -31,10 +31,10 @@ export async function interpret(
   const imports = model.expressions.filter(
     (x) => x.$type === 'ImportStatement' || x.$type === 'ImportList',
   ) as Array<{ path: string; name: string; $type: string }>
-  // 处理导入（支持动态加载模块）
+  // 处理导入：传原始路径和基准目录，由 interpretAction 统一解析（避免双重解析）
   const out = await Promise.all(
     imports.map((importStmt) =>
-      interpretAction(joinPath(dirnameOf(rootPath), importStmt.path)),
+      interpretAction(importStmt.path, dirnameOf(rootPath)),
     ),
   )
   let last: any = null

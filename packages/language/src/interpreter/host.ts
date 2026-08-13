@@ -6,9 +6,9 @@ import { ImportStatement, isModel, Model } from '../generated/ast.js'
 import { createObjectOrientedCServices } from '../object-oriented-c-module.js'
 import {
   extnameOf,
+  isAbsolutePath,
   joinPath,
   resolveModuleName,
-  toPosix,
 } from '../module-path.js'
 import { interpret, type InterpretAction } from './evaluate.js'
 import { type Globals, withGlobals } from './scope.js'
@@ -47,25 +47,18 @@ function nodeCwd(): string {
 }
 
 /**
- * 绝对路径判断：POSIX 以 / 开头，Windows 盘符 C:/…（URI.file 会把这两者
- * 直接当绝对路径；相对路径则必须相对当前工作目录解析，否则会被当成根路径）。
- */
-function isAbsolutePath(p: string): boolean {
-  const posix = toPosix(p)
-  return posix.startsWith('/') || /^[A-Za-z]:\//.test(posix)
-}
-
-/**
  * 解析入口文件路径：Node 下相对路径以当前工作目录为基准（URI.file 会把相对
  * 路径当成根路径，./demo.ooc 会被解析成 /demo.ooc）；绝对路径与浏览器保持原样。
+ * basePath 可选：导入模块时传入当前文档路径作为解析基准。
  */
 function resolveEntryFile(
   rawName: string,
   extensions: readonly string[],
+  basePath?: string,
 ): string {
   const cwd = nodeCwd()
-  const fromPath = !isAbsolutePath(rawName) && cwd
-    ? joinPath(cwd, 'entry.ooc')
+  const fromPath = !isAbsolutePath(rawName)
+    ? (basePath ?? (cwd ? joinPath(cwd, 'entry.ooc') : ''))
     : ''
   return resolveModuleName(rawName, fromPath, extensions)
 }
@@ -111,13 +104,14 @@ export function createInterpretAction(
 ) {
   const services = createObjectOrientedCServices(context).ObjectOrientedC
   const fs = context.fileSystemProvider(services.shared)
-  function interpretPath(rawName: string) {
-    let value = cacheInterpret.get(rawName)
+  function interpretPath(rawName: string, basePath?: string) {
+    const extensions = services.LanguageMetaData.fileExtensions
+    // 先解析出实际文件路径，用解析后的路径作为缓存键，避免不同目录下
+    // 相同相对路径（如 './foo'）的缓存冲突
+    const fileName = resolveEntryFile(rawName, extensions, basePath)
+    let value = cacheInterpret.get(fileName)
     if (!value) {
       value = run(async () => {
-        const extensions = services.LanguageMetaData.fileExtensions
-        // 统一为 posix 路径；无扩展名的虚拟路径补默认扩展（Langium 按扩展名注册语言服务）
-        const fileName = resolveEntryFile(rawName, extensions)
         const ext = extnameOf(fileName)
         if (ext && !extensions.includes(ext)) {
           throw `Please choose a file with one of these extensions: ${extensions}.`
@@ -132,7 +126,7 @@ export function createInterpretAction(
           )
         return execDocument(document, fileName)
       })
-      cacheInterpret.set(rawName, value)
+      cacheInterpret.set(fileName, value)
     }
     return value
   }
