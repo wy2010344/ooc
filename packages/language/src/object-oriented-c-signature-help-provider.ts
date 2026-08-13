@@ -23,9 +23,16 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
     this.checker = getSharedChecker(services)
   }
 
+  /**
+   * 签名帮助选项
+   * OOC 语言使用空格作为方法调用分隔符，逗号作为参数分隔符
+   * triggerCharacters: 触发签名帮助的字符（空格 - 方法调用）
+   * retriggerCharacters: 重新触发签名帮助的字符（逗号 - 新参数）
+   */
   override get signatureHelpOptions(): SignatureHelpOptions {
     return {
-      triggerCharacters: [' ', ','],
+      triggerCharacters: [' '],
+      retriggerCharacters: [','],
     }
   }
 
