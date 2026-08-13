@@ -69,8 +69,8 @@ export const ObjectOrientedCModule: Module<
     DefinitionProvider: (service) =>
       new ObjectOrientedCDefinitionProvider(service),
     // 查找引用
-    ReferencesProvider: () =>
-      new ObjectOrientedCReferencesProvider(),
+    ReferencesProvider: (services) =>
+      new ObjectOrientedCReferencesProvider(services),
   },
 }
 

@@ -1,226 +1,264 @@
-import { Location } from 'vscode-languageserver'
-import type { AstNode, LangiumDocument } from 'langium'
+import { Location, ReferenceParams } from 'vscode-languageserver'
+import { CstUtils, isCompositeCstNode, isLeafCstNode } from 'langium'
+import { DefaultReferencesProvider } from 'langium/lsp'
+import type { AstNode, CstNode, LangiumDocument } from 'langium'
+import type { LangiumServices } from 'langium/lsp'
 import {
   isAssignment,
   isMessage,
-  isMethodAll,
   isParam,
   isRef,
-  type Message,
+  isMethodAll,
+  isMethodBind,
+  isMethodBindMutable,
   type MethodAll,
-  type Ref,
+  type MethodBind,
+  type MethodBindMutable,
+  type Message,
 } from './generated/ast.js'
 
 /**
  * OOC 查找引用提供者
  *
- * OOC 语言不使用 Langium 标准的交叉引用语法（[TypeName]），
- * 引用解析通过自定义实现。此 Provider 基于名称匹配来查找所有引用位置。
+ * OOC 不使用 Langium 标准交叉引用语法，引用解析通过名称匹配实现。
+ * 继承 DefaultReferencesProvider，覆盖 findReferences 以实现基于名称的查找。
  */
-export class ObjectOrientedCReferencesProvider {
+export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider {
+
+  private _seenRanges: Set<string> = new Set()
+
+  constructor(services: LangiumServices) {
+    super(services)
+  }
 
   /**
    * 查找所有引用指定节点的位置
    */
-  findReferences(
+  override findReferences(
     document: LangiumDocument,
-    params: { position: { line: number; character: number }; context: { includeDeclaration: boolean } },
+    params: ReferenceParams,
     _cancelToken?: any,
   ): Location[] {
-    const rootNode = document.parseResult?.value
+    const rootNode = document.parseResult?.value?.$cstNode
     if (!rootNode) return []
 
-    // 使用 Langium 的 findDeclarationNodeAtOffset 找到光标位置的节点
     const offset = document.textDocument.offsetAt(params.position)
-    const targetNode = this.findNodeAtOffset(rootNode, offset)
+    const cstNode = CstUtils.findDeclarationNodeAtOffset(rootNode, offset, this.grammarConfig.nameRegexp)
+    if (!cstNode) return []
+
+    const targetNode = cstNode.astNode
     if (!targetNode) return []
 
     const name = this.getNodeName(targetNode)
     if (!name) return []
 
-    const locations: Location[] = []
+    const allLocations: Array<{ location: Location; isDeclaration: boolean; rangeKey: string }> = []
     const uri = document.uri?.toString()
-
     if (!uri) return []
 
-    // 如果需要包含声明本身
+    this._seenRanges.clear()
+    this.collectReferencesWithMeta(rootNode, name, allLocations, uri)
+
+    // 确定光标的语义节点的 rangeKey，用于排除自身位置
+    const cursorRange = cstNode.range
+    const cursorKey = cursorRange
+      ? `${cursorRange.start.line}:${cursorRange.start.character}-${cursorRange.end.line}:${cursorRange.end.character}`
+      : ''
+
     if (params.context.includeDeclaration) {
-      const loc = this.nodeToLocation(targetNode, uri)
-      if (loc) locations.push(loc)
+      // includeDeclaration=true: 保留所有匹配（声明 + 使用），但排除光标自身位置
+      return allLocations
+        .filter((item) => item.rangeKey !== cursorKey)
+        .map((item) => item.location)
+    } else {
+      // includeDeclaration=false: 只保留使用处（排除声明和光标自身）
+      return allLocations
+        .filter((item) => !item.isDeclaration && item.rangeKey !== cursorKey)
+        .map((item) => item.location)
     }
-
-    // 遍历文档查找所有引用
-    this.collectReferences(rootNode, name, locations, uri)
-
-    return locations
-  }
-
-  /**
-   * 在文档中查找指定偏移量处的节点
-   */
-  private findNodeAtOffset(root: AstNode, offset: number): AstNode | undefined {
-    const cstNode = (root as any).$cstNode
-    if (!cstNode) return undefined
-
-    // 遍历 CST 查找指定偏移处的节点
-    return this.traverseCstForOffset(cstNode, offset)?.astNode
-  }
-
-  /**
-   * 遍历 CST 查找指定偏移处的节点
-   */
-  private traverseCstForOffset(cstNode: any, offset: number): any | undefined {
-    if (!cstNode || offset < cstNode.offset || offset > cstNode.offset + cstNode.length) {
-      return undefined
-    }
-
-    // 如果有子节点，尝试在子节点中查找
-    if (cstNode.children && cstNode.children.length > 0) {
-      for (const child of cstNode.children) {
-        const found = this.traverseCstForOffset(child, offset)
-        if (found) return found
-      }
-    }
-
-    // 叶子节点就是目标
-    return cstNode
   }
 
   /**
    * 获取节点的名称
    */
   private getNodeName(node: AstNode): string | undefined {
-    if (isAssignment(node)) {
-      return node.name
-    }
-    if (isMethodAll(node)) {
-      return this.getMethodName(node)
-    }
-    if (isParam(node as any)) {
-      return (node as any).name
-    }
-    if (isRef(node)) {
-      return node.value
-    }
-    // 对于 Message 的 name
-    if (isMessage(node)) {
-      return this.getMethodCallName(node)
-    }
-    // 向上查找父节点的名称
+    if (isAssignment(node)) return node.name
+    if (isParam(node)) return node.name
+    if (isRef(node)) return node.value
+    if (isMethodAll(node)) return this.getMethodName(node)
+    if (isMethodBind(node)) return this.getBindName(node)
+    if (isMethodBindMutable(node)) return this.getMutableName(node)
+    if (isMessage(node)) return this.getMethodCallName(node)
     return this.findParentName(node)
   }
 
   /**
-   * 向上查找父节点的名称
+   * 向上查找父节点名称
    */
   private findParentName(node: AstNode): string | undefined {
     let current = node.$container
     while (current) {
       if (isAssignment(current)) return current.name
+      if (isParam(current)) return current.name
       if (isMethodAll(current)) return this.getMethodName(current)
-      if (isParam(current as any)) return (current as any).name
-      if (isRef(current)) return current.value
+      if (isMethodBind(current)) return this.getBindName(current)
+      if (isMethodBindMutable(current)) return this.getMutableName(current)
       if (isMessage(current)) return this.getMethodCallName(current)
       current = current.$container
     }
     return undefined
   }
 
-  /**
-   * 获取方法名（从 MethodAll 的 name 字段）
-   */
   private getMethodName(method: MethodAll): string | undefined {
-    const nameNode = method.name
-    if (!nameNode) return undefined
-    return this.extractNameValue(nameNode)
+    return this.extractNameFromDefName(method.name)
+  }
+
+  private getBindName(bind: MethodBind): string | undefined {
+    return this.extractNameFromDefName(bind.name)
+  }
+
+  private getMutableName(mutable: MethodBindMutable): string | undefined {
+    return this.extractNameFromDefName(mutable.name)
   }
 
   /**
-   * 获取消息调用名
+   * 从 MethodDefName / MethodCallName 提取字符串值
    */
-  private getMethodCallName(message: Message): string {
+  private extractNameFromDefName(nameNode: any): string | undefined {
+    if (!nameNode) return undefined
+    const innerName = nameNode.name
+    if (!innerName) return undefined
+    if (isRef(innerName)) return innerName.value
+    if (innerName.$type === 'StID') return innerName.value.replace(/^"/, '').replace(/"$/, '')
+    if (innerName.$type === 'Str') return innerName.value.replace(/^'/, '').replace(/'$/, '')
+    return undefined
+  }
+
+  private getMethodCallName(message: Message): string | undefined {
     const nameNode = message.name
-    if (!nameNode) return ''
-    return this.extractNameValue(nameNode) ?? ''
-  }
-
-  /**
-   * 从 Name 节点提取字符串值
-   */
-  private extractNameValue(nameNode: any): string | undefined {
     if (!nameNode) return undefined
-    if (typeof nameNode === 'string') return nameNode
-    // MethodDefName / MethodCallName: { value: Ref | StID | Str }
-    if (nameNode.value) {
-      if (typeof nameNode.value === 'string') return nameNode.value
-      if (typeof nameNode.value === 'object' && 'value' in nameNode.value) {
-        return (nameNode.value as any).value as string
-      }
-    }
+    const value = nameNode.value
+    if (!value) return undefined
+    if (isRef(value)) return value.value
+    if (value.$type === 'StID') return value.value.replace(/^"/, '').replace(/"$/, '')
+    if (value.$type === 'Str') return value.value.replace(/^'/, '').replace(/'$/, '')
     return undefined
   }
 
   /**
-   * 收集所有引用指定名称的节点
+   * 收集所有引用指定名称的节点（带 isDeclaration 元数据）
    */
-  private collectReferences(
-    node: AstNode,
+  private collectReferencesWithMeta(
+    cstNode: CstNode,
     name: string,
-    locations: Location[],
+    results: Array<{ location: Location; isDeclaration: boolean; rangeKey: string }>,
     uri: string,
   ): void {
-    // 如果是 Ref 节点，检查是否匹配目标名称
-    if (isRef(node as any) && (node as Ref).value === name) {
-      const loc = this.nodeToLocation(node, uri)
-      if (loc) locations.push(loc)
-    }
+    if (isLeafCstNode(cstNode)) {
+      const astNode = cstNode.astNode
+      if (!astNode) return
 
-    // 如果是 Message，检查消息名是否匹配
-    if (isMessage(node)) {
-      const msgName = this.getMethodCallName(node)
-      if (msgName === name) {
-        const loc = this.nodeToLocation(node, uri)
-        if (loc) locations.push(loc)
-      }
-    }
+      const semanticNode = this.resolveSemanticNode(cstNode)
+      if (!semanticNode) return
 
-    // 如果是 Assignment，检查变量名是否匹配
-    if (isAssignment(node) && node.name === name) {
-      const loc = this.nodeToLocation(node, uri)
-      if (loc) locations.push(loc)
-    }
+      const leafText = cstNode.text
 
-    // 遍历所有子节点
-    this.traverseAllChildren(node, name, locations, uri)
-  }
+      // 精确匹配：语义节点类型 + 文本
+      let matched = false
+      let isDecl = false
 
-  /**
-   * 遍历所有子节点（使用 Langium 的 reflection API）
-   */
-  private traverseAllChildren(
-    node: AstNode,
-    name: string,
-    locations: Location[],
-    uri: string,
-  ): void {
-    // 使用 $cstNode 的 children 遍历
-    const cstNode = (node as any).$cstNode
-    if (cstNode?.children) {
-      for (const child of cstNode.children) {
-        if (child?.astNode) {
-          this.collectReferences(child.astNode, name, locations, uri)
+      if (isRef(semanticNode) && semanticNode.value === name && leafText === name) {
+        matched = true
+        isDecl = false
+      } else if (isAssignment(semanticNode) && semanticNode.name === name && leafText === name) {
+        matched = true
+        isDecl = true
+      } else if (isParam(semanticNode) && semanticNode.name === name && leafText === name) {
+        matched = true
+        isDecl = true
+      } else if (isMethodAll(semanticNode)) {
+        const methodName = this.getMethodName(semanticNode)
+        if (methodName === name && leafText === name) {
+          matched = true
+          isDecl = true
+        }
+      } else if (isMethodBind(semanticNode)) {
+        const bindName = this.getBindName(semanticNode)
+        if (bindName === name && leafText === name) {
+          matched = true
+          isDecl = true
+        }
+      } else if (isMethodBindMutable(semanticNode)) {
+        const mutableName = this.getMutableName(semanticNode)
+        if (mutableName === name && leafText === name) {
+          matched = true
+          isDecl = true
+        }
+      } else if (isMessage(semanticNode)) {
+        const msgName = this.getMethodCallName(semanticNode)
+        if (msgName === name && leafText === name) {
+          matched = true
+          isDecl = false
         }
       }
+
+      if (matched) {
+        const loc = this.cstNodeToLocation(cstNode, uri)
+        if (loc) {
+          const rangeKey = `${loc.range.start.line}:${loc.range.start.character}-${loc.range.end.line}:${loc.range.end.character}`
+          if (!this._seenRanges.has(rangeKey)) {
+            this._seenRanges.add(rangeKey)
+            results.push({ location: loc, isDeclaration: isDecl, rangeKey })
+          }
+        }
+      }
+      return
+    }
+
+    if (isCompositeCstNode(cstNode)) {
+      for (const child of cstNode.content) {
+        this.collectReferencesWithMeta(child, name, results, uri)
+      }
     }
   }
 
   /**
-   * 将节点转换为 Location
+   * 解析叶节点语义上所属的声明节点
+   *
+   * Langium 中，CST 叶节点的 astNode 指向最近的复合节点 AST。
+   * 对于简单场景（Ref、Assignment、Param），叶节点就是语义节点本身的 CST。
+   * 对于嵌套场景（MethodAll、MethodBind、MethodBindMutable、Message），
+   * 叶节点的 astNode 可能指向外层复合，需要沿 CST 树向上查找真正的语义节点。
    */
-  private nodeToLocation(node: AstNode, uri: string): Location | undefined {
-    const cstNode = (node as any).$cstNode
-    if (!cstNode) return undefined
+  private resolveSemanticNode(leaf: CstNode): AstNode | undefined {
+    const directAst = leaf.astNode
+    if (!directAst) return undefined
 
+    // 直接类型匹配（Ref、Assignment、Param 等，叶节点的 astNode 就是语义节点）
+    if (isRef(directAst) || isAssignment(directAst) || isParam(directAst)) {
+      return directAst
+    }
+
+    // 对于 MethodAll/MethodBind/MethodBindMutable/Message 等，
+    // 叶节点可能被嵌套的复合节点共享，需要向上查找真正的语义节点
+    let current: CstNode | undefined = leaf
+    while (current?.container) {
+      const parent: CstNode = current.container
+      const parentAst = parent.astNode
+      if (parentAst && (isMethodAll(parentAst) || isMethodBind(parentAst) || isMethodBindMutable(parentAst) || isMessage(parentAst))) {
+        return parentAst
+      }
+      current = parent
+    }
+
+    // 回退：直接返回 astNode
+    return directAst
+  }
+
+  /**
+   * 将 CST 节点转换为 Location
+   */
+  private cstNodeToLocation(cstNode: CstNode, uri: string): Location | undefined {
     const range = cstNode.range
     if (!range) return undefined
 

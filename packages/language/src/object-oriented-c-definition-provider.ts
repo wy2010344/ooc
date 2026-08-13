@@ -1,4 +1,4 @@
-import { AstNode } from 'langium'
+import { AstNode, CstNode, isCompositeCstNode, isLeafCstNode } from 'langium'
 import { DefaultDefinitionProvider } from 'langium/lsp'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
@@ -80,16 +80,30 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
     sourceCstNode: any,
     targetNode: AstNode,
   ): LocationLink | undefined {
-    const targetCstNode = targetNode.$cstNode
+    // 尝试找到变量名本身的 CST 节点
+    const nameCstNode = this.findNameCstNode(targetNode)
+    let targetCstNode = nameCstNode
+    if (!targetCstNode) {
+      // 如果找不到变量名的 CST 节点，则使用目标节点本身
+      targetCstNode = targetNode.$cstNode
+    }
     if (!targetCstNode) return undefined
 
-    const targetRange = targetCstNode.range
+    let targetRange = targetCstNode.range
     if (!targetRange) return undefined
+
+    // 如果目标范围太大（大于变量名本身），尝试缩小范围
+    // 对于 Assignment 节点，只使用变量名的位置
+    if (isAssignment(targetNode) && targetRange.end.character - targetRange.start.character > 1) {
+      const nameCst = this.findNameCstNode(targetNode)
+      if (nameCst?.range) {
+        targetRange = nameCst.range
+      }
+    }
 
     const sourceRange = sourceCstNode.range
 
     // 获取文档 URI：通过 AST 节点的 $document 属性
-    // 只有根节点有 $document，所以需要向上遍历
     const documentUri = this.getDocumentUri(targetNode)
     if (!documentUri) return undefined
 
@@ -126,6 +140,37 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
         },
       },
     }
+  }
+
+  /**
+   * 查找变量名的 CST 叶节点
+   *
+   * Langium 的 CST 是嵌套结构：Assignment 的 $cstNode 是一个复合节点，
+   * 其子节点可能仍是复合节点（如嵌套的 Assignment 层），
+   * 最终才到叶节点（x、=、42 等）。
+   * 必须递归查找叶节点，而不仅仅是直接子节点。
+   */
+  private findNameCstNode(node: AstNode): CstNode | undefined {
+    if (!isAssignment(node) || !node.name) return undefined
+    const cstNode = node.$cstNode
+    if (!cstNode) return undefined
+    return this.findLeafWithText(cstNode, node.name)
+  }
+
+  /**
+   * 递归在 CST 树中查找文本匹配的叶节点
+   */
+  private findLeafWithText(cstNode: CstNode, text: string): CstNode | undefined {
+    if (isLeafCstNode(cstNode)) {
+      return cstNode.text === text ? cstNode : undefined
+    }
+    if (isCompositeCstNode(cstNode)) {
+      for (const child of cstNode.content) {
+        const found = this.findLeafWithText(child, text)
+        if (found) return found
+      }
+    }
+    return undefined
   }
 
   /**
