@@ -5,16 +5,17 @@ import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import type { OocConfig } from 'object-oriented-c-language'
 import { createObjectOrientedCServices } from 'object-oriented-c-language'
 import {
-  parseOocConfig,
+  parseOocJson,
+  toOocConfig,
   filterDiagnostic,
   codeOfDiagnostic,
   diagnosticData,
   loadOocConfig,
 } from 'object-oriented-c-language'
 
-describe('parseOocConfig', () => {
-  test('解析合法的 diagnostics 字段', () => {
-    const config = parseOocConfig(
+describe('parseOocJson', () => {
+  test('解析合法的 diagnostics 字段（JSON 格式）', () => {
+    const config = parseOocJson(
       JSON.stringify({
         diagnostics: {
           unknownType: 'off',
@@ -31,23 +32,76 @@ describe('parseOocConfig', () => {
   })
 
   test('非法级别被忽略', () => {
-    const config = parseOocConfig(
+    const config = parseOocJson(
       JSON.stringify({ diagnostics: { typeMismatch: 'fatal' as string } }),
     )
     expect(config.diagnostics).toEqual({})
   })
 
   test('空内容返回空配置', () => {
-    expect(parseOocConfig('')).toEqual({})
-    expect(parseOocConfig('not json')).toEqual({})
-    expect(parseOocConfig(JSON.stringify({}))).toEqual({})
+    expect(parseOocJson('')).toEqual({})
+    expect(parseOocJson('not json')).toEqual({})
+    expect(parseOocJson(JSON.stringify({}))).toEqual({})
   })
 
-  test('带 UTF-8 BOM 的内容也能解析', () => {
-    const config = parseOocConfig(
+  test('带 UTF-8 BOM 的 JSON 也能解析', () => {
+    const config = parseOocJson(
       '\uFEFF' + JSON.stringify({ diagnostics: { typeMismatch: 'error' } }),
     )
     expect(config.diagnostics).toEqual({ typeMismatch: 'error' })
+  })
+})
+
+describe('toOocConfig（从解释器返回值转换）', () => {
+  test('完整配置对象 { diagnostics: { code: level } }', () => {
+    const config = toOocConfig({
+      diagnostics: {
+        typeMismatch: 'warning',
+        noImplicitAny: 'off',
+      },
+    })
+    expect(config.diagnostics).toEqual({
+      typeMismatch: 'warning',
+      noImplicitAny: 'off',
+    })
+  })
+
+  test('扁平格式 { code: level } 直接是配置对象', () => {
+    const config = toOocConfig({
+      typeMismatch: 'error',
+      callArgsMismatch: 'warning',
+    })
+    expect(config.diagnostics).toEqual({
+      typeMismatch: 'error',
+      callArgsMismatch: 'warning',
+    })
+  })
+
+  test('混合格式（优先 diagnostics）', () => {
+    const config = toOocConfig({
+      diagnostics: { typeMismatch: 'off' },
+      unknownType: 'error',
+    })
+    expect(config.diagnostics).toEqual({ typeMismatch: 'off' })
+  })
+
+  test('无效级别被过滤', () => {
+    const config = toOocConfig({
+      typeMismatch: 'fatal',
+      unknownType: 'warning',
+    })
+    expect(config.diagnostics).toEqual({ unknownType: 'warning' })
+  })
+
+  test('非对象/空值返回空配置', () => {
+    expect(toOocConfig(null)).toEqual({})
+    expect(toOocConfig(undefined)).toEqual({})
+    expect(toOocConfig('string')).toEqual({})
+    expect(toOocConfig(42)).toEqual({})
+  })
+
+  test('空对象返回空配置', () => {
+    expect(toOocConfig({})).toEqual({})
   })
 })
 
@@ -138,6 +192,44 @@ describe('codeOfDiagnostic / diagnosticData', () => {
 })
 
 describe('loadOocConfig', () => {
+  test('config.ooc 优先于 ooc.json', async () => {
+    let seenNames: string[] = []
+    const fs = {
+      exists: async (uri: URI) => {
+        seenNames.push(uri.path)
+        return uri.path.endsWith('config.ooc')
+      },
+      readFile: async () => '',
+    }
+    // 传一个 mock executor，模拟解释器执行 config.ooc 返回的对象
+    const mockExecutor = async () => ({
+      diagnostics: { unknownType: 'off' },
+    })
+    const config = await loadOocConfig(fs, '/root', mockExecutor)
+    expect(config.diagnostics).toEqual({ unknownType: 'off' })
+    expect(seenNames.some((n) => n.endsWith('config.ooc'))).toBe(true)
+  })
+
+  test('config.ooc 无 executor 时回退到 ooc.json', async () => {
+    let triedOocJson = false
+    const fs = {
+      exists: async (uri: URI) => {
+        if (uri.path.endsWith('config.ooc')) return false
+        if (uri.path.endsWith('ooc.json')) {
+          triedOocJson = true
+          return true
+        }
+        return false
+      },
+      readFile: async () =>
+        JSON.stringify({ diagnostics: { unknownType: 'off' } }),
+    }
+    // 不传 executor，应该回退到 ooc.json
+    const config = await loadOocConfig(fs, '/root')
+    expect(config.diagnostics).toEqual({ unknownType: 'off' })
+    expect(triedOocJson).toBe(true)
+  })
+
   test('ooc.json 存在时读取并解析', async () => {
     const fs = {
       exists: async () => true,
@@ -148,7 +240,7 @@ describe('loadOocConfig', () => {
     expect(config.diagnostics).toEqual({ unknownType: 'off' })
   })
 
-  test('ooc.json 不存在返回空配置', async () => {
+  test('配置文件不存在返回空配置', async () => {
     const fs = { exists: async () => false, readFile: async () => '' }
     expect(await loadOocConfig(fs, '/root')).toEqual({})
   })
@@ -163,21 +255,33 @@ describe('loadOocConfig', () => {
     expect(await loadOocConfig(fs, '/root')).toEqual({})
   })
 
-  test("rootPath 为 '/' 时 URI 拼接正确（不产生 //ooc.json）", async () => {
-    let seenPath = ''
+  test("rootPath 为 '/' 时 URI 拼接正确", async () => {
+    const seenPaths: string[] = []
     const fs = {
       exists: async (uri: URI) => {
-        seenPath = uri.path
+        seenPaths.push(uri.path)
         return false
       },
       readFile: async () => '',
     }
     expect(await loadOocConfig(fs, '/')).toEqual({})
-    expect(seenPath).toBe('/ooc.json')
+    // 先检查 config.ooc
+    expect(seenPaths[0]).toBe('/config.ooc')
+  })
+
+  test('config.ooc 执行出错返回空配置', async () => {
+    const fs = {
+      exists: async () => true,
+      readFile: async () => 'invalid ooc code',
+    }
+    const failingExecutor = async () => {
+      throw new Error('runtime error')
+    }
+    expect(await loadOocConfig(fs, '/root', failingExecutor)).toEqual({})
   })
 })
 
-describe('ConfigAwareDocumentValidator 升降级', () => {
+describe('ConfigAwareDocumentValidator 升降级（LSP 环境，无解释器）', () => {
   function fsWithSources(sources: Record<string, string>) {
     const nameOf = (uri: URI) =>
       decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
@@ -255,6 +359,51 @@ describe('ConfigAwareDocumentValidator 升降级', () => {
       validation: true,
     })
     expect(doc.diagnostics ?? []).toEqual([])
+  })
+
+  test("config.ooc 中 typeMismatch:'error' 将诊断提升为错误（静态解析回退）", async () => {
+    // LSP 环境没有解释器，config.ooc 会被当作 JSON 静态解析
+    const services = createObjectOrientedCServices({
+      fileSystemProvider: () =>
+        fsWithSources({
+          'config.ooc': JSON.stringify({
+            diagnostics: { typeMismatch: 'error' },
+          }),
+        }),
+    })
+    const parse = parseHelper(services.ObjectOrientedC)
+    const doc = await parse(`x: number = 'hello'`, {
+      documentUri: URI.file('/proj/demo.ooc').toString(),
+      validation: true,
+    })
+    const mismatch = (doc.diagnostics ?? []).find((d) =>
+      d.message.includes('类型不匹配'),
+    )
+    expect(mismatch?.severity).toBe(DiagnosticSeverity.Error)
+  })
+
+  test("config.ooc 优先于 ooc.json", async () => {
+    const services = createObjectOrientedCServices({
+      fileSystemProvider: () =>
+        fsWithSources({
+          'config.ooc': JSON.stringify({
+            diagnostics: { typeMismatch: 'error' },
+          }),
+          'ooc.json': JSON.stringify({
+            diagnostics: { typeMismatch: 'off' },
+          }),
+        }),
+    })
+    const parse = parseHelper(services.ObjectOrientedC)
+    const doc = await parse(`x: number = 'hello'`, {
+      documentUri: URI.file('/proj/demo.ooc').toString(),
+      validation: true,
+    })
+    const mismatch = (doc.diagnostics ?? []).find((d) =>
+      d.message.includes('类型不匹配'),
+    )
+    // config.ooc 设为 error，应被提升为错误
+    expect(mismatch?.severity).toBe(DiagnosticSeverity.Error)
   })
 
   test("noImplicitAny 未配置时默认 off，无诊断", async () => {

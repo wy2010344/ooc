@@ -6,7 +6,8 @@
 calc = {
     add(a, b) => a + b,      // 单表达式方法
     sub(a, b) { a - b },     // 方法体，最后一行是返回值
-    cached = 1 + 2           // 绑定：创建时求值一次，之后发消息取缓存（也是方法）
+    cached = 1 + 2,          // 绑定：创建时求值一次，之后发消息取缓存（也是方法）
+    counter <= 0             // 可变属性：无参返回当前值，有参修改并返回新值
 };
 ```
 
@@ -15,6 +16,9 @@ calc = {
 ```ooc
 calc add 3 4     // 7
 calc cached      // 3
+calc counter     // 0（无参 → 返回当前值）
+calc counter 42  // 42（有参 → 修改并返回新值）
+calc counter     // 42（已修改）
 ```
 
 ## responser

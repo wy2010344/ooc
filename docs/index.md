@@ -25,4 +25,8 @@ features:
     details: 类型注解、#import 模块加载与 [...] Lambda，支持闭包捕获。
     icon: 🌐
     link: /guide/04-types
+  - title: 项目配置
+    details: 用 config.ooc（OOC 语法，支持注释）控制诊断级别，`ooc init` 一键生成。
+    icon: ⚙️
+    link: /guide/01-basics#项目配置
 ---

@@ -1,6 +1,7 @@
 import { AstNode, LangiumDocument, URI } from 'langium'
 import { DefaultSharedModuleContext } from 'langium/lsp'
 import type { Diagnostic } from 'vscode-languageserver-types'
+import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import { run } from 'wy-helper'
 import { ImportStatement, isModel, Model } from '../generated/ast.js'
 import { createObjectOrientedCServices } from '../object-oriented-c-module.js'
@@ -12,6 +13,13 @@ import {
 } from '../module-path.js'
 import { interpret, type InterpretAction } from './evaluate.js'
 import { type Globals, withGlobals } from './scope.js'
+import {
+  codeOfDiagnostic,
+  dirnameForConfig,
+  filterDiagnostic,
+  findNearestOocConfig,
+  uriToPath,
+} from '../diagnostics-config.js'
 
 let nextInMemoryId = 0
 
@@ -168,14 +176,17 @@ export function createInterpretAction(
 }
 
 /**
- * 静态类型检查（独立于解释器）：解析 + 校验，返回按最近 ooc.json 过滤后的
+ * 静态类型检查（独立于解释器）：解析 + 校验，返回按最近 config.ooc / ooc.json 过滤后的
  * 全部诊断（error / warning），不执行代码。与 IDE 里的 LSP 校验走同一套
- * Langium 校验器（ConfigAwareDocumentValidator 按 ooc.json 升降级）。
+ * Langium 校验器（ConfigAwareDocumentValidator 按配置升降级）。
  */
 export function createTypeCheckAction(context: DefaultSharedModuleContext) {
   const services = createObjectOrientedCServices(context).ObjectOrientedC
   const fs = context.fileSystemProvider(services.shared)
   const docs = services.shared.workspace.LangiumDocuments
+
+  // 创建配置执行器，用解释器执行 config.ooc
+  const configExecutor = createConfigExecutor(context)
 
   /**
    * 预加载导入文档树（含递归导入），让静态类型解析器在文档校验期间
@@ -222,7 +233,22 @@ export function createTypeCheckAction(context: DefaultSharedModuleContext) {
     await services.shared.workspace.DocumentBuilder.build([document], {
       validation: true,
     })
-    return document.diagnostics ?? []
+    const rawDiagnostics = document.diagnostics ?? []
+
+    // 使用配置过滤诊断（用解释器执行 config.ooc）
+    const docPath = uriToPath(document.uri)
+    const config = await findNearestOocConfig(
+      fs,
+      docPath.startsWith('/') ? dirnameForConfig(docPath) : dirnameForConfig('/' + docPath),
+      configExecutor,
+    )
+    return rawDiagnostics.flatMap((d) => {
+      const next = filterDiagnostic(config, d.severity, codeOfDiagnostic(d))
+      if (next === undefined) {
+        return []
+      }
+      return [{ ...d, severity: next as DiagnosticSeverity }]
+    })
   }
 
   function checkPath(rawName: string): Promise<Diagnostic[]> {
@@ -258,5 +284,18 @@ export function createTypeCheckAction(context: DefaultSharedModuleContext) {
       )
       return checkDocument(document, resolved)
     },
+  }
+}
+
+/**
+ * 创建配置文件执行器：用解释器执行 config.ooc，返回最后一条表达式的值。
+ * config.ooc 是真正的 OOC 文件，支持变量、注释等完整语法。
+ */
+export function createConfigExecutor(
+  context: DefaultSharedModuleContext,
+): import('../diagnostics-config.js').ConfigExecutor {
+  const { interpret } = createInterpretAction(context)
+  return async (text: string, fileName: string): Promise<unknown> => {
+    return interpret(text, fileName)
   }
 }

@@ -62,3 +62,29 @@ Math PI             // 3.14159...
 /* 多行
    注释 */
 ```
+
+## 项目配置
+
+`config.ooc` 是**真正的 OOC 文件**，由解释器执行，**最后一条表达式**返回配置对象。支持变量、注释等完整 OOC 语法：
+
+```ooc
+// config.ooc — 这是一个真正的 OOC 文件
+// 注释、变量、所有 OOC 语法都可用
+// 最后一条表达式返回配置对象
+
+{ diagnostics: {
+    typeMismatch: 'warning',      // 类型不匹配：警告
+    callArgsMismatch: 'error',    // 参数数量不匹配：错误
+    noImplicitAny: 'off',         // 隐式 any：隐藏
+} }
+```
+
+三级控制：`off`（隐藏）、`warning`（警告）、`error`（错误）。
+
+> CLI 运行时 `config.ooc` 由解释器执行；LSP/IDE 环境无解释器时，回退到静态 JSON 解析。
+
+快速初始化：
+
+```bash
+ooc init    # 在当前目录生成 config.ooc 模板
+```
