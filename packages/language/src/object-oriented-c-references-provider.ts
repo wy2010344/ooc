@@ -3,7 +3,7 @@ import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 
 /**
  * OOC 查找引用提供者
- * 继承 Langium 默认实现，使用语法级引用解析
+ * 继承 Langium 默认实现
  */
 export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider {
 

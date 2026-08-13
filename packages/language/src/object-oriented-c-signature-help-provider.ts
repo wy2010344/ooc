@@ -2,36 +2,31 @@ import { AstNode, MaybePromise } from 'langium'
 import { AbstractSignatureHelpProvider } from 'langium/lsp'
 import type { SignatureHelpOptions } from 'vscode-languageserver'
 import type { CancellationToken } from 'vscode-jsonrpc'
+import type { SignatureHelp } from 'vscode-languageserver'
+import type { ParameterInformation, SignatureInformation } from 'vscode-languageserver'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
   isMessageOrChain,
   type Message,
 } from './generated/ast.js'
-import {
-  createImportResolver,
-  ObjectOrientedCTypeChecker,
-} from './type-checker.js'
-import {
-  SignatureHelp,
-  ParameterInformation,
-  SignatureInformation,
-} from 'vscode-languageserver'
+import { getSharedChecker } from './shared-checker.js'
 
 /**
  * OOC 签名帮助提供者
  * 在消息调用时显示方法签名信息
  */
 export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpProvider {
-  private readonly checker: ObjectOrientedCTypeChecker
+  private readonly checker: ReturnType<typeof getSharedChecker>
 
   constructor(services: ObjectOrientedCServices) {
     super()
-    this.checker = new ObjectOrientedCTypeChecker(
-      createImportResolver(
-        services.shared.workspace.LangiumDocuments,
-        services.LanguageMetaData.fileExtensions,
-      ),
-    )
+    this.checker = getSharedChecker(services)
+  }
+
+  override get signatureHelpOptions(): SignatureHelpOptions {
+    return {
+      triggerCharacters: [' ', ','],
+    }
   }
 
   protected override getSignatureFromElement(
@@ -42,7 +37,6 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
       return undefined
     }
 
-    // 获取消息节点
     const message = this.findMessage(element)
     if (!message) return undefined
 
@@ -54,22 +48,16 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
       const sig = this.findSignature(receiverType, name)
       if (!sig) return undefined
 
-      const params = (sig.params ?? []).map((p: any, i: number) => {
-        const typeStr = p ? this.formatType(p) : 'any'
-        return ParameterInformation.create(
-          `${name}${i}: ${typeStr}`,
-          `${i}, ${i + 1}`,
-        )
-      })
+      const params = this.buildParameters(sig)
+      const label = this.buildSignatureLabel(name, sig)
+      
+      const signature: SignatureInformation = {
+        label,
+        parameters: params,
+      }
 
-      const signatureLabel = this.buildSignatureLabel(name, sig, params.length)
-      const signature = SignatureInformation.create(
-        signatureLabel,
-        signatureLabel,
-        ...params,
-      )
-
-      const activeParameter = message.args.length - 1
+      // 计算当前激活参数
+      const activeParameter = message.args.length
 
       return {
         signatures: [signature],
@@ -78,12 +66,6 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
       }
     } catch {
       return undefined
-    }
-  }
-
-  override get signatureHelpOptions(): SignatureHelpOptions {
-    return {
-      triggerCharacters: [' ', ','],
     }
   }
 
@@ -114,10 +96,7 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
   }
 
   /** 查找类型上的方法签名 */
-  private findSignature(
-    type: any,
-    name: string,
-  ): any | undefined {
+  private findSignature(type: any, name: string): any | undefined {
     if (!type) return undefined
     if (type.kind === 'object') {
       const sigs = type.methods.get(name)
@@ -126,6 +105,22 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
       }
     }
     return undefined
+  }
+
+  /** 构建参数信息 */
+  private buildParameters(sig: any): ParameterInformation[] {
+    const params: ParameterInformation[] = []
+    const sigParams = sig.params ?? []
+    
+    for (let i = 0; i < sigParams.length; i++) {
+      const p = sigParams[i]
+      const typeStr = p ? this.formatType(p) : 'any'
+      params.push({
+        label: `${i}: ${typeStr}`,
+      })
+    }
+    
+    return params
   }
 
   /** 格式化类型 */
@@ -138,16 +133,15 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
   }
 
   /** 构建签名标签 */
-  private buildSignatureLabel(
-    name: string,
-    sig: any,
-    paramCount: number,
-  ): string {
+  private buildSignatureLabel(name: string, sig: any): string {
     const params: string[] = []
-    for (let i = 0; i < paramCount; i++) {
-      const p = sig.params?.[i]
+    const sigParams = sig.params ?? []
+    
+    for (let i = 0; i < sigParams.length; i++) {
+      const p = sigParams[i]
       params.push(p ? this.formatType(p) : 'any')
     }
+    
     const returnStr = sig.returns ? this.formatType(sig.returns) : 'any'
     return `${name}(${params.join(', ')}) => ${returnStr}`
   }

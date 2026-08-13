@@ -6,27 +6,19 @@ import {
   isRef,
   type Expression,
 } from './generated/ast.js'
-import {
-  createImportResolver,
-  ObjectOrientedCTypeChecker,
-} from './type-checker.js'
+import { getSharedChecker } from './shared-checker.js'
 import { CompletionItemKind } from 'vscode-languageserver'
 
 /**
  * OOC 代码自动补全提供者
- * 提供：变量名、对象方法等补全建议
+ * 只添加自定义补全，不遮避 Langium 默认补全
  */
 export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider {
-  private readonly checker: ObjectOrientedCTypeChecker
+  private readonly checker: ReturnType<typeof getSharedChecker>
 
   constructor(services: ObjectOrientedCServices) {
     super(services)
-    this.checker = new ObjectOrientedCTypeChecker(
-      createImportResolver(
-        services.shared.workspace.LangiumDocuments,
-        services.LanguageMetaData.fileExtensions,
-      ),
-    )
+    this.checker = getSharedChecker(services)
   }
 
   protected override completionFor(
@@ -37,12 +29,12 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
     // 先调用默认实现（关键字补全等）
     super.completionFor(context, next as any, acceptor)
     
-    // 添加自定义补全：变量名、方法名等
+    // 追加自定义补全：使用 queue 模式而非替换
     this.addCustomCompletions(context, acceptor)
   }
 
   /**
-   * 添加自定义补全项
+   * 添加自定义补全项（变量名、方法名）
    */
   private addCustomCompletions(
     context: CompletionContext,
@@ -74,7 +66,6 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
   private collectVisibleVariables(node: any): Map<string, string> {
     const result = new Map<string, string>()
     
-    // 向上遍历 AST，收集所有声明的变量
     let current = node
     while (current) {
       this.collectDeclarations(current, result)
@@ -94,7 +85,6 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
     if (isAssignment(node)) {
       result.set(node.name, this.inferTypeString(node.expression))
     }
-    // 处理包含表达式列表的节点
     if ('expressions' in node && Array.isArray(node.expressions)) {
       for (const expr of node.expressions) {
         if (isAssignment(expr)) {

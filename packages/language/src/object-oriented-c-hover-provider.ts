@@ -17,10 +17,7 @@ import {
   type Message,
   type MethodCallName,
 } from './generated/ast.js'
-import {
-  createImportResolver,
-  ObjectOrientedCTypeChecker,
-} from './type-checker.js'
+import { getSharedChecker } from './shared-checker.js'
 import {
   describeType,
   getBuiltinMethods,
@@ -28,23 +25,25 @@ import {
   type TypeInfo,
 } from './type-system.js'
 
+/**
+ * OOC Hover 提供者
+ * - 显示类型信息
+ * - 使用 Langium CommentProvider 获取注释
+ */
 export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
-  private readonly checker: ObjectOrientedCTypeChecker
+  private readonly checker: ReturnType<typeof getSharedChecker>
+  private readonly oocServices: ObjectOrientedCServices
 
   constructor(services: ObjectOrientedCServices) {
     super(services)
-    this.checker = new ObjectOrientedCTypeChecker(
-      createImportResolver(
-        services.shared.workspace.LangiumDocuments,
-        services.LanguageMetaData.fileExtensions,
-      ),
-    )
+    this.oocServices = services
+    this.checker = getSharedChecker(services)
   }
 
   protected override getAstNodeHoverContent(
     node: AstNode,
   ): MaybePromise<string | undefined> {
-    // 获取节点的文档注释
+    // 使用 Langium 的 CommentProvider 获取注释
     const comment = this.getNodeComment(node)
 
     if (isImportStatement(node)) {
@@ -131,44 +130,45 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     return undefined
   }
 
-  /** 获取节点的文档注释 */
+  /**
+   * 使用 Langium CommentProvider 获取节点注释
+   */
   private getNodeComment(node: AstNode): string {
-    // 使用 Langium 的 CommentProvider 获取注释
-    // 如果服务可用，使用服务；否则回退到简单的注释查找
-    const cstNode = node.$cstNode
-    if (!cstNode) return ''
-
-    // 查找 CST 节点文本中的注释
-    const text = cstNode.text
-    const lines = text.split('\n')
-    const commentLines: string[] = []
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      // 单行注释
-      if (trimmed.startsWith('//')) {
-        commentLines.push(trimmed.slice(2).trim())
-      }
-      // 多行注释开始
-      else if (trimmed.startsWith('/*')) {
-        const endIdx = trimmed.indexOf('*/')
-        if (endIdx !== -1) {
-          commentLines.push(trimmed.slice(2, endIdx).trim())
-        } else {
-          commentLines.push(trimmed.slice(2).trim())
-        }
-      }
-      // 多行注释中间
-      else if (trimmed.startsWith('*') && !trimmed.startsWith('*/')) {
-        commentLines.push(trimmed.slice(1).trim())
-      }
-      // 多行注释结束
-      else if (trimmed.endsWith('*/')) {
-        commentLines.push(trimmed.slice(0, -2).trim())
+    // 从服务中获取 CommentProvider
+    const services = this.oocServices
+    if (services.documentation?.CommentProvider) {
+      const comment = services.documentation.CommentProvider.getComment(node)
+      if (comment) {
+        return comment
       }
     }
+    
+    // 回退：简单的注释提取
+    return this.extractCommentFallback(node)
+  }
 
-    return commentLines.join('\n')
+  /**
+   * 回退的注释提取方法
+   */
+  private extractCommentFallback(node: AstNode): string {
+    const cstNode = node.$cstNode
+    if (!cstNode) return ''
+    
+    // 查找前导注释
+    const rootNode = cstNode.root
+    const fullText = rootNode.text
+    const nodeOffset = cstNode.offset
+    
+    // 简单策略：查找节点前面的注释
+    const beforeText = fullText.substring(0, nodeOffset)
+    const commentMatch = beforeText.match(/\/\/.*$/gm)
+    if (commentMatch && commentMatch.length > 0) {
+      // 取最后几条连续注释
+      const lastComments = commentMatch.slice(-3).map(c => c.replace(/^\/\/\s*/, ''))
+      return lastComments.join('\n')
+    }
+    
+    return ''
   }
 
   /** 处理消息调用的 hover：显示方法签名 */
@@ -180,7 +180,6 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     const container = message.$container
     let receiverType: TypeInfo | undefined
 
-    // 向上查找接收者类型
     if (container && isMessageOrChain(container)) {
       receiverType = this.checker.inferType(container.primary)
     }
@@ -222,7 +221,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     if (type.kind === 'object') {
       const sigs = type.methods.get(name)
       if (sigs && sigs.length > 0) {
-        return sigs[sigs.length - 1] // 返回最后一个重载
+        return sigs[sigs.length - 1]
       }
     }
     if (type.kind === 'name') {
@@ -245,7 +244,6 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     if (isStID(v)) {
       return v.value.slice(1)
     }
-    // Str 类型
     return v.value
   }
 
@@ -261,9 +259,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   }
 }
 
-/**
- * 从 MethodDefName 取出方法名：Ref/StID/Str 三种形态。
- */
+/** 从 MethodDefName 取出方法名 */
 function methodDefName(name: {
   name: { $type: string; value: string }
 }): string {
@@ -277,10 +273,7 @@ function methodDefName(name: {
   return v.value
 }
 
-/**
- * 对象的悬停展示：列出方法签名，方便在编辑器里查看对象形状。
- * 返回 markdown：方法签名用 `- ` 列表，否则单行换行会被 markdown 折叠成空格。
- */
+/** 对象的悬停展示：列出方法签名 */
 function describeHoverType(t: TypeInfo): string {
   if (t.kind === 'union') {
     const branches = t.types.map(describeHoverType).join('\n')
