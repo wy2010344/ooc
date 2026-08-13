@@ -19,6 +19,10 @@ import type { OocConfig } from './diagnostics-config.js'
 import { ConfigAwareDocumentValidator } from './diagnostics-config.js'
 import { ObjectOrientedCSemanticTokenProvider } from './object-oriented-c-semantic-token-provider.js'
 import { ObjectOrientedCHoverProvider } from './object-oriented-c-hover-provider.js'
+import { ObjectOrientedCCompletionProvider } from './object-oriented-c-completion-provider.js'
+import { ObjectOrientedCSignatureHelpProvider } from './object-oriented-c-signature-help-provider.js'
+import { ObjectOrientedCDefinitionProvider } from './object-oriented-c-definition-provider.js'
+import { ObjectOrientedCReferencesProvider } from './object-oriented-c-references-provider.js'
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -55,6 +59,18 @@ export const ObjectOrientedCModule: Module<
     HoverProvider: (service) => new ObjectOrientedCHoverProvider(service),
     SemanticTokenProvider: (service) =>
       new ObjectOrientedCSemanticTokenProvider(service),
+    // 代码自动补全
+    CompletionProvider: (service) =>
+      new ObjectOrientedCCompletionProvider(service),
+    // 签名帮助
+    SignatureHelp: (service) =>
+      new ObjectOrientedCSignatureHelpProvider(service),
+    // 跳转定义
+    DefinitionProvider: (service) =>
+      new ObjectOrientedCDefinitionProvider(service),
+    // 查找引用
+    ReferencesProvider: (service) =>
+      new ObjectOrientedCReferencesProvider(service),
   },
 }
 
