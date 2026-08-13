@@ -24,11 +24,11 @@ const DEFAULT_CONFIG = `// config.ooc — OOC 项目配置文件
 // 这是一个真正的 OOC 文件，由解释器执行，最后一条表达式返回配置对象。
 // 诊断级别：off（隐藏）、warning（警告）、error（错误）
 
-{ diagnostics: {
-    // typeMismatch: 'warning',      // 类型不匹配
-    // callArgsMismatch: 'error',    // 调用参数数量不匹配
-    // noImplicitAny: 'off',         // 隐式 any 类型（默认关闭）
-    // unknownType: 'warning',       // 未知类型
+{ diagnostics = {
+    // typeMismatch = 'warning',      // 类型不匹配
+    // callArgsMismatch = 'error',    // 调用参数数量不匹配
+    // noImplicitAny = 'off',         // 隐式 any 类型（默认关闭）
+    // unknownType = 'warning',       // 未知类型
 } }
 `
 

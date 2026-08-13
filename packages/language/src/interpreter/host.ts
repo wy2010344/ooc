@@ -1,5 +1,6 @@
 import { AstNode, LangiumDocument, URI } from 'langium'
 import { DefaultSharedModuleContext } from 'langium/lsp'
+import type { LangiumCoreServices } from 'langium'
 import type { Diagnostic } from 'vscode-languageserver-types'
 import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import { run } from 'wy-helper'
@@ -16,6 +17,7 @@ import { type Globals, withGlobals } from './scope.js'
 import {
   codeOfDiagnostic,
   dirnameForConfig,
+  executeConfigOoc,
   filterDiagnostic,
   findNearestOocConfig,
   uriToPath,
@@ -185,8 +187,8 @@ export function createTypeCheckAction(context: DefaultSharedModuleContext) {
   const fs = context.fileSystemProvider(services.shared)
   const docs = services.shared.workspace.LangiumDocuments
 
-  // 创建配置执行器，用解释器执行 config.ooc
-  const configExecutor = createConfigExecutor(context)
+  // 创建配置执行器，用解释器执行 config.ooc（复用现有服务）
+  const configExecutor = createConfigExecutor(services)
 
   /**
    * 预加载导入文档树（含递归导入），让静态类型解析器在文档校验期间
@@ -289,13 +291,12 @@ export function createTypeCheckAction(context: DefaultSharedModuleContext) {
 
 /**
  * 创建配置文件执行器：用解释器执行 config.ooc，返回最后一条表达式的值。
- * config.ooc 是真正的 OOC 文件，支持变量、注释等完整语法。
+ * 复用传入的 Langium 服务，不再创建新的服务树。
  */
 export function createConfigExecutor(
-  context: DefaultSharedModuleContext,
+  services: LangiumCoreServices,
 ): import('../diagnostics-config.js').ConfigExecutor {
-  const { interpret } = createInterpretAction(context)
   return async (text: string, fileName: string): Promise<unknown> => {
-    return interpret(text, fileName)
+    return executeConfigOoc(text, fileName, services)
   }
 }

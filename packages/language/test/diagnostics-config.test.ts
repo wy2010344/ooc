@@ -361,14 +361,12 @@ describe('ConfigAwareDocumentValidator 升降级（LSP 环境，无解释器）'
     expect(doc.diagnostics ?? []).toEqual([])
   })
 
-  test("config.ooc 中 typeMismatch:'error' 将诊断提升为错误（静态解析回退）", async () => {
-    // LSP 环境没有解释器，config.ooc 会被当作 JSON 静态解析
+  test("config.ooc 中 typeMismatch:'error' 将诊断提升为错误（解释器执行）", async () => {
+    // config.ooc 是真正的 OOC 文件，用解释器执行；OOC 对象用 = 绑定
     const services = createObjectOrientedCServices({
       fileSystemProvider: () =>
         fsWithSources({
-          'config.ooc': JSON.stringify({
-            diagnostics: { typeMismatch: 'error' },
-          }),
+          'config.ooc': "{ diagnostics = { typeMismatch = 'error' } }",
         }),
     })
     const parse = parseHelper(services.ObjectOrientedC)
@@ -386,9 +384,7 @@ describe('ConfigAwareDocumentValidator 升降级（LSP 环境，无解释器）'
     const services = createObjectOrientedCServices({
       fileSystemProvider: () =>
         fsWithSources({
-          'config.ooc': JSON.stringify({
-            diagnostics: { typeMismatch: 'error' },
-          }),
+          'config.ooc': "{ diagnostics = { typeMismatch = 'error' } }",
           'ooc.json': JSON.stringify({
             diagnostics: { typeMismatch: 'off' },
           }),

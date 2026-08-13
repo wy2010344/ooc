@@ -8,6 +8,9 @@ import {
 import type { Diagnostic } from 'vscode-languageserver-types'
 import type { LangiumCoreServices } from 'langium'
 import type { LangiumDocument } from 'langium'
+import { isModel } from './generated/ast.js'
+import { interpret } from './interpreter/evaluate.js'
+import { withGlobals } from './interpreter/scope.js'
 
 /** * OOC 项目配置（类似 tsconfig.json），控制类型检查诊断的显示级别。
  *
@@ -15,15 +18,12 @@ import type { LangiumDocument } from 'langium'
  * 1. ooc.json（向后兼容，JSON 格式，静态解析）
  * 2. config.ooc（真正的 OOC 文件，解释器执行，最后一条表达式返回配置对象）
  *
- * config.ooc 示例（与普通 .ooc 文件完全一致）：
+ * config.ooc 示例（与普通 .ooc 文件完全一致，OOC 对象用 = 绑定）：
  * // 这是注释
- * diagnostics = {
- *     typeMismatch: 'warning',
- *     noImplicitAny: 'off',
- * }
- *
- * // 最后一条表达式是配置对象（推荐直接写对象）
- * { diagnostics: { typeMismatch: 'error' } }
+ * { diagnostics = {
+ *     typeMismatch = 'warning',
+ *     noImplicitAny = 'off',
+ * } }
  *
  * ooc.json 示例：
  * {
@@ -70,38 +70,60 @@ const DEFAULT_DIAGNOSTIC_LEVELS: Partial<Record<DiagnosticCode, DiagLevel>> = {
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES]
 
 /**
- * 将任意值转换为 OocConfig（从解释器返回值或正则解析结果中提取）。
- * 支持两种格式：
- *   1. { diagnostics: { code: level, ... } }  — 完整配置对象
- *   2. { code: level, ... }                  — 省略 diagnostics 包装
+ * 从 OOC 解释器返回值中提取 OocConfig。
+ * OOC 对象的属性都是方法函数（如 obj.diagnostics() 返回内层对象），
+ * 需要调用这些方法才能取到实际值。
  */
 export function toOocConfig(value: unknown): OocConfig {
   if (!value || typeof value !== 'object') {
     return {}
   }
   const obj = value as Record<string, unknown>
-  const diags = obj.diagnostics
-  if (diags && typeof diags === 'object') {
-    return normalizeDiags(diags as Record<string, unknown>)
+  // OOC 对象属性是方法函数，需要调用才能取值
+  const rawDiags = extractOocValue(obj, 'diagnostics')
+  if (rawDiags && typeof rawDiags === 'object') {
+    const normalized = extractDiagLevels(rawDiags as Record<string, unknown>)
+    return { diagnostics: normalized }
   }
   // 检查是否是扁平的 { code: level } 格式
-  const result: Record<string, DiagLevel> = {}
-  for (const [k, v] of Object.entries(obj)) {
-    if (isValidCode(k) && (v === 'off' || v === 'warning' || v === 'error')) {
-      result[k] = v as DiagLevel
-    }
-  }
-  return Object.keys(result).length > 0 ? { diagnostics: result } : {}
+  const flatResult = extractDiagLevels(obj)
+  return Object.keys(flatResult).length > 0
+    ? { diagnostics: flatResult }
+    : {}
 }
 
-function normalizeDiags(diags: Record<string, unknown>): OocConfig {
-  const normalized: Record<string, DiagLevel> = {}
-  for (const [code, level] of Object.entries(diags)) {
-    if (level === 'off' || level === 'warning' || level === 'error') {
-      normalized[code] = level
+/**
+ * 从 OOC 对象中提取命名属性值：OOC 对象属性是方法，
+ * 调用后返回实际值；如果不是函数则直接返回。
+ */
+function extractOocValue(obj: Record<string, unknown>, key: string): unknown {
+  const v = obj[key]
+  if (typeof v === 'function') {
+    try {
+      return (v as () => unknown).call(obj)
+    } catch {
+      return v
     }
   }
-  return { diagnostics: normalized }
+  return v
+}
+
+/**
+ * 从 OOC 对象或普通对象中提取诊断级别键值对。
+ * OOC 对象的属性是方法函数，需要调用求值。
+ */
+function extractDiagLevels(
+  obj: Record<string, unknown>,
+): Record<string, DiagLevel> {
+  const result: Record<string, DiagLevel> = {}
+  for (const [code, raw] of Object.entries(obj)) {
+    if (!isValidCode(code)) continue
+    const level = typeof raw === 'function' ? raw.call(obj) : raw
+    if (level === 'off' || level === 'warning' || level === 'error') {
+      result[code] = level as DiagLevel
+    }
+  }
+  return result
 }
 
 function isValidCode(code: string): boolean {
@@ -250,8 +272,39 @@ export async function findNearestOocConfig(
 }
 
 /**
+ * 用解释器执行 config.ooc：用 LangiumParser 解析后直接 interpret。
+ * 可在 LSP / CLI 任意环境下使用，只要有 LangiumCoreServices。
+ * config.ooc 通常无 #import；若有，传入 interpretAction 处理。
+ */
+export async function executeConfigOoc(
+  text: string,
+  filePath: string,
+  services: LangiumCoreServices,
+  interpretAction?: (name: string, basePath?: string) => Promise<any>,
+): Promise<unknown> {
+  const parseResult = services.parser.LangiumParser.parse(text)
+  if (parseResult.lexerErrors.length > 0 || parseResult.parserErrors.length > 0) {
+    return {}
+  }
+  const model = parseResult.value
+  if (!isModel(model)) {
+    return {}
+  }
+  const noop: (name: string, basePath?: string) => Promise<any> =
+    async () => undefined
+  return interpret(
+    model,
+    withGlobals(undefined, {}),
+    filePath,
+    interpretAction ?? noop,
+  )
+}
+
+/**
  * 在 Langium 文档校验后按最近 config.ooc / ooc.json 过滤诊断。
- * 校验逻辑完全复用默认实现，只对产出的诊断做配置过滤/升降级。
+ * config.ooc 由校验器自己用解释器执行（通过 services.shared.workspace 的
+ * DocumentBuilder / LangiumDocumentFactory 解析，interpret 执行），
+ * 无需外部 ConfigExecutor。
  */
 export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
   private readonly fs: {
@@ -259,12 +312,15 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
     readFile: (uri: URI) => Promise<string> | string
   }
 
-  private readonly executor?: ConfigExecutor
+  private readonly services: LangiumCoreServices
 
-  constructor(services: LangiumCoreServices, executor?: ConfigExecutor) {
+  /** 配置缓存：文件路径 → 配置结果（同一进程内只执行一次） */
+  private readonly configCache = new Map<string, OocConfig>()
+
+  constructor(services: LangiumCoreServices) {
     super(services)
     this.fs = services.shared.workspace.FileSystemProvider
-    this.executor = executor
+    this.services = services
   }
 
   override async validateDocument(
@@ -275,22 +331,66 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
     const diagnostics = await super.validateDocument(
       document,
       options,
-      // 结构类型：CancellationToken 只是接口，透传无妨
       cancelToken as never,
     )
-    const config = await findNearestOocConfig(
-      this.fs,
-      dirnameForConfig(uriToPath(document.uri)),
-      this.executor,
-    )
+    const docDir = dirnameForConfig(uriToPath(document.uri))
+    const config = await this.findConfigCached(docDir)
     return diagnostics.flatMap((d) => {
       const next = filterDiagnostic(config, d.severity, codeOfDiagnostic(d))
       if (next === undefined) {
         return []
       }
-      // 应用配置后的严重级别（warning -> error / 保持原级）
       return [{ ...d, severity: next as DiagnosticSeverity }]
     })
+  }
+
+  /** 带缓存的配置查找：同一 config 文件只执行一次 */
+  private async findConfigCached(startDir: string): Promise<OocConfig> {
+    let dir = startDir
+    for (;;) {
+      const cfg = await this.loadOocConfigForDir(dir)
+      const keys = Object.keys(cfg.diagnostics ?? {})
+      if (keys.length > 0) {
+        return cfg
+      }
+      const parent = dirnameForConfig(dir)
+      if (parent === dir) {
+        return {}
+      }
+      dir = parent
+    }
+  }
+
+  /** 单目录的配置查找：优先 config.ooc（解释器执行），回退 ooc.json */
+  private async loadOocConfigForDir(dir: string): Promise<OocConfig> {
+    const configUri = UriUtils.joinPath(URI.file(dir), 'config.ooc')
+    const path = configUri.path
+    if (this.configCache.has(path)) {
+      return this.configCache.get(path)!
+    }
+    try {
+      if (await this.fs.exists(configUri)) {
+        const text = await this.fs.readFile(configUri)
+        const result = await executeConfigOoc(text, path, this.services)
+        const config = toOocConfig(result)
+        this.configCache.set(path, config)
+        return config
+      }
+    } catch {
+      // config.ooc 执行失败（语法错误等），回退 ooc.json
+    }
+    const jsonUri = UriUtils.joinPath(URI.file(dir), 'ooc.json')
+    try {
+      if (await this.fs.exists(jsonUri)) {
+        const text = await this.fs.readFile(jsonUri)
+        const config = parseOocJson(text)
+        this.configCache.set(jsonUri.path, config)
+        return config
+      }
+    } catch {
+      // ooc.json 解析失败，返回空配置
+    }
+    return {}
   }
 }
 

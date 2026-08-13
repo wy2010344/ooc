@@ -72,16 +72,16 @@ Math PI             // 3.14159...
 // 注释、变量、所有 OOC 语法都可用
 // 最后一条表达式返回配置对象
 
-{ diagnostics: {
-    typeMismatch: 'warning',      // 类型不匹配：警告
-    callArgsMismatch: 'error',    // 参数数量不匹配：错误
-    noImplicitAny: 'off',         // 隐式 any：隐藏
+{ diagnostics = {
+    typeMismatch = 'warning',      // 类型不匹配：警告
+    callArgsMismatch = 'error',    // 参数数量不匹配：错误
+    noImplicitAny = 'off',         // 隐式 any：隐藏
 } }
 ```
 
 三级控制：`off`（隐藏）、`warning`（警告）、`error`（错误）。
 
-> CLI 运行时 `config.ooc` 由解释器执行；LSP/IDE 环境无解释器时，回退到静态 JSON 解析。
+> CLI 和 LSP/IDE 环境均使用解释器执行 `config.ooc`，支持完整 OOC 语法。
 
 快速初始化：
 
