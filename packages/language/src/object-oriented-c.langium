@@ -124,7 +124,7 @@ TypeName:
 ObjectDef:
     '{' 
         ('...' extends=Ref ',' )?
-        methods+=Method (',' methods+=Method)*  
+        (methods+=Method (',' methods+=Method)*)?  
     '}';
 
 

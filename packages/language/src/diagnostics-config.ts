@@ -323,6 +323,50 @@ export async function executeConfigOoc(
   )
 }
 
+/** LRU 配置缓存：带最大容量限制，防止内存泄漏 */
+class LruConfigCache {
+  private readonly map = new Map<string, OocConfig>()
+  private readonly maxSize: number
+
+  constructor(maxSize = 100) {
+    this.maxSize = maxSize
+  }
+
+  get(key: string): OocConfig | undefined {
+    const value = this.map.get(key)
+    if (value !== undefined) {
+      // LRU: 移到末尾（标记为最近使用）
+      this.map.delete(key)
+      this.map.set(key, value)
+    }
+    return value
+  }
+
+  set(key: string, value: OocConfig): void {
+    // 如果已存在，先删除再添加（更新位置）
+    if (this.map.has(key)) {
+      this.map.delete(key)
+    }
+    // 如果已满，删除最久未使用的条目（第一条）
+    if (this.map.size >= this.maxSize) {
+      const firstKey = this.map.keys().next().value
+      if (firstKey !== undefined) {
+        this.map.delete(firstKey)
+      }
+    }
+    this.map.set(key, value)
+  }
+
+  /** 清除所有缓存 */
+  clear(): void {
+    this.map.clear()
+  }
+
+  get size(): number {
+    return this.map.size
+  }
+}
+
 /**
  * 在 Langium 文档校验后按最近 config.ooc / ooc.json 过滤诊断。
  * 配置文件通过解释器执行（config.ooc）或静态解析（ooc.json），
@@ -336,8 +380,8 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
 
   private readonly services: LangiumCoreServices
 
-  /** 配置缓存：缓存键 = 路径 + ':' + 内容 hash，文件变更自动失效 */
-  private readonly configCache = new Map<string, OocConfig>()
+  /** 配置缓存：缓存键 = 路径 + ':' + 内容 hash，文件变更自动失效；LRU 策略防止内存泄漏 */
+  private readonly configCache = new LruConfigCache(200)
 
   constructor(services: LangiumCoreServices) {
     super(services)
