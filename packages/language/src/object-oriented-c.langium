@@ -43,7 +43,7 @@ Assignment:
 
 //object的方法
 Method:
-    MethodAll | MethodBind;
+    MethodAll | MethodBind | MethodBindMutable;
 
 MethodAll:
     name=MethodDefName 
@@ -67,6 +67,10 @@ MethodAll:
 
 MethodBind:
     name=MethodDefName (':' typeAnnotation=Type)? '=' expression=Expression;
+
+//可变属性：无参返回当前值，有参修改并返回新值
+MethodBindMutable:
+    name=MethodDefName (':' typeAnnotation=Type)? '<=' expression=Expression;
 
 MethodDefName:
     name=(Ref|Str|StID);

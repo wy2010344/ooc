@@ -165,6 +165,49 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(42)
   })
 
+  test('可变属性 <= ：无参返回当前值', async () => {
+    const result = await interpreter.interpret(`
+            counter = { value <= 0 };
+            counter value
+        `)
+    expect(result).toBe(0)
+  })
+
+  test('可变属性 <= ：有参修改并返回新值', async () => {
+    const result = await interpreter.interpret(`
+            counter = { value <= 0 };
+            counter value 42
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('可变属性 <= ：修改后无参返回新值', async () => {
+    const result = await interpreter.interpret(`
+            counter = { value <= 0 };
+            counter value 42;
+            counter value
+        `)
+    expect(result).toBe(42)
+  })
+
+  test('可变属性 <= ：多次修改', async () => {
+    const result = await interpreter.interpret(`
+            counter = { value <= 0 };
+            counter value 10;
+            counter value 20;
+            counter value
+        `)
+    expect(result).toBe(20)
+  })
+
+  test('可变属性 <= ：初始值非数字', async () => {
+    const result = await interpreter.interpret(`
+            obj = { greeting <= 'hello' };
+            obj greeting
+        `)
+    expect(result).toBe('hello')
+  })
+
   test('对象即 JS 对象：属性均为方法函数', async () => {
     const result = await interpreter.interpret(`
             obj = { value = 42, f() { 'f' } };

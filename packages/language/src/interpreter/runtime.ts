@@ -52,6 +52,12 @@ export function objectValue(
             name: getObjDefineName(method.name),
             value: interpretExpression(method.expression, scope),
           } as const
+        case 'MethodBindMutable':
+          return {
+            type: 'mutable' as const,
+            name: getObjDefineName(method.name),
+            value: interpretExpression(method.expression, scope) as unknown,
+          }
         default:
           return {
             type: 'call',
@@ -71,6 +77,11 @@ export function objectValue(
           const pair = methods[i]
           switch (pair.type) {
             case 'bind':
+              return pair.value
+            case 'mutable':
+              if (args.length > 0) {
+                ;(pair as { value: unknown }).value = args[0]
+              }
               return pair.value
             case 'call':
               const method = pair.value

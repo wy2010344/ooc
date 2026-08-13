@@ -8,6 +8,7 @@ import {
   isLambdaDef,
   isMethodAll,
   isMethodBind,
+  isMethodBindMutable,
   isPrimary,
   isRef,
   isStID,
@@ -50,6 +51,9 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     }
     if (isMethodBind(node)) {
       return `绑定 ${node.name}`
+    }
+    if (isMethodBindMutable(node)) {
+      return `可变属性 ${node.name}（getter/setter）`
     }
     if (isLambdaDef(node)) {
       // 同像：lambda 的类型就是 { apply(...) }，直接展示签名

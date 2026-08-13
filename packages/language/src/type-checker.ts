@@ -14,6 +14,7 @@ import {
   isMessagePipRight,
   isMethodAll,
   isMethodBind,
+  isMethodBindMutable,
   isModel,
   isNamedExpression,
   isNil,
@@ -616,6 +617,19 @@ export class ObjectOrientedCTypeChecker {
         typeParams:
           methodTypeParams.length > 0 ? methodTypeParams : undefined,
       })
+    } else if (isMethodBindMutable(method)) {
+      // 可变属性：注册 getter（无参）+ setter（一个 value 参数）两个变体
+      const valueType = method.typeAnnotation
+        ? this.resolveAnnotation(method.typeAnnotation, accept, undefined, env)
+        : anyType
+      sigs.push({
+        params: [],
+        returns: valueType,
+      })
+      sigs.push({
+        params: [valueType],
+        returns: valueType,
+      })
     } else {
       sigs.push({
         params: [],
@@ -658,6 +672,27 @@ export class ObjectOrientedCTypeChecker {
           const last = sigs[sigs.length - 1]
           if (!method.typeAnnotation) {
             last.returns = inferred
+          }
+        }
+        continue
+      }
+      if (isMethodBindMutable(method)) {
+        const inferred = this.inferExpression(method.expression, bodyEnv, accept)
+        this.checkAnnotation(method.typeAnnotation, inferred, accept, undefined, bodyEnv)
+        const sigs = objType.methods.get(name)
+        if (sigs && sigs.length > 0) {
+          // getter variant（无参）
+          const getter = sigs[0]
+          if (!method.typeAnnotation) {
+            getter.returns = inferred
+          }
+          // setter variant（一个参数，类型与值相同）
+          if (sigs.length > 1) {
+            const setter = sigs[1]
+            if (!method.typeAnnotation) {
+              setter.params = [inferred]
+              setter.returns = inferred
+            }
           }
         }
         continue
