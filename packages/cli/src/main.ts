@@ -23,12 +23,31 @@ const packageContent = await fs.readFile(packagePath, 'utf-8')
 const DEFAULT_CONFIG = `// config.ooc — OOC 项目配置文件
 // 这是一个真正的 OOC 文件，由解释器执行，最后一条表达式返回配置对象。
 // 诊断级别：off（隐藏）、warning（警告）、error（错误）
+// 所有规则都列在下方，按需取消注释即可。未列出的规则使用默认行为。
 
 { diagnostics = {
-    // typeMismatch = 'warning',      // 类型不匹配
-    // callArgsMismatch = 'error',    // 调用参数数量不匹配
-    // noImplicitAny = 'off',         // 隐式 any 类型（默认关闭）
-    // unknownType = 'warning',       // 未知类型
+    // --- 类型检查 ---
+    // typeMismatch = 'warning',           // 类型不匹配
+    // unknownType = 'warning',             // 未知类型名
+    // typeNotFound = 'error',              // 类型未找到
+    // noImplicitAny = 'off',               // 隐式 any（默认关闭）
+    // notGeneric = 'warning',              // 非泛型类型上使用了类型参数
+    // typeArgCount = 'warning',            // 类型参数数量不匹配
+    // missingTypeArg = 'warning',          // 缺少类型参数
+
+    // --- 调用与重载 ---
+    // callArgsMismatch = 'warning',        // 调用参数数量不匹配
+    // overloadReturnMismatch = 'warning',  // 重载方法返回类型不匹配
+    // guardNotBoolean = 'warning',         // #guard 条件不是布尔
+    // partialUnionMessage = 'warning',     // 联合类型成员专属方法未判别
+
+    // --- 重复定义 ---
+    // duplicateType = 'error',             // 重复的 typedef
+    // duplicateMethod = 'error',          // 重复的方法
+    // duplicateParam = 'error',           // 重复的参数
+
+    // --- 变量与赋值 ---
+    // reassignmentMismatch = 'warning',    // 重新赋值类型不匹配
 } }
 `
 

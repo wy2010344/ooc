@@ -40,6 +40,19 @@ export interface OocConfig {
   diagnostics?: Record<string, DiagLevel>
 }
 
+/** 空配置单例（无任何诊断规则） */
+const EMPTY_OOC_CONFIG: OocConfig = Object.freeze({})
+
+/** 简单字符串 hash（FNV-1a 32位），用于缓存键生成 */
+function hashStr(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
 /** 类型检查的规则 code（与 type-checker.ts 中 accept 的 data.code 对应） */
 export const DIAGNOSTIC_CODES = {
   duplicateType: 'duplicateType',
@@ -76,7 +89,7 @@ export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_C
  */
 export function toOocConfig(value: unknown): OocConfig {
   if (!value || typeof value !== 'object') {
-    return {}
+    return EMPTY_OOC_CONFIG
   }
   const obj = value as Record<string, unknown>
   // OOC 对象属性是方法函数，需要调用才能取值
@@ -89,7 +102,7 @@ export function toOocConfig(value: unknown): OocConfig {
   const flatResult = extractDiagLevels(obj)
   return Object.keys(flatResult).length > 0
     ? { diagnostics: flatResult }
-    : {}
+    : EMPTY_OOC_CONFIG
 }
 
 /**
@@ -136,7 +149,7 @@ export function parseOocJson(text: string): OocConfig {
     const json = JSON.parse(text.replace(/^\uFEFF/, ''))
     return toOocConfig(json)
   } catch {
-    return {}
+    return EMPTY_OOC_CONFIG
   }
 }
 
@@ -206,11 +219,46 @@ export function diagnosticData(code: DiagnosticCode): { code: DiagnosticCode } {
 }
 
 /**
- * 从项目根读取配置文件（优先 config.ooc，其次 ooc.json），不存在则返回空配置。
- * @param fs 语言服务的 FileSystemProvider
- * @param rootPath 项目根目录
- * @param executor 可选的配置文件执行器（用解释器执行 config.ooc）
+ * 从单目录加载配置：优先 config.ooc（解释器执行），回退 ooc.json（静态解析）。
+ * 这是所有配置读取的核心实现，CLI 和 LSP 共用。
  */
+async function loadConfigForDir(
+  fs: {
+    exists: (uri: URI) => Promise<boolean> | boolean
+    readFile: (uri: URI) => Promise<string> | string
+  },
+  dirPath: string,
+  executor?: ConfigExecutor,
+): Promise<OocConfig> {
+  try {
+    // 优先查找 config.ooc（真正的 OOC 文件，用解释器执行）
+    const configUri = UriUtils.joinPath(URI.file(dirPath), 'config.ooc')
+    if (await fs.exists(configUri)) {
+      const text = await fs.readFile(configUri)
+      if (executor) {
+        try {
+          const result = await executor(text, configUri.path)
+          return toOocConfig(result)
+        } catch {
+          return EMPTY_OOC_CONFIG
+        }
+      }
+      // 无解释器时回退到静态解析
+      return parseOocJson(text)
+    }
+    // 回退到 ooc.json（向后兼容，JSON 格式）
+    const jsonUri = UriUtils.joinPath(URI.file(dirPath), 'ooc.json')
+    if (await fs.exists(jsonUri)) {
+      const text = await fs.readFile(jsonUri)
+      return parseOocJson(text)
+    }
+    return EMPTY_OOC_CONFIG
+  } catch {
+    return EMPTY_OOC_CONFIG
+  }
+}
+
+/** 从项目根读取配置文件（公开 API，CLI 使用） */
 export async function loadOocConfig(
   fs: {
     exists: (uri: URI) => Promise<boolean> | boolean
@@ -219,35 +267,10 @@ export async function loadOocConfig(
   rootPath: string,
   executor?: ConfigExecutor,
 ): Promise<OocConfig> {
-  try {
-    // 优先查找 config.ooc（真正的 OOC 文件，用解释器执行）
-    const configUri = UriUtils.joinPath(URI.file(rootPath), 'config.ooc')
-    if (await fs.exists(configUri)) {
-      const text = await fs.readFile(configUri)
-      if (executor) {
-        try {
-          const result = await executor(text, configUri.path)
-          return toOocConfig(result)
-        } catch {
-          return {}
-        }
-      }
-      // 无解释器时回退到静态解析（LSP 环境）
-      return parseOocJson(text)
-    }
-    // 回退到 ooc.json（向后兼容，JSON 格式）
-    const jsonUri = UriUtils.joinPath(URI.file(rootPath), 'ooc.json')
-    if (await fs.exists(jsonUri)) {
-      const text = await fs.readFile(jsonUri)
-      return parseOocJson(text)
-    }
-    return {}
-  } catch {
-    return {}
-  }
+  return loadConfigForDir(fs, rootPath, executor)
 }
 
-/** 从文件所在目录逐级向上找最近的一个 config.ooc / ooc.json（类 tsconfig 查找语义） */
+/** 从文件所在目录逐级向上找最近的一个 config.ooc / ooc.json（CLI 使用） */
 export async function findNearestOocConfig(
   fs: {
     exists: (uri: URI) => Promise<boolean> | boolean
@@ -258,14 +281,14 @@ export async function findNearestOocConfig(
 ): Promise<OocConfig> {
   let dir = startDir
   for (;;) {
-    const cfg = await loadOocConfig(fs, dir, executor)
+    const cfg = await loadConfigForDir(fs, dir, executor)
     const keys = Object.keys(cfg.diagnostics ?? {})
     if (keys.length > 0) {
       return cfg
     }
     const parent = dirnameForConfig(dir)
     if (parent === dir) {
-      return {}
+      return EMPTY_OOC_CONFIG
     }
     dir = parent
   }
@@ -302,9 +325,8 @@ export async function executeConfigOoc(
 
 /**
  * 在 Langium 文档校验后按最近 config.ooc / ooc.json 过滤诊断。
- * config.ooc 由校验器自己用解释器执行（通过 services.shared.workspace 的
- * DocumentBuilder / LangiumDocumentFactory 解析，interpret 执行），
- * 无需外部 ConfigExecutor。
+ * 配置文件通过解释器执行（config.ooc）或静态解析（ooc.json），
+ * 缓存键为「路径 + 内容 hash」，文件变更时自动失效。
  */
 export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
   private readonly fs: {
@@ -314,7 +336,7 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
 
   private readonly services: LangiumCoreServices
 
-  /** 配置缓存：文件路径 → 配置结果（同一进程内只执行一次） */
+  /** 配置缓存：缓存键 = 路径 + ':' + 内容 hash，文件变更自动失效 */
   private readonly configCache = new Map<string, OocConfig>()
 
   constructor(services: LangiumCoreServices) {
@@ -335,6 +357,9 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
     )
     const docDir = dirnameForConfig(uriToPath(document.uri))
     const config = await this.findConfigCached(docDir)
+    // 无论是否有配置都走 filterDiagnostic：
+    // - EMPTY_OOC_CONFIG 时仍需应用默认级别（如 noImplicitAny 默认 off）
+    // - 有配置时按配置调整
     return diagnostics.flatMap((d) => {
       const next = filterDiagnostic(config, d.severity, codeOfDiagnostic(d))
       if (next === undefined) {
@@ -344,53 +369,60 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
     })
   }
 
-  /** 带缓存的配置查找：同一 config 文件只执行一次 */
+  /** 带缓存的配置查找：内容 hash 作为缓存键，文件变更自动失效 */
   private async findConfigCached(startDir: string): Promise<OocConfig> {
     let dir = startDir
     for (;;) {
-      const cfg = await this.loadOocConfigForDir(dir)
-      const keys = Object.keys(cfg.diagnostics ?? {})
-      if (keys.length > 0) {
-        return cfg
+      const cfg = await this.loadConfigForDirCached(dir)
+      if (cfg !== EMPTY_OOC_CONFIG) {
+        const keys = Object.keys(cfg.diagnostics ?? {})
+        if (keys.length > 0) {
+          return cfg
+        }
       }
       const parent = dirnameForConfig(dir)
       if (parent === dir) {
-        return {}
+        return EMPTY_OOC_CONFIG
       }
       dir = parent
     }
   }
 
-  /** 单目录的配置查找：优先 config.ooc（解释器执行），回退 ooc.json */
-  private async loadOocConfigForDir(dir: string): Promise<OocConfig> {
+  /** 单目录缓存加载：读取内容 → 计算 hash → 命中则复用，未命中则执行/解析 */
+  private async loadConfigForDirCached(dir: string): Promise<OocConfig> {
     const configUri = UriUtils.joinPath(URI.file(dir), 'config.ooc')
-    const path = configUri.path
-    if (this.configCache.has(path)) {
-      return this.configCache.get(path)!
-    }
-    try {
-      if (await this.fs.exists(configUri)) {
-        const text = await this.fs.readFile(configUri)
-        const result = await executeConfigOoc(text, path, this.services)
-        const config = toOocConfig(result)
-        this.configCache.set(path, config)
-        return config
-      }
-    } catch {
-      // config.ooc 执行失败（语法错误等），回退 ooc.json
-    }
     const jsonUri = UriUtils.joinPath(URI.file(dir), 'ooc.json')
-    try {
-      if (await this.fs.exists(jsonUri)) {
-        const text = await this.fs.readFile(jsonUri)
-        const config = parseOocJson(text)
-        this.configCache.set(jsonUri.path, config)
-        return config
+
+    // 优先 config.ooc
+    if (await this.fs.exists(configUri)) {
+      const text = await this.fs.readFile(configUri)
+      const cacheKey = configUri.path + ':' + hashStr(text)
+      const cached = this.configCache.get(cacheKey)
+      if (cached) {
+        return cached
       }
-    } catch {
-      // ooc.json 解析失败，返回空配置
+      try {
+        const result = await executeConfigOoc(text, configUri.path, this.services)
+        const config = toOocConfig(result)
+        this.configCache.set(cacheKey, config)
+        return config
+      } catch {
+        // 执行失败，回退到 ooc.json
+      }
     }
-    return {}
+    // 回退 ooc.json
+    if (await this.fs.exists(jsonUri)) {
+      const text = await this.fs.readFile(jsonUri)
+      const cacheKey = jsonUri.path + ':' + hashStr(text)
+      const cached = this.configCache.get(cacheKey)
+      if (cached) {
+        return cached
+      }
+      const config = parseOocJson(text)
+      this.configCache.set(cacheKey, config)
+      return config
+    }
+    return EMPTY_OOC_CONFIG
   }
 }
 

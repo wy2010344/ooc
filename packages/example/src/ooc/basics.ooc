@@ -1,10 +1,10 @@
-// 变量、基本类型与运算符
+// ===== 变量与基本类型 =====
 x = 42;
 name = 'ooc';
 flag = true;
 empty = nil;
-x + 3;
 
+// ===== 运算符（无优先级，左结合） =====
 1 + 2;
 7 - 3;
 6 * 4;
@@ -14,14 +14,17 @@ x + 3;
 10 == 10;
 1 && 0;
 
-// 字符串方法（空格调用）
+// ===== 字符串（空格调用方法） =====
 'abcdef' slice 1 3;
 'abc' + 'def';
-
-// 字符串属性直接读取
 'abcdef' length;
 
-// JS 对象属性访问
+// ===== JS 全局（解释器回退 globalThis） =====
 Math PI;
+console log 'hello from ooc';
 
-// 注释：// 单行、/* 多行 */
+// ===== 消息调用 =====
+hello = { greet(name) => 'hello, ' + name };
+hello greet 'ooc'
+
+// ===== 注释：// 单行、/* 多行 */

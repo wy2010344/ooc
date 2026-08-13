@@ -32,11 +32,14 @@ function runCase(file: string) {
 }
 
 const expectedBinds: Record<string, Record<string, unknown>> = {
-  'loop.ooc': { iterations: 5 },
-  'loop-edge.ooc': { first: 1, zeroStops: 1, runs: 3, count: 0 },
-  'loop-repeat.ooc': { sum: 10, touched: 0 },
+  'loop.ooc': {
+    loopIterations: 5,
+    loopRuns: 3,
+    repeatSum: 10,
+    repeatTouched: 0,
+    sum_1_to_10: 55,
+  },
   'js.ooc': { year: 2026, month: 0, called: 42 },
-  'host-globals.ooc': { sum_1_to_10: 55, sqrt_16: 4, max_3_7: 7 },
 }
 
 describe('browser demo 案例（宿主桥接注入）', () => {

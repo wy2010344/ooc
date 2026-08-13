@@ -16,6 +16,9 @@ import {
 } from './evaluate.js'
 import { addScope, type Scope } from './scope.js'
 
+/** 空对象单例：`{}` 字面量共享同一个实例 */
+const EMPTY_OBJECT: Record<string, unknown> = {}
+
 // 定义值类型
 export type Value = number | string | boolean | null | ObjectValue
 
@@ -39,6 +42,10 @@ export function objectValue(
   scope: Scope,
   parent: ObjectValue | undefined,
 ) {
+  // 空对象 {} 快速返回共享单例（无 parent 且无方法时）
+  if (methods.length === 0 && !parent) {
+    return EMPTY_OBJECT
+  }
   // 顶层对象（无 parent）直接新建普通对象 {}，而非 Object.create(null)，
   // 保留 Object.prototype，JS 侧 toString/拼接等原生能力可用。
   const currentObject = parent ? Object.create(parent) : {}
