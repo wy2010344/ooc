@@ -3,6 +3,7 @@ import { AstNodeHoverProvider } from 'langium/lsp'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
   isAssignment,
+  isBool,
   isExpression,
   isImportStatement,
   isLambdaDef,
@@ -11,8 +12,11 @@ import {
   isMethodAll,
   isMethodBind,
   isMethodBindMutable,
+  isNil,
+  isNum,
   isPrimary,
   isRef,
+  isStr,
   isStID,
   type Message,
   type MethodCallName,
@@ -122,6 +126,28 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
         `引用 ${node.value}：${describeHoverType(t)}`,
         comment,
       )
+    }
+    // 字面量类型
+    if (isNum(node)) {
+      return this.buildHoverContent(
+        `数字 ${node.value}：number`,
+        comment,
+      )
+    }
+    if (isStr(node)) {
+      return this.buildHoverContent(
+        `字符串 ${node.value}：string`,
+        comment,
+      )
+    }
+    if (isBool(node)) {
+      return this.buildHoverContent(
+        `布尔 ${node.value}：bool`,
+        comment,
+      )
+    }
+    if (isNil(node)) {
+      return this.buildHoverContent(`nil：null`, comment)
     }
     if (isExpression(node) || isPrimary(node)) {
       const t = this.checker.inferType(node)

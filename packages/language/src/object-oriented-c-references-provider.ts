@@ -1,20 +1,21 @@
 import { Location } from 'vscode-languageserver'
-import type { AstNode } from 'langium'
+import type { AstNode, LangiumDocument } from 'langium'
 import {
   isAssignment,
-  isMethod,
+  isMessage,
+  isMethodAll,
   isParam,
   isRef,
-  isMessage,
-  type Method,
+  type Message,
+  type MethodAll,
+  type Ref,
 } from './generated/ast.js'
 
 /**
  * OOC 查找引用提供者
  *
- * 由于 OOC 语言不使用 Langium 标准的交叉引用语法（[TypeName]），
- * 引用解析是通过自定义的类型检查器实现的。因此我们需要自定义
- * ReferencesProvider 来遍历 AST 查找所有引用位置。
+ * OOC 语言不使用 Langium 标准的交叉引用语法（[TypeName]），
+ * 引用解析通过自定义实现。此 Provider 基于名称匹配来查找所有引用位置。
  */
 export class ObjectOrientedCReferencesProvider {
 
@@ -22,13 +23,14 @@ export class ObjectOrientedCReferencesProvider {
    * 查找所有引用指定节点的位置
    */
   findReferences(
-    document: any,
+    document: LangiumDocument,
     params: { position: { line: number; character: number }; context: { includeDeclaration: boolean } },
     _cancelToken?: any,
   ): Location[] {
     const rootNode = document.parseResult?.value
     if (!rootNode) return []
 
+    // 使用 Langium 的 findDeclarationNodeAtOffset 找到光标位置的节点
     const offset = document.textDocument.offsetAt(params.position)
     const targetNode = this.findNodeAtOffset(rootNode, offset)
     if (!targetNode) return []
@@ -37,15 +39,18 @@ export class ObjectOrientedCReferencesProvider {
     if (!name) return []
 
     const locations: Location[] = []
+    const uri = document.uri?.toString()
+
+    if (!uri) return []
 
     // 如果需要包含声明本身
     if (params.context.includeDeclaration) {
-      const loc = this.nodeToLocation(targetNode, document)
+      const loc = this.nodeToLocation(targetNode, uri)
       if (loc) locations.push(loc)
     }
 
     // 遍历文档查找所有引用
-    this.collectReferences(rootNode, name, locations, document)
+    this.collectReferences(rootNode, name, locations, uri)
 
     return locations
   }
@@ -57,21 +62,28 @@ export class ObjectOrientedCReferencesProvider {
     const cstNode = (root as any).$cstNode
     if (!cstNode) return undefined
 
-    // 找到该位置的叶子节点
-    let current: any = cstNode
-    while (current && current.children && current.children.length > 0) {
-      let child: any = undefined
-      for (const c of current.children) {
-        if (c.offset <= offset && offset <= c.offset + c.length) {
-          child = c
-          break
-        }
-      }
-      if (!child) break
-      current = child
+    // 遍历 CST 查找指定偏移处的节点
+    return this.traverseCstForOffset(cstNode, offset)?.astNode
+  }
+
+  /**
+   * 遍历 CST 查找指定偏移处的节点
+   */
+  private traverseCstForOffset(cstNode: any, offset: number): any | undefined {
+    if (!cstNode || offset < cstNode.offset || offset > cstNode.offset + cstNode.length) {
+      return undefined
     }
 
-    return current?.astNode
+    // 如果有子节点，尝试在子节点中查找
+    if (cstNode.children && cstNode.children.length > 0) {
+      for (const child of cstNode.children) {
+        const found = this.traverseCstForOffset(child, offset)
+        if (found) return found
+      }
+    }
+
+    // 叶子节点就是目标
+    return cstNode
   }
 
   /**
@@ -81,33 +93,69 @@ export class ObjectOrientedCReferencesProvider {
     if (isAssignment(node)) {
       return node.name
     }
-    if (isMethod(node)) {
+    if (isMethodAll(node)) {
       return this.getMethodName(node)
     }
-    if (isParam(node)) {
-      return node.name
+    if (isParam(node as any)) {
+      return (node as any).name
     }
-    // 对于 Ref 节点，获取其引用的名称
     if (isRef(node)) {
       return node.value
+    }
+    // 对于 Message 的 name
+    if (isMessage(node)) {
+      return this.getMethodCallName(node)
+    }
+    // 向上查找父节点的名称
+    return this.findParentName(node)
+  }
+
+  /**
+   * 向上查找父节点的名称
+   */
+  private findParentName(node: AstNode): string | undefined {
+    let current = node.$container
+    while (current) {
+      if (isAssignment(current)) return current.name
+      if (isMethodAll(current)) return this.getMethodName(current)
+      if (isParam(current as any)) return (current as any).name
+      if (isRef(current)) return current.value
+      if (isMessage(current)) return this.getMethodCallName(current)
+      current = current.$container
     }
     return undefined
   }
 
   /**
-   * 获取方法名
+   * 获取方法名（从 MethodAll 的 name 字段）
    */
-  private getMethodName(method: Method): string | undefined {
+  private getMethodName(method: MethodAll): string | undefined {
     const nameNode = method.name
     if (!nameNode) return undefined
+    return this.extractNameValue(nameNode)
+  }
 
-    // MethodDefName: name=(Ref|Str|StID)
-    if (typeof nameNode === 'object' && 'value' in nameNode) {
-      const value = (nameNode as any).value
-      if (typeof value === 'object' && value !== null && 'value' in value) {
-        return (value as any).value as string
+  /**
+   * 获取消息调用名
+   */
+  private getMethodCallName(message: Message): string {
+    const nameNode = message.name
+    if (!nameNode) return ''
+    return this.extractNameValue(nameNode) ?? ''
+  }
+
+  /**
+   * 从 Name 节点提取字符串值
+   */
+  private extractNameValue(nameNode: any): string | undefined {
+    if (!nameNode) return undefined
+    if (typeof nameNode === 'string') return nameNode
+    // MethodDefName / MethodCallName: { value: Ref | StID | Str }
+    if (nameNode.value) {
+      if (typeof nameNode.value === 'string') return nameNode.value
+      if (typeof nameNode.value === 'object' && 'value' in nameNode.value) {
+        return (nameNode.value as any).value as string
       }
-      return value as string
     }
     return undefined
   }
@@ -119,75 +167,62 @@ export class ObjectOrientedCReferencesProvider {
     node: AstNode,
     name: string,
     locations: Location[],
-    document: any,
+    uri: string,
   ): void {
-    // 如果是 Ref 节点，检查是否引用目标名称
-    if (isRef(node) && node.value === name) {
-      const loc = this.nodeToLocation(node, document)
+    // 如果是 Ref 节点，检查是否匹配目标名称
+    if (isRef(node as any) && (node as Ref).value === name) {
+      const loc = this.nodeToLocation(node, uri)
       if (loc) locations.push(loc)
     }
 
-    // 如果是 Message 节点，检查消息名是否匹配
+    // 如果是 Message，检查消息名是否匹配
     if (isMessage(node)) {
-      const msgName = this.getMessageName(node)
+      const msgName = this.getMethodCallName(node)
       if (msgName === name) {
-        const loc = this.nodeToLocation(node, document)
+        const loc = this.nodeToLocation(node, uri)
         if (loc) locations.push(loc)
       }
     }
 
-    // 递归遍历子节点（使用 $container 链或 $cstNode 子节点）
-    this.traverseChildren(node, name, locations, document)
+    // 如果是 Assignment，检查变量名是否匹配
+    if (isAssignment(node) && node.name === name) {
+      const loc = this.nodeToLocation(node, uri)
+      if (loc) locations.push(loc)
+    }
+
+    // 遍历所有子节点
+    this.traverseAllChildren(node, name, locations, uri)
   }
 
   /**
-   * 遍历子节点
+   * 遍历所有子节点（使用 Langium 的 reflection API）
    */
-  private traverseChildren(
+  private traverseAllChildren(
     node: AstNode,
     name: string,
     locations: Location[],
-    document: any,
+    uri: string,
   ): void {
-    // 尝试使用 $cstNode 的 children
+    // 使用 $cstNode 的 children 遍历
     const cstNode = (node as any).$cstNode
     if (cstNode?.children) {
       for (const child of cstNode.children) {
         if (child?.astNode) {
-          this.collectReferences(child.astNode, name, locations, document)
+          this.collectReferences(child.astNode, name, locations, uri)
         }
       }
     }
   }
 
   /**
-   * 获取消息名
-   */
-  private getMessageName(message: any): string {
-    const nameNode = message.name
-    if (!nameNode) return ''
-    if (typeof nameNode === 'object' && 'value' in nameNode) {
-      const value = (nameNode as any).value
-      if (typeof value === 'object' && value !== null && 'value' in value) {
-        return (value as any).value as string
-      }
-      return value as string
-    }
-    return ''
-  }
-
-  /**
    * 将节点转换为 Location
    */
-  private nodeToLocation(node: AstNode, document: any): Location | undefined {
+  private nodeToLocation(node: AstNode, uri: string): Location | undefined {
     const cstNode = (node as any).$cstNode
     if (!cstNode) return undefined
 
     const range = cstNode.range
     if (!range) return undefined
-
-    const uri = document.uri?.toString() ?? document.textDocument?.uri
-    if (!uri) return undefined
 
     return Location.create(uri, {
       start: {
