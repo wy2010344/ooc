@@ -57,8 +57,15 @@ function resolveEntryFile(
   basePath?: string,
 ): string {
   const cwd = nodeCwd()
-  const fromPath = !isAbsolutePath(rawName)
-    ? (basePath ?? (cwd ? joinPath(cwd, 'entry.ooc') : ''))
+  if (typeof basePath === 'string' && basePath) {
+    // basePath 已经是目录（来自 dirnameOf(rootPath)）
+    // 构造假文件路径，让 resolveModuleName 的 dirnameOf 正确提取目录
+    const fromPath = joinPath(basePath, '_')
+    return resolveModuleName(rawName, fromPath, extensions)
+  }
+  // 顶层入口：basePath 非字符串（undefined / Commander Command 对象等）
+  const fromPath = !isAbsolutePath(rawName) && cwd
+    ? joinPath(cwd, 'entry.ooc')
     : ''
   return resolveModuleName(rawName, fromPath, extensions)
 }
