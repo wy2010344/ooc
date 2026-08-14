@@ -1,39 +1,80 @@
-# AGENTS.md — 与 AI 交互的注意
+# AGENTS.md — AI 协作守则
 
-本仓库由 AI 协作开发，以下规则务必遵守。项目架构细节见 `SKILL.md`。
+本仓库由 AI 协作开发。以下规则务必遵守。架构细节见 `SKILL.md`。
 
-## 0. 协作方式
+## 1. 项目结构
 
-- 尽量用中文回复。
-- 执行任何指令前，先评估可行性与潜在问题（工具链约束、环境差异、对架构的影响），说明后再动手；不硬上、不盲目照做。
-- 不要用歪门方法绕问题：比如检测编译输出、探测 node_modules、改配置绕过等。缺什么先搜 skills（`npx skills find <关键词>`），找不到再问我。
-- 单文件代码量过多时，恰当地拆分成模块目录，注意高聚合低耦合，并添加必要的中文注释方便阅读理解。
+```
+packages/
+├── language/     # 核心语言：Grammar、解释器、类型检查、LSP 服务
+├── vscode-ooc/   # VSCode 扩展壳，消费 language 的 LSP 服务
+└── example/      # 示例 OOC 代码（vite 打包，非 Termux 兼容范围）
+```
 
-## 1. 类型检查与运行是两个独立分支
+修改前先确认文件属于哪个包，避免跨包误改。
 
-- **运行时解释器不做任何类型检查**。`createInterpretAction`（`packages/language/src/interpreter/host.ts`）只拦语法错误（`syntaxErrorText`），类型错误**从不阻断运行**——能运行就运行。
-- 类型检查只发生在两处：IDE/LSP 的 `ConfigAwareDocumentValidator`，以及 CLI 的 `ooc type-check`（`createTypeCheckAction`）。`ooc.json`（`diagnostics-config.ts`）只控制类型检查的显示级别，与运行无关。
-- 别把类型诊断、validator、ooc.json 的逻辑加回解释器路径（`evaluate.ts`、`execDocument`）。给解释器「加类型检查」是反设计。
+## 2. 核心原则
 
-## 2. 工具链约束（Termux/Android）
+- **中文回复**。
+- **评估先行**：动手前先评估可行性（工具链、架构影响），不硬上、不绕路。
+- **遇到限制时**：优先搜索 skills (`npx skills find <关键词>`)，找不到再问用户。
+- **单文件 ≤ 300 行**。超出时拆分模块，遵循高聚合低耦合。
+- **代码加中文注释**，方便阅读理解。
 
-- 任何需要 dlopen 原生 `.node` 模块的库都不可用：vitest 4 / rolldown、vite / rollup、SWC、esbuild 的 native binding 等，在 Android/Termux 的 linker namespace 下加载失败。
-- 可用：纯 JS 库、Node 内置（`node:test`）、tsc、esbuild 子进程可执行文件。
-- 测试跑 `npm run test`（`node:test`，`test/compat.ts` 复刻 vitest 小面 API）。**别换回 vitest**。构建用 `npm run build`。
-- 例外：`packages/example` 用 vite 打包，不在 Termux 兼容范围——它的 `vite build` 在这里跑不了，root `npm run build` 会挂在 example，属预期；别把它再改回 esbuild，除非用户明确要求。
+## 3. 类型检查 vs 运行（两个独立分支）
 
-## 3. 语言事实（容易搞错）
+- **运行时解释器不做任何类型检查**。`createInterpretAction`（`packages/language/src/interpreter/host.ts`）只拦语法错误，类型错误从不阻断运行。
+- 类型检查仅存在于两处：
+  - LSP 的 `ConfigAwareDocumentValidator`
+  - CLI 的 `ooc type-check`（`createTypeCheckAction`）
+- **禁止**把类型诊断逻辑加回解释器路径（`evaluate.ts`、`execDocument`）。
 
-- `//` 是单行注释（`SL_COMMENT`），**不是除法**。除法是消息形式：`12 "/ 3`（用 `"/` 消息名，比 `'/'` 更通用，变量接收者上也解析正常）。
-- 消息调用用空格分隔，没有函数括号；字符串用单引号。
-- 运算符无优先级，左结合；`#import` 用相对路径，最后一条表达式是模块导出值。
+## 4. 工具链约束
 
-## 4. 改动语法
+- **不可用**：任何需要 `dlopen` 原生 `.node` 的库（vitest 4、rolldown、vite/rollup、SWC、esbuild 的 native binding）——在 Termux/Android 下加载失败。
+- **可用**：纯 JS 库、Node 内置（`node:test`）、tsc、esbuild 子进程。
+- **测试**：`npm run test`（基于 `node:test`，`test/compat.ts` 复刻 vitest 面 API）。**不要换回 vitest**。
+- **构建**：`npm run build`。`packages/example` 的 vite 构建失败属预期，不在 Termux 兼容范围。
 
-改 `packages/language/src/object-oriented-c.langium` 后必须 `npm run langium:generate` 重新生成，再 build + test。`src/generated` 已在 gitignore，不入库。
+## 5. OOC 语言陷阱
 
-## 5. 提交与推送
+- `//` 是**单行注释**，不是除法。除法写法：`12 "/ 3`（`"/` 是消息名）。
+- 消息调用用空格分隔，无括号；字符串用单引号。
+- 运算符无优先级，左结合。
+- `#import` 用相对路径，最后一条表达式是模块导出值。
 
-- git 身份：`wy2010344 <wangyang2010344@foxmail.com>`（仓库级已配置）。
-- 推送走 SSH：仓库已配 `core.sshCommand`（`~/.ssh/id_ed25519`，已加入 GitHub），直接 `git push origin main` 即可。
-- 生成的 `out/`、`dist/`、`src/generated` 不入库。
+## 6. Grammar 修改流程
+
+修改 `packages/language/src/object-oriented-c.langium` 后必须：
+```bash
+npm run langium:generate  # 重新生成 parser/visitor
+npm run build             # 编译
+npm test                  # 验证
+```
+
+`src/generated/` 已 gitignore，不入库。
+
+## 7. 提交与推送
+
+```bash
+git add <files>
+git commit -m "描述性信息"
+git push origin main
+```
+
+生成产物（`out/`、`dist/`、`src/generated/`）不入库。
+
+## 8. 调试技巧
+
+已有的调试脚本（仅本地使用，不入库）：
+- `debug-ref.mjs` — 调试 ReferencesProvider
+- `debug-def.mjs` — 调试 DefinitionProvider
+- `debug-hover.mjs` — 调试 HoverProvider
+
+遇到 LSP 问题时，先跑对应 debug 脚本验证 CST 结构，再修改 Provider。
+
+## 9. 测试原则
+
+- 修改 LSP Provider 时，**必须**在 `lsp-smoke.test.ts` 中添加对应测试用例。
+- 使用 Langium 测试工具（`expectHover`、`expectCompletion`、`expectFindReferences` 等），不用 try...catch 手写断言。
+- 语法测试使用 `langium:generate` 后的 AST 类型，不手动构造。

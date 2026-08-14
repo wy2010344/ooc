@@ -1,12 +1,13 @@
 import type { CompletionParams, CancellationToken } from 'vscode-languageserver'
 import { CompletionItem, CompletionItemKind, CompletionList } from 'vscode-languageserver'
-import { CstUtils } from 'langium'
+import { CstUtils, isCompositeCstNode } from 'langium'
 import { DefaultCompletionProvider } from 'langium/lsp'
-import type { AstNode, LangiumDocument } from 'langium'
+import type { AstNode, CstNode, LangiumDocument } from 'langium'
 import type { LangiumServices } from 'langium/lsp'
 import {
   isAssignment,
   isLambdaDef,
+  isMessage,
   isMessageOrChain,
   isRef,
   isModel,
@@ -24,7 +25,11 @@ import { describeType, type TypeInfo } from './type-system.js'
 
 /**
  * OOC 代码自动补全提供者
- * 继承 DefaultCompletionProvider，叠加 OOC 特有的变量和方法补全
+ * 
+ * 核心设计：
+ * 1. 使用 findLastNodeBefore 找到光标位置前最近的 CST/AST 节点
+ * 2. 分析上下文决定补全类型（变量/方法/参数）
+ * 3. 正确处理尾部位置（光标在最后一个 token 之后）
  */
 export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider {
   private readonly checker: ReturnType<typeof getSharedChecker>
@@ -70,62 +75,232 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
     if (!cstRoot) return items
 
     const offset = document.textDocument.offsetAt(params.position)
-    // 先尝试使用 findDeclarationNodeAtOffset（会调整 offset 以匹配标识符）
-    let cstNode = CstUtils.findDeclarationNodeAtOffset(cstRoot, offset, this.grammarConfig.nameRegexp)
-    // 如果找不到节点，或者找到的节点的 offset 与原始 offset 差距太大，
-    // 则尝试使用原始 offset 直接查找
-    if (!cstNode || Math.abs(cstNode.offset - offset) > 1) {
-      cstNode = CstUtils.findLeafNodeAtOffset(cstRoot, offset)
-    }
+    const text = document.textDocument.getText() || ''
+
+    // 找到光标位置前最近的 CST 节点
+    const cstNode = this.findBestCstNode(cstRoot, offset)
     const node = cstNode?.astNode
 
-    if (node) {
-      const variables = this.collectVisibleVariables(node)
-      for (const [name, typeInfo] of variables) {
-        items.push({
-          label: name,
-          kind: CompletionItemKind.Variable,
-          detail: typeInfo,
-        })
-      }
-    } else {
-      // 如果找不到特定节点，则从根节点收集所有可见变量
-      const variables = this.collectVisibleVariablesFromRoot(rootNode)
-      for (const [name, typeInfo] of variables) {
-        items.push({
-          label: name,
-          kind: CompletionItemKind.Variable,
-          detail: typeInfo,
-        })
-      }
-    }
+    // 收集可见变量（基于找到的节点或根节点）
+    const variableItems = this.getVariableCompletions(node || rootNode)
+    items.push(...variableItems)
 
-    if (node && isRef(node)) {
-      const methodItems = this.getMethodCompletions(node)
-      items.push(...methodItems)
-    }
-
-    if (node && isMessageOrChain(node)) {
-      const methodItems = this.getMessageChainCompletions(node)
-      items.push(...methodItems)
-    }
+    // 方法补全：基于上下文推断
+    const methodItems = this.getContextualMethodCompletions(node, offset, text)
+    items.push(...methodItems)
 
     return items
   }
 
   /**
-   * 从根节点收集所有可见变量
+   * 找到光标位置前最优的 CST 节点
+   * 
+   * 策略：
+   * 1. 先尝试 findDeclarationNodeAtOffset（精确匹配标识符）
+   * 2. 如果失败，使用 findLastNodeBefore（找到光标前最近的节点）
    */
-  private collectVisibleVariablesFromRoot(rootNode: AstNode): Map<string, string> {
-    const result = new Map<string, string>()
-    if (isModel(rootNode)) {
-      for (const stmt of rootNode.expressions) {
-        if (isAssignment(stmt)) {
-          result.set(stmt.name, this.inferTypeString(stmt.expression))
+  private findBestCstNode(cstRoot: CstNode, offset: number): CstNode | undefined {
+    // 策略1: 使用 findDeclarationNodeAtOffset
+    const declNode = CstUtils.findDeclarationNodeAtOffset(cstRoot, offset, this.grammarConfig.nameRegexp)
+    if (declNode) return declNode
+
+    // 策略2: 尝试 findLeafNodeAtOffset（用于光标在节点内部的情况）
+    const leafNode = CstUtils.findLeafNodeAtOffset(cstRoot, offset)
+    if (leafNode) return leafNode
+
+    // 策略3: 找到光标前最近的 CST 节点
+    return this.findLastCstNodeBefore(cstRoot, offset)
+  }
+
+  /**
+   * 找到 offset 之前最近的 CST 节点
+   * 用于处理光标在 token 之后的情况
+   */
+  private findLastCstNodeBefore(cstRoot: CstNode, offset: number): CstNode | undefined {
+    let result: CstNode | undefined
+
+    function walk(node: CstNode) {
+      if (node.offset === undefined) return
+
+      // 光标在节点内部或之后
+      if (node.offset <= offset) {
+        // 记录这个节点（如果它比之前的结果更靠近光标）
+        if (!result || node.offset > result.offset) {
+          result = node
+        }
+      }
+
+      // 继续遍历子节点（寻找更精确的匹配）
+      if (isCompositeCstNode(node) && node.content) {
+        for (const child of node.content) {
+          if (child.offset <= offset) {
+            walk(child)
+          }
         }
       }
     }
+
+    walk(cstRoot)
     return result
+  }
+
+  /**
+   * 获取变量补全项
+   */
+  private getVariableCompletions(node: AstNode): CompletionItem[] {
+    const items: CompletionItem[] = []
+    const variables = this.collectVisibleVariables(node)
+    for (const [name, typeInfo] of variables) {
+      items.push({
+        label: name,
+        kind: CompletionItemKind.Variable,
+        detail: typeInfo,
+      })
+    }
+    return items
+  }
+
+  /**
+   * 基于上下文获取方法补全
+   */
+  private getContextualMethodCompletions(
+    node: AstNode | undefined,
+    offset: number,
+    text: string,
+  ): CompletionItem[] {
+    if (!node) return []
+
+    // 场景1: 光标在 Ref 节点上 → 补全该对象的方法
+    if (isRef(node)) {
+      return this.getMethodCompletionsFromRef(node)
+    }
+
+    // 场景2: 光标在 MessageOrChain 上 → 补全该对象的方法
+    if (isMessageOrChain(node)) {
+      return this.getMessageChainCompletions(node)
+    }
+
+    // 场景3: 光标在 Message 上 → 补全该对象的方法
+    if (isMessage(node)) {
+      const container = node.$container
+      if (container && isMessageOrChain(container)) {
+        return this.getMessageChainCompletions(container)
+      }
+    }
+
+    // 场景4: 尾部位置 - 检查光标前是否有 Ref
+    const textBefore = text.substring(0, offset).trimEnd()
+    if (textBefore.length > 0) {
+      const lastIdent = this.findLastIdentifier(textBefore)
+      if (lastIdent) {
+        // 从根节点查找这个标识符
+        return this.getMethodCompletionsByName(node, lastIdent)
+      }
+    }
+
+    return []
+  }
+
+  /**
+   * 从文本中找到最后一个标识符
+   */
+  private findLastIdentifier(text: string): string | undefined {
+    const match = text.match(/[a-zA-Z_][a-zA-Z0-9_]*\s*$/)
+    if (!match) return undefined
+    return match[0].trim()
+  }
+
+  /**
+   * 从 Ref 节点获取方法补全
+   */
+  private getMethodCompletionsFromRef(refNode: AstNode): CompletionItem[] {
+    const items: CompletionItem[] = []
+    const t = this.checker.inferType(refNode)
+    if (t?.kind === 'object' && t.methods) {
+      for (const [methodName, sigs] of t.methods) {
+        const sig = (sigs as any[])[(sigs as any[]).length - 1]
+        const params = (sig.params ?? [])
+          .map((p: any) => (p ? describeType(p) : 'any'))
+          .join(', ')
+        items.push({
+          label: methodName,
+          kind: CompletionItemKind.Method,
+          detail: `${methodName}(${params}) => ${describeType(sig.returns)}`,
+        })
+      }
+    }
+    return items
+  }
+
+  /**
+   * 从 MessageOrChain 节点获取方法补全
+   */
+  private getMessageChainCompletions(chainNode: AstNode): CompletionItem[] {
+    const items: CompletionItem[] = []
+    if (isMessageOrChain(chainNode)) {
+      // 获取 primary（接收者）的类型
+      const primary = chainNode.primary
+      if (primary) {
+        const t = this.checker.inferType(primary)
+        if (t?.kind === 'object' && t.methods) {
+          for (const [methodName, sigs] of t.methods) {
+            const sig = (sigs as any[])[(sigs as any[]).length - 1]
+            const params = (sig.params ?? [])
+              .map((p: any) => (p ? describeType(p) : 'any'))
+              .join(', ')
+            items.push({
+              label: methodName,
+              kind: CompletionItemKind.Method,
+              detail: `${methodName}(${params}) => ${describeType(sig.returns)}`,
+            })
+          }
+        }
+      }
+    }
+    return items
+  }
+
+  /**
+   * 按名称查找变量并返回其方法
+   */
+  private getMethodCompletionsByName(currentNode: AstNode, name: string): CompletionItem[] {
+    const items: CompletionItem[] = []
+    
+    // 遍历容器链查找变量定义
+    let cur: AstNode | undefined = currentNode
+    while (cur) {
+      // 在当前节点中查找变量
+      const varNode = this.findVariableByName(cur, name)
+      if (varNode && isRef(varNode)) {
+        return this.getMethodCompletionsFromRef(varNode)
+      }
+      cur = cur.$container
+    }
+    
+    return items
+  }
+
+  /**
+   * 在节点中按名称查找变量
+   */
+  private findVariableByName(node: AstNode, name: string): AstNode | undefined {
+    if (isModel(node)) {
+      for (const stmt of node.expressions) {
+        if (isAssignment(stmt) && stmt.name === name) {
+          // 返回 expression 部分的 Ref（如果存在）
+          if (stmt.expression && isRef(stmt.expression)) {
+            return stmt.expression
+          }
+          return stmt
+        }
+      }
+    }
+    if (isAssignment(node) && node.name === name) {
+      if (node.expression && isRef(node.expression)) {
+        return node.expression
+      }
+    }
+    return undefined
   }
 
   /**
@@ -255,54 +430,6 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
   private formatTypeInfo(t: TypeInfo): string {
     if (!t) return 'any'
     return describeType(t)
-  }
-
-  /**
-   * 获取 Ref 节点的方法补全项
-   */
-  private getMethodCompletions(node: AstNode): CompletionItem[] {
-    const items: CompletionItem[] = []
-    if (isRef(node)) {
-      const t = this.checker.inferType(node)
-      if (t?.kind === 'object' && t.methods) {
-        for (const [methodName, sigs] of t.methods) {
-          const sig = (sigs as any[])[(sigs as any[]).length - 1]
-          const params = (sig.params ?? [])
-            .map((p: any) => (p ? describeType(p) : 'any'))
-            .join(', ')
-          items.push({
-            label: methodName,
-            kind: CompletionItemKind.Method,
-            detail: `${methodName}(${params}) => ${describeType(sig.returns)}`,
-          })
-        }
-      }
-    }
-    return items
-  }
-
-  /**
-   * 获取 MessageChain 的方法补全项
-   */
-  private getMessageChainCompletions(node: AstNode): CompletionItem[] {
-    const items: CompletionItem[] = []
-    if (isMessageOrChain(node)) {
-      const t = this.checker.inferType(node.primary)
-      if (t?.kind === 'object' && t.methods) {
-        for (const [methodName, sigs] of t.methods) {
-          const sig = (sigs as any[])[(sigs as any[]).length - 1]
-          const params = (sig.params ?? [])
-            .map((p: any) => (p ? describeType(p) : 'any'))
-            .join(', ')
-          items.push({
-            label: methodName,
-            kind: CompletionItemKind.Method,
-            detail: `${methodName}(${params}) => ${describeType(sig.returns)}`,
-          })
-        }
-      }
-    }
-    return items
   }
 
   /**

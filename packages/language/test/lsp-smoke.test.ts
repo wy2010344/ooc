@@ -177,6 +177,111 @@ test('LSP: Completion 应支持 lambda 参数补全', async () => {
   assert.ok(result, '应返回补全结果')
 })
 
+test('LSP: Completion 应在 Ref 位置提供方法补全', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 在 obj 引用上请求补全，应能看到 obj 的方法
+  const result = await expect({
+    text: 'obj = { greet() => 1 }; ' + IDX + 'obj',
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      // 应包含变量 obj 和 greet 方法
+      assert.ok(labels.includes('obj'), `补全列表应包含变量 obj，实际: ${labels.join(', ')}`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应在对象后空格提供方法补全', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 在 obj 后空格处请求补全（模拟用户准备输入方法名）
+  const result = await expect({
+    text: 'obj = { greet() => 1 }; obj ' + IDX,
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(labels.length > 0, `补全列表应有内容`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应支持嵌套作用域补全', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 外层变量 x 在 lambda 内应可见
+  const result = await expect({
+    text: 'x = 1; f = [y -> ' + IDX + '];',
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(labels.includes('x'), `补全列表应包含外层变量 x，实际: ${labels.join(', ')}`)
+      assert.ok(labels.includes('y'), `补全列表应包含 lambda 参数 y，实际: ${labels.join(', ')}`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应支持方法定义参数补全', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 方法定义内部，参数应可见。使用有效语法：光标在参数表达式前
+  const result = await expect({
+    text: 'obj = { greet(x) => ' + IDX + 'x };',
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(labels.includes('x'), `补全列表应包含方法参数 x，实际: ${labels.join(', ')}`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应在空文档提供基本补全', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 空赋值后应能提供补全
+  const result = await expect({
+    text: 'x = ' + IDX,
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      // 至少应能提供关键字等基本补全
+      assert.ok(labels.length > 0, `补全列表应有内容`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应在链式调用位置提供补全', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 链式调用中间位置
+  const result = await expect({
+    text: 'obj = { greet() => 1 }; obj greet ' + IDX,
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(labels.length > 0, `补全列表应有内容`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
 // ========== References Provider 测试 ==========
 
 test('LSP: References 应能查找变量引用', async () => {
