@@ -282,6 +282,23 @@ test('LSP: Completion 应在链式调用位置提供补全', async () => {
   assert.ok(result, '应返回补全结果')
 })
 
+test('LSP: Completion 位置感知 — 光标在变量声明前不应补全该变量', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  // 光标在空行，x 声明在光标之后
+  const result = await expect({
+    text: IDX + '\nx = 42;',
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(!labels.includes('x'), `光标在 x 声明前，补全列表不应包含 x，实际: ${labels.join(', ')}`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
 // ========== References Provider 测试 ==========
 
 test('LSP: References 应能查找变量引用', async () => {
