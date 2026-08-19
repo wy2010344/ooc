@@ -15,6 +15,7 @@ import {
   interpretPrimary,
 } from './evaluate.js'
 import { addScope, type Scope } from './scope.js'
+import { OocMethodNotFoundError } from './errors.js'
 
 /** 空对象单例：`{}` 字面量共享同一个实例 */
 const EMPTY_OBJECT: Record<string, unknown> = {}
@@ -147,7 +148,11 @@ export function objectValue(
           return fun(this, args[0])
         }
         if (name == 'methodNotFound') {
-          throw new TypeError(`没有定义该方法${name}`)
+          const [methodName, ...methodArgs] = Array.from(args)
+          if (typeof methodName === 'string') {
+            throw new OocMethodNotFoundError(this, methodName, methodArgs)
+          }
+          throw new OocMethodNotFoundError(this, name, Array.from(args))
         }
         return sendMessage(this, 'methodNotFound', [name, ...args])
       },
@@ -155,113 +160,6 @@ export function objectValue(
   })
   return currentObject
 }
-
-// type ObjectMethod =
-//   | {
-//       type: 'call'
-//       name: string
-//       value: MethodAll
-//     }
-//   | {
-//       name: string
-//       type: 'bind'
-//       value: any
-//     }
-/***
- * 好像并不能和js的原型对象一一匹配，主要是guard的策略，可以路由到父节点去处理。
- */
-// export class ObjectValue {
-//   readonly methods: ObjectMethod[]
-//   private scope: Scope
-//   constructor(
-//     methods: Method[],
-//     scope: Scope,
-//     readonly parent: ObjectValue | undefined,
-//   ) {
-//     if (parent != undefined && !(parent instanceof ObjectValue)) {
-//       throw new Error(`parent 应该是一个ObjectValue`)
-//     }
-//     scope = addScope(scope, 'currentObject', this)
-//     this.methods = methods.map((method, i) => {
-//       switch (method.$type) {
-//         case 'MethodBind':
-//           return {
-//             type: 'bind',
-//             name: getObjDefineName(method.name),
-//             value: interpretExpression(method.expression, scope),
-//           }
-//         default:
-//           return {
-//             type: 'call',
-//             name: getObjDefineName(method.name),
-//             value: method,
-//           }
-//       }
-//     })
-//     this.scope = scope
-//   }
-//   send(name: string, responser: any, args: any[]): any {
-//     for (let i = 0; i < this.methods.length; i++) {
-//       const pair = this.methods[i]
-//       if (pair.name == name) {
-//         switch (pair.type) {
-//           case 'bind':
-//             return pair.value
-//           case 'call':
-//             const method = pair.value
-//             let s = addScope(this.scope, 'responser', responser)
-//             method.params.forEach((param, index) => {
-//               s = addScope(s, param.name, args[index])
-//             })
-
-//             if (method.restParam) {
-//               s = addScope(
-//                 s,
-//                 method.restParam.name,
-//                 args.slice(method.params.length),
-//               )
-//             }
-//             if (
-//               !method.guardExpression ||
-//               (method.guardExpression &&
-//                 interpretExpression(method.guardExpression, s))
-//             ) {
-//               //继续
-//               let last = null
-//               method.expressions.forEach((e) => {
-//                 switch (e.$type) {
-//                   case 'Assignment':
-//                     s = addScope(
-//                       s,
-//                       e.name,
-//                       interpretExpression(e.expression, s),
-//                     )
-//                     return
-//                   default:
-//                     last = interpretExpression(e, s)
-//                     return
-//                 }
-//               })
-//               return last
-//             }
-//         }
-//       }
-//     }
-//     //继承：自身没有，向上查找父对象
-//     if (this.parent) {
-//       return this.parent.send(name, responser, args)
-//     }
-//     //通用对象方法
-//     const fun = objectDefine[name as '&&']
-//     if (fun) {
-//       return fun(this, args[0])
-//     }
-//     if (name == 'methodNotFound') {
-//       throw new TypeError(`没有定义该方法${name}`)
-//     }
-//     return sendMessage(this, 'methodNotFound', [name, ...args])
-//   }
-// }
 
 export function getMethodCallName({ value }: MethodCallName) {
   switch (value.$type) {
@@ -290,7 +188,13 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     return fun.apply(o, args)
   }
   if (value === 'methodNotFound') {
-    throw new TypeError(`没有定义该方法${value}`)
+    // 此处是未知消息的最终兜底：上一次派发已将原消息名放在第一个实参。
+    // 保留它可让宿主准确判断究竟是哪条 OOC 消息未被处理。
+    const [methodName, ...methodArgs] = args
+    if (typeof methodName === 'string') {
+      throw new OocMethodNotFoundError(o, methodName, methodArgs)
+    }
+    throw new OocMethodNotFoundError(o, value, args)
   }
   if (value in Object(o)) {
     //属性读取与设置

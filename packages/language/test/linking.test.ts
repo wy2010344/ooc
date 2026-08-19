@@ -48,7 +48,7 @@ describe('Linking tests', () => {
                 add(a, b) => a add b,
                 mul(a, b) => a mul b
             };
-            result = calc add 5 / mul 2;
+            result = calc add 5 |> mul 2;
         `)
 
     expect(checkDocumentValid(document)).toBeUndefined()

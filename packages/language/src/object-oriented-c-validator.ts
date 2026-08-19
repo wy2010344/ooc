@@ -1,8 +1,6 @@
-import type {
-  ValidationAcceptor,
-  ValidationChecks,
-  ValidationSeverity,
-} from 'langium'
+import { URI } from 'langium'
+import type { ValidationAcceptor, ValidationChecks, ValidationSeverity } from 'langium'
+import { isModel } from './generated/ast.js'
 import type {
   ObjectOrientedCAstType,
   ObjectDef,
@@ -15,6 +13,7 @@ import {
   ObjectOrientedCTypeChecker,
 } from './type-checker.js'
 import { diagnosticData, filterDiagnostic, type OocConfig } from './diagnostics-config.js'
+import { resolveModuleName } from './module-path.js'
 
 /**
  * Register custom validation checks.
@@ -66,6 +65,7 @@ export class ObjectOrientedCValidator {
     model: Parameters<ObjectOrientedCTypeChecker['checkModel']>[0],
     accept: ValidationAcceptor,
   ): void {
+    this.checkCircularImports(model, accept)
     // 每次新建，避免不同文档之间的类型定义互相污染。
     // 有 services 时注入 #import 解析器：跨模块 typedef/模块结果类型可见（需要完整工作区）。
     const importResolver = this.services
@@ -80,22 +80,57 @@ export class ObjectOrientedCValidator {
     )
   }
 
-  checkObjectDef(model: ObjectDef, accept: ValidationAcceptor): void {
-    // 基本的模型验证逻辑
-    // 可以在这里添加模型级别的验证
-    const methodNames = new Set()
-    model.methods.forEach((method) => {
-      if (methodNames.has(method.name)) {
-        this.wrap(accept)('error', `对象里已经定义了 '${method.name}'.`, {
-          node: method,
-          property: 'name',
-          data: diagnosticData('duplicateMethod'),
-        })
+  /** 在已加载工作区中深度优先检查 #import 环，环上的导入语句各自报告一次。 */
+  private checkCircularImports(
+    model: Parameters<ObjectOrientedCTypeChecker['checkModel']>[0],
+    accept: ValidationAcceptor,
+  ): void {
+    if (!this.services || !model.$document) return
+    const documents = this.services.shared.workspace.LangiumDocuments
+    const extensions = this.services.LanguageMetaData.fileExtensions
+    const rootPath = model.$document.uri.path
+    const visited = new Set<string>()
+    const visiting: string[] = []
+
+    const visit = (current: typeof model, currentPath: string): void => {
+      if (visited.has(currentPath)) return
+      visited.add(currentPath)
+      visiting.push(currentPath)
+      for (const statement of current.expressions) {
+        if (statement.$type !== 'ImportStatement') continue
+        const importedPath = resolveModuleName(
+          statement.path,
+          currentPath,
+          extensions,
+        )
+        const cycleStart = visiting.indexOf(importedPath)
+        if (cycleStart !== -1) {
+          const chain = [...visiting.slice(cycleStart), importedPath]
+          this.wrap(accept)('error', `不允许循环模块导入：${chain.join(' -> ')}`, {
+            node: statement,
+            property: 'path',
+            data: diagnosticData('circularImport'),
+          })
+          continue
+        }
+        const imported = documents.getDocument(URI.file(importedPath))
+        const importedModel = imported?.parseResult.value
+        if (isModel(importedModel)) {
+          visit(importedModel, importedPath)
+        }
       }
+      visiting.pop()
+    }
+
+    visit(model, rootPath)
+  }
+
+  checkObjectDef(model: ObjectDef, accept: ValidationAcceptor): void {
+    // 检查方法参数重名
+    model.methods.forEach((method) => {
       if (method.$type == 'MethodAll') {
         checkParamDuplicates(method, this.wrap(accept))
       }
-      methodNames.add(method.name)
     })
   }
 

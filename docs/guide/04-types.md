@@ -112,7 +112,7 @@ Processor #type { run(cb: Callback) };
 
 p: Processor = { run(cb) { cb apply 1 } };
 p run { apply(x) { x * 2 } }   // 匿名回调对象：x 自动是 number
-p run [x -> x + 1]             // lambda 回调：x 自动是 number
+p run [x => x + 1]             // lambda 回调：x 自动是 number
 ```
 
 - 支持泛型实例化的回调签名（`forEach(cb: T)` 实例化为 `Callback` 时同样回填）

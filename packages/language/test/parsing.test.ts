@@ -38,7 +38,7 @@ describe('Parsing tests', () => {
 
   test('parse pipe with named expression', async () => {
     document = await parse(`
-            result = 'hello' length | x => x + 5;
+            result = 'hello' length | x -> x + 5;
         `)
     expect(checkDocumentValid(document)).toBeUndefined()
   })
@@ -56,12 +56,12 @@ describe('Parsing tests', () => {
 
   test('parse lambda expressions', async () => {
     document = await parse(`
-            f1 = [x -> x + 1];
-            f2 = [a, b -> a + b];
-            f3 = [x -> y = x + 1; y * 2];
+            f1 = [x => x + 1];
+            f2 = [a, b => a + b];
+            f3 = [x => y = x + 1; y * 2];
             f4 = [42];
             f5 = [n * 21];
-            f6 = [x: number -> x * 2];
+            f6 = [x: number => x * 2];
         `)
     expect(checkDocumentValid(document)).toBeUndefined()
   })
@@ -86,7 +86,7 @@ describe('Parsing tests', () => {
 
   test('parse complex nested pipe with multiple arguments', async () => {
     document = await parse(`
-            x = obj method1 10 20 / method2 30 / method3;
+            x = obj method1 10 20 |> method2 30 |> method3;
         `)
     expect(checkDocumentValid(document)).toBeUndefined()
   })

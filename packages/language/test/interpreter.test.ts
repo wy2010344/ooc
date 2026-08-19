@@ -1,17 +1,39 @@
 import { beforeAll, describe, expect, test } from './compat.js'
 import { EmptyFileSystem } from 'langium'
-import type { FileSystemProvider } from 'langium'
 import { NodeFileSystem } from 'langium/node'
+import type { FileSystemProvider } from 'langium'
+import { parseHelper } from 'langium/test'
+import type { Diagnostic } from 'vscode-languageserver-types'
+import type { Model } from 'object-oriented-c-language'
+import { createObjectOrientedCServices } from 'object-oriented-c-language'
 import * as nodeFs from 'node:fs/promises'
 import * as nodeOs from 'node:os'
 import * as nodePath from 'node:path'
-import { createInterpretAction } from 'object-oriented-c-language'
+import {
+  createInterpretAction,
+  createTypeCheckAction,
+  OocCircularImportError,
+  OocMethodNotFoundError,
+} from 'object-oriented-c-language'
 
 let interpreter: ReturnType<typeof createInterpretAction>
+let services: ReturnType<typeof createObjectOrientedCServices>
+let parse: ReturnType<typeof parseHelper<Model>>
 
 beforeAll(async () => {
   interpreter = createInterpretAction(EmptyFileSystem)
+  services = createObjectOrientedCServices(EmptyFileSystem)
+  parse = parseHelper<Model>(services.ObjectOrientedC)
 })
+
+async function diagnostics(input: string): Promise<Diagnostic[]> {
+  const doc = await parse(input, { validation: true })
+  return doc.diagnostics ?? []
+}
+
+function messages(diags: Diagnostic[]): string[] {
+  return diags.map((d) => d.message)
+}
 
 describe('OOC Interpreter', () => {
   test('变量与算术', async () => {
@@ -68,7 +90,7 @@ describe('OOC Interpreter', () => {
                     value = 42
                 }
             };
-            outer inner / value
+            outer inner |> value
         `)
     expect(result).toBe(42)
   })
@@ -274,6 +296,20 @@ describe('OOC Interpreter', () => {
     ).rejects.toThrow('没有定义该方法')
   })
 
+  test('未处理消息抛出包含调用信息的错误对象', async () => {
+    await expect(
+      interpreter.interpret(`Math _ooc_notexist_method 1 2`),
+    ).rejects.toThrow(OocMethodNotFoundError)
+    try {
+      await interpreter.interpret(`Math _ooc_notexist_method 1 2`)
+    } catch (error) {
+      const oocError = error as OocMethodNotFoundError
+      expect(oocError.methodName).toBe('_ooc_notexist_method')
+      expect(oocError.argumentsList).toEqual([1, 2])
+      expect(oocError.receiver).toBe(Math)
+    }
+  })
+
   test('自定义对象未绑定触发 methodNotFound 方法', async () => {
     const result = await interpreter.interpret(`
             obj = {
@@ -286,7 +322,7 @@ describe('OOC Interpreter', () => {
 
   test('lambda 表达式函数体', async () => {
     const result = await interpreter.interpret(`
-            f = [x -> x + 1];
+            f = [x => x + 1];
             f apply 41
         `)
     expect(result).toBe(42)
@@ -294,7 +330,7 @@ describe('OOC Interpreter', () => {
 
   test('lambda 多参数', async () => {
     const result = await interpreter.interpret(`
-            f = [a, b -> a + b];
+            f = [a, b => a + b];
             f apply 20 22
         `)
     expect(result).toBe(42)
@@ -302,7 +338,7 @@ describe('OOC Interpreter', () => {
 
   test('lambda 参数类型注解', async () => {
     const result = await interpreter.interpret(`
-            f = [x: number -> x + 1];
+            f = [x: number => x + 1];
             f apply 41
         `)
     expect(result).toBe(42)
@@ -327,7 +363,7 @@ describe('OOC Interpreter', () => {
 
   test('lambda 多语句函数体', async () => {
     const result = await interpreter.interpret(`
-            f = [x -> y = x + 1; y * 2];
+            f = [x => y = x + 1; y * 2];
             f apply 20
         `)
     expect(result).toBe(42)
@@ -336,7 +372,7 @@ describe('OOC Interpreter', () => {
   test('lambda 闭包捕获', async () => {
     const result = await interpreter.interpret(`
             n = 1;
-            f = [x -> x + n];
+            f = [x => x + n];
             f apply 41
         `)
     expect(result).toBe(42)
@@ -345,7 +381,7 @@ describe('OOC Interpreter', () => {
   test('lambda 作为消息参数', async () => {
     const result = await interpreter.interpret(`
             obj = { call(f) => f apply 42 };
-            obj call [x -> x * 2]
+            obj call [x => x * 2]
         `)
     expect(result).toBe(84)
   })
@@ -567,5 +603,65 @@ describe('OOC #import 模块', () => {
       'demo.ooc',
     )
     expect(result).toBe(1)
+  })
+
+  test('循环模块导入立即抛出结构化错误', async () => {
+    const fs = memoryFs({
+      'a.ooc': `b = #import 'b'; b`,
+      'b.ooc': `a = #import 'a'; a`,
+    })
+    const { interpretPath } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    await expect(interpretPath('a.ooc')).rejects.toThrow(OocCircularImportError)
+  })
+
+  test('循环模块导入在静态检查中给出诊断', async () => {
+    const fs = memoryFs({
+      'b.ooc': `a = #import 'a'; a`,
+    })
+    const { check } = createTypeCheckAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const diagnostics = await check(`b = #import 'b'; b`, '/a.ooc')
+    expect(diagnostics.map((item) => item.message).join('\n')).toContain(
+      '不允许循环模块导入',
+    )
+  })
+})
+
+describe('除法运算符', () => {
+  test('基本除法：number / number → number', async () => {
+    const result = await interpreter.interpret(`
+        x: number = 12 / 3;
+        x
+    `)
+    expect(result).toBe(4)
+  })
+
+  test('浮点除法', async () => {
+    const result = await interpreter.interpret(`
+        x: number = 10 / 4;
+        x
+    `)
+    expect(result).toBe(2.5)
+  })
+
+  test('除法与类型检查：返回 number', async () => {
+    const diags = await diagnostics(`
+        x: number = 12 / 3;
+        y: string = 12 / 3
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('除法与管道混合使用', async () => {
+    const result = await interpreter.interpret(`
+        calc = {
+            div(a, b) => a / b
+        };
+        calc div 12 4
+    `)
+    expect(result).toBe(3)
   })
 })

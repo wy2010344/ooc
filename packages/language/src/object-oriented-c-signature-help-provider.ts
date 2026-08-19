@@ -15,6 +15,7 @@ import {
   type MessageOrChain,
 } from './generated/ast.js'
 import { getSharedChecker } from './shared-checker.js'
+import { getBuiltinMethods } from './type-system.js'
 
 /**
  * OOC 签名帮助提供者
@@ -237,7 +238,6 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
    */
   private getBuiltinMethodSignatures(typeName: string, methodName: string): any[] {
     try {
-      const { getBuiltinMethods } = require('./type-system.js')
       const methods = getBuiltinMethods(typeName)
       return methods.get(methodName) ?? []
     } catch {

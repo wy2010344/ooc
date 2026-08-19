@@ -134,7 +134,7 @@ test('LSP: Hover Lambda 应有内容', async () => {
   const expect = expectHover(services.ObjectOrientedC)
 
   await expect({
-    text: 'square = ' + IDX + '[x -> x * x];',
+    text: 'square = ' + IDX + '[x => x * x];',
     indexMarker: IDX,
     index: 0,
     hover: /λ|匿名函数/,
@@ -166,7 +166,7 @@ test('LSP: Completion 应支持 lambda 参数补全', async () => {
 
   // 在 lambda 内部，参数 x 应可见
   const result = await expect({
-    text: 'f = [x -> ' + IDX + '];',
+    text: 'f = [x => ' + IDX + '];',
     indexMarker: IDX,
     index: 0,
     assert: (completions: any) => {
@@ -218,7 +218,7 @@ test('LSP: Completion 应支持嵌套作用域补全', async () => {
 
   // 外层变量 x 在 lambda 内应可见
   const result = await expect({
-    text: 'x = 1; f = [y -> ' + IDX + '];',
+    text: 'x = 1; f = [y => ' + IDX + '];',
     indexMarker: IDX,
     index: 0,
     assert: (completions: any) => {
@@ -372,7 +372,7 @@ test('LSP: 应能解析完整的 OOC 代码', async () => {
     Point #type { x: number, y: number };
     p = { x = 1, y = 2 };
     result = p x;
-    square = [x -> x * x];
+    square = [x => x * x];
     obj = { greet(name) => 'Hello, ' + name };
     obj greet 'World';
   `

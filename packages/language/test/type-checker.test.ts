@@ -60,7 +60,7 @@ describe('类型注解语法解析', () => {
 
   test('管道命名参数', async () => {
     const doc = await parse(`
-        data | x => x + 1
+        data | x -> x + 1
     `)
     expect(doc.parseResult.parserErrors).toHaveLength(0)
   })
@@ -289,7 +289,7 @@ describe('真实示例无类型告警', () => {
 
   test('lambda 推断为函数类型，无多余告警', async () => {
     const diags = await diagnostics(`
-        f = [x -> x + 1];
+        f = [x => x + 1];
         f apply 41
     `)
     expect(messages(diags)).toEqual([])
@@ -297,14 +297,14 @@ describe('真实示例无类型告警', () => {
 
   test('lambda 未知参数类型告警', async () => {
     const diags = await diagnostics(`
-        f = [x: Foo -> x + 1]
+        f = [x: Foo => x + 1]
     `)
     expect(messages(diags).join('\n')).toContain("未知类型 'Foo'")
   })
 
   test('lambda 与 apply 对象双向兼容（同像）', async () => {
     const diags = await diagnostics(`
-        f = [x -> x + 1];
+        f = [x => x + 1];
         f = { apply(x) { x + 1 } };
         f apply 1
     `)
@@ -314,7 +314,7 @@ describe('真实示例无类型告警', () => {
   test('apply 对象重新赋值为 lambda 无警告（同像）', async () => {
     const diags = await diagnostics(`
         f = { apply(x) { x + 1 } };
-        f = [x -> x + 1];
+        f = [x => x + 1];
         f apply 1
     `)
     expect(messages(diags)).toEqual([])
@@ -322,7 +322,7 @@ describe('真实示例无类型告警', () => {
 
   test('lambda 的 apply 调用参数检查生效', async () => {
     const diags = await diagnostics(`
-        f = [x: number -> x + 1];
+        f = [x: number => x + 1];
         f apply 'str'
     `)
     expect(messages(diags).join('\n')).toContain('调用参数不匹配')
@@ -330,7 +330,7 @@ describe('真实示例无类型告警', () => {
 
   test('lambda 的 apply 调用参数正确无警告', async () => {
     const diags = await diagnostics(`
-        f = [x: number -> x + 1];
+        f = [x: number => x + 1];
         f apply 42
     `)
     expect(messages(diags)).toEqual([])
@@ -339,7 +339,7 @@ describe('真实示例无类型告警', () => {
   test('lambda 传给需要 apply 方法的对象参数无告警', async () => {
     const diags = await diagnostics(`
         obj = { call(f) => f apply 42 };
-        obj call [x -> x * 2]
+        obj call [x => x * 2]
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -596,7 +596,7 @@ describe('回调实参回填', () => {
         Callback #type { apply(x: number) };
         Processor #type { run(cb: Callback) };
         p: Processor = { run(cb) { cb apply 1 } };
-        p run [x -> x + 1]
+        p run [x => x + 1]
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -606,7 +606,7 @@ describe('回调实参回填', () => {
         Callback #type { apply(x: number) };
         Processor #type { run(cb: Callback) };
         p: Processor = { run(cb) { cb apply 1 } };
-        p run [x -> x = 'str']
+        p run [x => x = 'str']
     `)
     expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
   })

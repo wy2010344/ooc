@@ -70,6 +70,7 @@ export const DIAGNOSTIC_CODES = {
   duplicateParam: 'duplicateParam',
   noImplicitAny: 'noImplicitAny',
   typeNotFound: 'typeNotFound',
+  circularImport: 'circularImport',
 } as const
 
 /**

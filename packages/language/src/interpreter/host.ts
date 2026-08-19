@@ -13,6 +13,7 @@ import {
   resolveModuleName,
 } from '../module-path.js'
 import { interpret, type InterpretAction } from './evaluate.js'
+import { OocCircularImportError } from './errors.js'
 import { type Globals, withGlobals } from './scope.js'
 import {
   codeOfDiagnostic,
@@ -121,27 +122,38 @@ export function createInterpretAction(
 ) {
   const services = createObjectOrientedCServices(context).ObjectOrientedC
   const fs = context.fileSystemProvider(services.shared)
-  function interpretPath(rawName: string, basePath?: string) {
+  function interpretPath(
+    rawName: string,
+    basePath?: string,
+    importChain: readonly string[] = [],
+  ) {
     const extensions = services.LanguageMetaData.fileExtensions
     // 先解析出实际文件路径，用解析后的路径作为缓存键，避免不同目录下
     // 相同相对路径（如 './foo'）的缓存冲突
     const fileName = resolveEntryFile(rawName, extensions, basePath)
+    const cycleStart = importChain.indexOf(fileName)
+    if (cycleStart !== -1) {
+      throw new OocCircularImportError([
+        ...importChain.slice(cycleStart),
+        fileName,
+      ])
+    }
     let value = cacheInterpret.get(fileName)
     if (!value) {
       value = run(async () => {
         const ext = extnameOf(fileName)
         if (ext && !extensions.includes(ext)) {
-          throw `Please choose a file with one of these extensions: ${extensions}.`
+          throw new Error(`Please choose a file with one of these extensions: ${extensions}.`)
         }
         const uri = URI.file(fileName)
         if (!fs.exists(uri)) {
-          throw `File ${fileName} does not exist.`
+          throw new Error(`File ${fileName} does not exist.`)
         }
         const document =
           await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
             uri,
           )
-        return execDocument(document, fileName)
+        return execDocument(document, fileName, [...importChain, fileName])
       })
       cacheInterpret.set(fileName, value)
     }
@@ -151,13 +163,16 @@ export function createInterpretAction(
   async function execDocument(
     document: LangiumDocument<AstNode>,
     fileName: string,
+    importChain: readonly string[] = fileName ? [fileName] : [],
   ) {
     const syntax = syntaxErrorText(document)
     if (syntax) {
       throw syntax
     }
     const model = document.parseResult.value as Model
-    return executeOOC(model, fileName, interpretPath, globals)
+    const importAction: InterpretAction = (name, basePath) =>
+      interpretPath(name, basePath, importChain)
+    return executeOOC(model, fileName, importAction, globals)
   }
 
   return {
@@ -259,11 +274,11 @@ export function createTypeCheckAction(context: DefaultSharedModuleContext) {
       const fileName = resolveEntryFile(rawName, extensions)
       const ext = extnameOf(fileName)
       if (ext && !extensions.includes(ext)) {
-        throw `Please choose a file with one of these extensions: ${extensions}.`
+        throw new Error(`Please choose a file with one of these extensions: ${extensions}.`)
       }
       const uri = URI.file(fileName)
       if (!fs.exists(uri)) {
-        throw `File ${fileName} does not exist.`
+        throw new Error(`File ${fileName} does not exist.`)
       }
       const document =
         await services.shared.workspace.LangiumDocuments.getOrCreateDocument(
