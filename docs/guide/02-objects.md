@@ -82,7 +82,7 @@ child r 12    // 'big'（子 guard 不过，父 guard 过）
 
 ```ooc
 outer = { inner = { value = 42 } };
-outer inner / value    // 42
+outer inner |> value    // 42
 ```
 
-`outer inner` 取到 inner 对象，`/ value` 继续给它发消息。
+`outer inner` 取到 inner 对象，`|> value` 继续给它发消息。
