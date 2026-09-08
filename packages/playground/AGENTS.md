@@ -20,7 +20,7 @@
 - `src/lib/run.ts` — `runNote(engine, name, source)`：先类型检查再解释。**每次运行用唯一会话路径 `__ooc-run-N/<name>`**，避免 Langium 文档注册表重复 URI 报错；basename 保持笔记名供 `#import` 查找。
 - `src/lib/store.ts` — IndexedDB（经 **idb** 封装）：笔记 CRUD + 执行历史（`history` store）。不要手写 `openDB`/事务样板。
 - `src/hooks/useNotebook.ts` — 状态管理 + 演示笔记播种（首次打开）。
-- `src/components/` — App 壳、笔记列表、编辑器（含 `ui add` 改 DOM 的宿主提示）、执行历史 sheet。
+- `src/components/` — App 壳、笔记列表、编辑器（含 `ui add` 改 DOM 的宿主提示）、执行历史 sheet、移动端键盘符号快捷条（`QuickKeysBar` 配合 `CodeArea.insert` 往光标处插字符）。
 
 ## 修改流与红线
 

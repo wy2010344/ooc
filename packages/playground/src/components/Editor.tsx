@@ -14,8 +14,9 @@ import {
   Warning,
 } from '@phosphor-icons/react'
 import { Notebook } from '../hooks/useNotebook.js'
-import { CodeArea } from './CodeArea.js'
+import { CodeArea, type CodeAreaHandle } from './CodeArea.js'
 import { HistorySheet } from './HistorySheet.js'
+import { QuickKeysBar } from './QuickKeysBar.js'
 import type { RunResult } from '../lib/run.js'
 
 interface Props {
@@ -31,6 +32,8 @@ export function Editor({ nb, note }: Props) {
   const [newName, setNewName] = useState('')
   const [renameErr, setRenameErr] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const codeRef = useRef<CodeAreaHandle>(null)
+  const [codeFocused, setCodeFocused] = useState(false)
   const saveTimer = useRef<number | null>(null)
 
   // 笔记切换时同步文本
@@ -213,7 +216,13 @@ export function Editor({ nb, note }: Props) {
 
       {/* 代码区 */}
       <main className="min-h-0 flex-1">
-        <CodeArea value={text} onChange={onChange} placeholder="写点 OOC…" />
+        <CodeArea
+          ref={codeRef}
+          value={text}
+          onChange={onChange}
+          onFocusChange={setCodeFocused}
+          placeholder="写点 OOC…"
+        />
       </main>
 
       {/* 输出区（运行后展开；作为菜单功能的"输出"） */}
@@ -248,6 +257,11 @@ export function Editor({ nb, note }: Props) {
             <OutputRow value={result.error ?? result.output} />
           </div>
         </section>
+      )}
+
+      {/* 移动端键盘上方的符号快捷条（聚焦时显示） */}
+      {codeFocused && (
+        <QuickKeysBar onInsert={(s) => codeRef.current?.insert(s)} />
       )}
     </div>
   )
