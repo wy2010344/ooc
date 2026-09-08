@@ -1,0 +1,30 @@
+{
+    "name": "ooc-playground",
+    "description": "Mobile-first OOC notebook: create, run and persist code like a notepad app",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "preview": "vite preview",
+        "test": "tsc -p tsconfig.test.json && node --test \"out/test/**/*.test.js\""
+    },
+    "dependencies": {
+        "@headlessui/react": "^2.2.0",
+        "@phosphor-icons/react": "^2.1.7",
+        "object-oriented-c-language": "0.0.1",
+        "langium": "~4.2.1",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0"
+    },
+    "devDependencies": {
+        "@tailwindcss/vite": "^4.1.0",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^5.0.0",
+        "tailwindcss": "^4.1.0",
+        "typescript": "~6.0.2",
+        "vite": "^8.2.0"
+    }
+}

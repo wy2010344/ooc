@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "out",
+    "rootDir": ".",
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "test"]
+}

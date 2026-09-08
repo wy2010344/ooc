@@ -1,0 +1,34 @@
+@import 'tailwindcss';
+
+/* 记事本主题：暖纸底 + 墨色字 + 单一强调色（秋香绿）。
+   代码区用等宽字体；正文用系统字体，手机上无需下载字体包。 */
+:root {
+  --font-ui: system-ui, -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 语法高亮颜色（跟随深色模式） */
+.hl-comment { color: color-mix(in oklab, currentColor 45%, transparent); font-style: italic; }
+.hl-string { color: color-mix(in oklab, #dc8a1a 85%, currentColor); }
+.hl-number { color: color-mix(in oklab, #4f9e5c 85%, currentColor); }
+.hl-keyword { color: color-mix(in oklab, #c4553f 85%, currentColor); font-weight: 600; }
+.hl-ident { color: inherit; }
+.hl-plain { color: inherit; }
+
+/* 移动端：隐藏系统滚动条但保留滚动 */
+* { scrollbar-width: thin; }
+
+@media (prefers-color-scheme: dark) {
+  html { color-scheme: dark; }
+}
