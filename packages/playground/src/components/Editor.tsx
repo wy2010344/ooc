@@ -16,7 +16,7 @@ import {
 import { Notebook } from '../hooks/useNotebook.js'
 import { CodeArea, type CodeAreaHandle } from './CodeArea.js'
 import { HistorySheet } from './HistorySheet.js'
-import { QuickKeysBar } from './QuickKeysBar.js'
+import { QuickKeysBar, QUICK_KEYS_BAR_H } from './QuickKeysBar.js'
 import type { RunResult } from '../lib/run.js'
 
 interface Props {
@@ -34,6 +34,24 @@ export function Editor({ nb, note }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const codeRef = useRef<CodeAreaHandle>(null)
   const [codeFocused, setCodeFocused] = useState(false)
+  // visualViewport 跟踪键盘顶缘：弹键盘不一定收缩布局视口，算 top 钉在键盘上方
+  const [vpBottom, setVpBottom] = useState(() =>
+    typeof window !== 'undefined' && window.visualViewport
+      ? window.visualViewport.offsetTop + window.visualViewport.height
+      : 0,
+  )
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setVpBottom(vv.offsetTop + vv.height)
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
+  }, [])
   const saveTimer = useRef<number | null>(null)
 
   // 笔记切换时同步文本
@@ -214,8 +232,14 @@ export function Editor({ nb, note }: Props) {
         onClose={() => setHistoryOpen(false)}
       />
 
-      {/* 代码区 */}
-      <main className="min-h-0 flex-1">
+      {/* 代码区（聚焦时底部留出快捷条高度，避免行被盖住） */}
+      <main
+        className={
+          codeFocused
+            ? 'min-h-0 flex-1 pb-[52px]'
+            : 'min-h-0 flex-1'
+        }
+      >
         <CodeArea
           ref={codeRef}
           value={text}
@@ -259,9 +283,12 @@ export function Editor({ nb, note }: Props) {
         </section>
       )}
 
-      {/* 移动端键盘上方的符号快捷条（聚焦时显示） */}
+      {/* 键盘上方的符号快捷条（跟随 visualViewport，聚焦时显示） */}
       {codeFocused && (
-        <QuickKeysBar onInsert={(s) => codeRef.current?.insert(s)} />
+        <QuickKeysBar
+          top={vpBottom - QUICK_KEYS_BAR_H}
+          onInsert={(s) => codeRef.current?.insert(s)}
+        />
       )}
     </div>
   )

@@ -1,4 +1,7 @@
-/** OOC 常用符号 + Tab 的快捷条：聚焦代码区时浮在键盘上方 */
+/** OOC 常用符号 + Tab 的快捷条：聚焦代码区时钉在虚拟键盘正上方。
+ *  用 visualViewport 计算键盘位置（部分浏览器弹键盘不收缩布局视口，靠 dvh 会被盖住）。 */
+const BAR_H = 52
+
 const SYMBOLS = [
   '(',
   ')',
@@ -26,20 +29,29 @@ const SYMBOLS = [
 
 interface Props {
   onInsert: (text: string) => void
+  /** 视觉视口底缘（visualViewport.offsetTop + height）对应的 top */
+  top: number
 }
 
-export function QuickKeysBar({ onInsert }: Props) {
+export function QuickKeysBar({ onInsert, top }: Props) {
   return (
-    <div className="shrink-0 border-t border-stone-200/70 bg-stone-100/95 px-2 py-1.5 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/95">
-      <div className="flex gap-1.5 overflow-x-auto">
-        <KeyBtn label="Tab" text="    " onInsert={onInsert} highlight />
-        {SYMBOLS.map((s) => (
-          <KeyBtn key={s} label={s} text={s === "'" || s === '"' ? s : s} onInsert={onInsert} />
-        ))}
+    <div
+      style={{ top }}
+      className="fixed left-1/2 z-40 w-full max-w-xl -translate-x-1/2"
+    >
+      <div className="flex h-[52px] items-center overflow-hidden border-t border-stone-200/70 bg-stone-100/95 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/95">
+        <div className="flex h-full items-center gap-1.5 overflow-x-auto px-2">
+          <KeyBtn label="Tab" text="    " onInsert={onInsert} highlight />
+          {SYMBOLS.map((s) => (
+            <KeyBtn key={s} label={s} text={s} onInsert={onInsert} />
+          ))}
+        </div>
       </div>
     </div>
   )
 }
+
+export const QUICK_KEYS_BAR_H = BAR_H
 
 function KeyBtn({
   label,
