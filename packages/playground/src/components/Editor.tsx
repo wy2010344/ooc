@@ -34,24 +34,45 @@ export function Editor({ nb, note }: Props) {
   const [historyOpen, setHistoryOpen] = useState(false)
   const codeRef = useRef<CodeAreaHandle>(null)
   const [codeFocused, setCodeFocused] = useState(false)
-  // visualViewport 跟踪键盘顶缘：弹键盘不一定收缩布局视口，算 top 钉在键盘上方
-  const [vpBottom, setVpBottom] = useState(() =>
-    typeof window !== 'undefined' && window.visualViewport
-      ? window.visualViewport.offsetTop + window.visualViewport.height
-      : 0,
-  )
-  useEffect(() => {
+
+  // 快捷条顶缘：取「收缩后的最小视口底缘」。
+  // - Android(interactive-widget=resizes-content)：window.innerHeight 收缩到键盘顶
+  // - iOS/默认：visualViewport.height 收缩
+  // 两者取小并监听 resize/scroll，任何行为都能钉在键盘正上方
+  const calcBarTop = useCallback(() => {
     const vv = window.visualViewport
-    if (!vv) return
-    const update = () => setVpBottom(vv.offsetTop + vv.height)
-    update()
-    vv.addEventListener('resize', update)
-    vv.addEventListener('scroll', update)
-    return () => {
-      vv.removeEventListener('resize', update)
-      vv.removeEventListener('scroll', update)
-    }
+    const vvBottom = vv ? vv.offsetTop + vv.height : window.innerHeight
+    return Math.min(window.innerHeight, vvBottom) - QUICK_KEYS_BAR_H
   }, [])
+
+  const [barTop, setBarTop] = useState(calcBarTop)
+
+  useEffect(() => {
+    const update = () => setBarTop(calcBarTop())
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', update)
+    vv?.addEventListener('scroll', update)
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update)
+    return () => {
+      vv?.removeEventListener('resize', update)
+      vv?.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update)
+    }
+  }, [calcBarTop])
+
+  // 兜底轮询：部分输入法/浏览器（如百度输入法）弹键盘不触发任何事件，
+  // 定时重算，能被探测到收缩的变化
+  useEffect(() => {
+    if (!codeFocused) return
+    const id = window.setInterval(
+      () => setBarTop((t) => (Math.abs(t - calcBarTop()) > 1 ? calcBarTop() : t)),
+      150,
+    )
+    return () => window.clearInterval(id)
+  }, [codeFocused, calcBarTop])
+
   const saveTimer = useRef<number | null>(null)
 
   // 笔记切换时同步文本
@@ -283,10 +304,10 @@ export function Editor({ nb, note }: Props) {
         </section>
       )}
 
-      {/* 键盘上方的符号快捷条（跟随 visualViewport，聚焦时显示） */}
+      {/* 键盘上方的符号快捷条（跟随视口收缩，聚焦时显示） */}
       {codeFocused && (
         <QuickKeysBar
-          top={vpBottom - QUICK_KEYS_BAR_H}
+          top={barTop}
           onInsert={(s) => codeRef.current?.insert(s)}
         />
       )}
