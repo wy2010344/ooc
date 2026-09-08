@@ -77,7 +77,8 @@ export function useNotebook() {
       const ok = await store.rename(from, to)
       if (ok) {
         await refresh()
-        setActive(to)
+        // store 统一存小写键，这里用全小写去对照列表
+        setActive(to.toLowerCase())
       }
       return ok
     },
@@ -90,7 +91,8 @@ export function useNotebook() {
       const list = await store.list()
       notesHolder.current = list
       setNotes(list)
-      setActive((cur) => (cur === name ? list[0]?.name ?? null : cur))
+      // 删掉当前笔记后回列表，简单可预期
+      setActive(null)
     },
     [],
   )

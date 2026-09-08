@@ -29,6 +29,7 @@ export function Editor({ nb, note }: Props) {
   const [result, setResult] = useState<RunResult | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
+  const [renameErr, setRenameErr] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const saveTimer = useRef<number | null>(null)
 
@@ -66,11 +67,30 @@ export function Editor({ nb, note }: Props) {
   }, [nb, note.name, text])
 
   const doRename = useCallback(async () => {
-    if (!newName.trim()) return
-    if (!newName.endsWith('.ooc')) return
-    const ok = await nb.renameNote(note.name, newName.trim())
-    if (ok) setRenaming(false)
+    const raw = newName.trim()
+    if (!raw) return
+    // 省去手打扩展名：没写 .ooc 就自动补上
+    const target = raw.toLowerCase().endsWith('.ooc') ? raw : `${raw}.ooc`
+    // 重命名前清掉未落盘的防抖保存，避免旧名回写
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    const ok = await nb.renameNote(note.name, target)
+    if (ok) {
+      setRenaming(false)
+      setRenameErr(null)
+    } else {
+      setRenameErr('同名笔记已存在')
+    }
   }, [nb, newName, note.name])
+
+  // 进入重命名态：预填当前名（去掉后缀），便于就地改
+  const enterRename = useCallback(() => {
+    setNewName(note.name.replace(/\.ooc$/i, ''))
+    setRenameErr(null)
+    setRenaming(true)
+  }, [note.name])
 
   const doDelete = useCallback(async () => {
     if (window.confirm(`删除 ${note.name}？`)) {
@@ -81,9 +101,9 @@ export function Editor({ nb, note }: Props) {
   const hasDiagnostics = (result?.diagnostics.length ?? 0) > 0
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-xl flex-col bg-stone-100 dark:bg-zinc-950">
+    <div className="mx-auto flex h-dvh w-full max-w-xl flex-col overflow-hidden bg-stone-100 dark:bg-zinc-950">
       {/* 顶栏 */}
-      <header className="sticky top-0 z-20 flex items-center gap-1 border-b border-stone-200/70 bg-stone-100/90 px-2 py-2 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/90">
+      <header className="sticky top-0 z-20 flex shrink-0 items-center gap-1 border-b border-stone-200/70 bg-stone-100/90 px-2 py-2 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/90">
         <button
           onClick={() => nb.setActive(null)}
           aria-label="返回列表"
@@ -93,29 +113,39 @@ export function Editor({ nb, note }: Props) {
         </button>
 
         {renaming ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1">
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void doRename()
-              }}
-              placeholder={note.name}
-              className="min-w-0 flex-1 border-b border-emerald-600 bg-transparent py-0.5 font-mono text-sm text-stone-900 outline-none dark:text-zinc-100"
-            />
-            <button
-              onClick={() => void doRename()}
-              className="rounded-full px-2 py-1 text-sm font-medium text-emerald-700 dark:text-emerald-500"
-            >
-              确定
-            </button>
-          </div>
+          <>
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <input
+                value={newName}
+                onChange={(e) => {
+                  setNewName(e.target.value)
+                  setRenameErr(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void doRename()
+                }}
+                autoCapitalize="off"
+                autoCorrect="off"
+                placeholder="笔记名"
+                autoFocus
+                className="min-w-0 flex-1 border-b border-emerald-600 bg-transparent py-0.5 font-mono text-sm text-stone-900 outline-none placeholder:text-stone-400 dark:text-zinc-100 dark:placeholder:text-zinc-600"
+              />
+              <button
+                onClick={() => void doRename()}
+                className="rounded-full px-2 py-1 text-sm font-medium text-emerald-700 dark:text-emerald-500"
+              >
+                确定
+              </button>
+            </div>
+            {renameErr && (
+              <p className="shrink-0 whitespace-nowrap text-xs text-rose-600 dark:text-rose-400">
+                {renameErr}
+              </p>
+            )}
+          </>
         ) : (
           <button
-            onClick={() => {
-              setNewName('')
-              setRenaming(!renaming)
-            }}
+            onClick={() => (renaming ? setRenaming(false) : enterRename())}
             className="min-w-0 flex-1 truncate px-2 py-1 text-left font-mono text-sm font-medium text-stone-900 dark:text-zinc-100"
           >
             {note.name}
@@ -155,10 +185,7 @@ export function Editor({ nb, note }: Props) {
             </MenuItem>
             <MenuItem>
               <button
-                onClick={() => {
-                  setRenaming(true)
-                  setNewName('')
-                }}
+                onClick={enterRename}
                 className="w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 重命名
@@ -191,7 +218,7 @@ export function Editor({ nb, note }: Props) {
 
       {/* 输出区（运行后展开；作为菜单功能的"输出"） */}
       {result && (
-        <section className="border-t border-stone-200/70 bg-stone-50 dark:border-zinc-800/70 dark:bg-zinc-900">
+        <section className="max-h-[40dvh] shrink-0 overflow-y-auto border-t border-stone-200/70 bg-stone-50 dark:border-zinc-800/70 dark:bg-zinc-900">
           {/* 诊断条 */}
           {hasDiagnostics && (
             <div className="flex items-start gap-2 border-b border-stone-200/60 px-4 py-2 dark:border-zinc-800/60">
