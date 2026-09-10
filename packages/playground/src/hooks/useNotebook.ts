@@ -151,4 +151,34 @@ const DEMO_NOTES: Array<{ name: string; source: string }> = [
     name: 'playground.ooc',
     source: `// 借助注入的宿主对象改页面（类似 Smalltalk）\n// ui add '标签' '文本'：body 里追加元素\nui add 'p' '我从 OOC 生成了这段文字'\n\n// db notes：列出所有笔记\nnotes = db notes;\nnotes\n`,
   },
+  {
+    name: '预览.ooc',
+    source: `// 组件：fc apply [ctx, 参数 => 用 ctx.addNode 生成节点]
+// 最后一个表达式是模块导出：带 preview(ctx) 的对象运行后可全屏预览
+Card = fc apply [ctx, title, count =>
+    ctx addNode (
+        dom div {'className' => 'rounded-xl bg-emerald-100 p-3 dark:bg-emerald-950/50'}
+            (text apply title)
+            (dom div {'className' => 'mt-1 font-mono text-sm text-emerald-800 dark:text-emerald-400'}
+                (text apply count)
+            )
+    )
+];
+
+{
+    preview(ctx){
+        // 关闭预览时执行的回调
+        ctx addDestroy [console log 'destroy时执行';];
+        // 管道：A | ctx addNode 等价于 ctx.addNode(A)
+        (dom div {'className' => 'rounded-xl bg-stone-200 p-2 text-stone-500 dark:bg-zinc-800 dark:text-zinc-400'}) | ctx addNode;
+        ctx addNode (
+            dom div {'className' => 'space-y-3', 's_cursor' => 'pointer'}
+                (text apply '组件示例')
+                (Card apply '标题' 8)
+                (dom input {'className' => 'w-full rounded-lg border border-stone-300 px-2 py-1 dark:border-zinc-700'})
+        )
+    }
+}
+`,
+  },
 ]

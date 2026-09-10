@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   ClockCounterClockwise,
   DotsThreeVertical,
+  Eye,
   Play,
   Trash,
   Warning,
@@ -16,6 +17,8 @@ import {
 import { Notebook } from '../hooks/useNotebook.js'
 import { CodeArea, type CodeAreaHandle } from './CodeArea.js'
 import { HistorySheet } from './HistorySheet.js'
+import { PreviewSheet } from './PreviewSheet.js'
+import { hasPreview } from '../lib/preview/dom.js'
 import { QuickKeysBar, QUICK_KEYS_BAR_H } from './QuickKeysBar.js'
 import type { RunResult } from '../lib/run.js'
 
@@ -32,6 +35,7 @@ export function Editor({ nb, note }: Props) {
   const [newName, setNewName] = useState('')
   const [renameErr, setRenameErr] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const codeRef = useRef<CodeAreaHandle>(null)
   const [codeFocused, setCodeFocused] = useState(false)
 
@@ -79,6 +83,7 @@ export function Editor({ nb, note }: Props) {
   useEffect(() => {
     setText(note.source)
     setResult(null)
+    setPreviewOpen(false)
   }, [note.name])
 
   // 输入防抖自动保存
@@ -253,6 +258,15 @@ export function Editor({ nb, note }: Props) {
         onClose={() => setHistoryOpen(false)}
       />
 
+      {/* 全屏预览（导出对象带 preview(ctx) 时出现） */}
+      {previewOpen && result && (
+        <PreviewSheet
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          value={result.value}
+        />
+      )}
+
       {/* 代码区（聚焦时底部留出快捷条高度，避免行被盖住） */}
       <main
         className={
@@ -297,7 +311,18 @@ export function Editor({ nb, note }: Props) {
           <div className="px-4 py-3">
             <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-stone-400 dark:text-zinc-500">
               <span>输出</span>
-              <span>{result.durationMs.toFixed(1)}ms</span>
+              <span className="flex items-center gap-2">
+                {hasPreview(result.value) && (
+                  <button
+                    onClick={() => setPreviewOpen(true)}
+                    className="flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 py-0.5 text-[11px] font-medium normal-case text-white dark:bg-emerald-600"
+                  >
+                    <Eye size={12} />
+                    预览
+                  </button>
+                )}
+                <span>{result.durationMs.toFixed(1)}ms</span>
+              </span>
             </div>
             <OutputRow value={result.error ?? result.output} />
           </div>

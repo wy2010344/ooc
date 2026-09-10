@@ -1,8 +1,10 @@
 import type { Engine } from './engine.js'
+import type { Value } from 'object-oriented-c-language'
 import { formatValue } from './engine.js'
 
 export interface RunResult {
   output: string
+  value: unknown
   error: string | null
   diagnostics: AppDiagnostic[]
   durationMs: number
@@ -50,12 +52,13 @@ export async function runNote(
 
   let output = ''
   let error: string | null = null
+  let value: unknown = undefined
   try {
-    const value = await engine.interpret.interpret(source, runName)
-    output = formatValue(value)
+    value = await engine.interpret.interpret(source, runName)
+    output = formatValue(value as Value)
   } catch (err) {
     error = String(err)
   }
 
-  return { output, error, diagnostics, durationMs: performance.now() - started }
+  return { output, value, error, diagnostics, durationMs: performance.now() - started }
 }

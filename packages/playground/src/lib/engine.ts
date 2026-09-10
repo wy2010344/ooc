@@ -7,6 +7,7 @@ import {
 } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
+import { context, dom, fc, text } from './preview/dom.js'
 
 export interface NotebookEntry {
   name: string
@@ -81,6 +82,8 @@ export function createVirtualFs(
  *     db.read '名字' 读取笔记源码
  *     ui.dom '选择器' '属性' '值' 修改页面元素
  *     ui.add '标签' '文本' 追加一个元素
+ *   fc / dom / text / context  —— 预览渲染（详见 src/lib/preview/）：
+ *     组件：fc apply [ctx,...]；元素：dom.div props children；文本：text / text apply
  */
 export function createGlobals(listNotes: () => NotebookEntry[]) {
   const db = {
@@ -112,7 +115,7 @@ export function createGlobals(listNotes: () => NotebookEntry[]) {
     },
   }
 
-  return { storage, loop, js, db, ui } as const
+  return { storage, loop, js, fc, dom, text, context, db, ui } as const
 }
 
 export function createEngine(listNotes: () => NotebookEntry[]) {
@@ -144,11 +147,16 @@ export function formatValue(value: Value): string {
     const item = (value as Record<string, unknown>)[key]
     let rendered: string
     if (typeof item === 'function') {
-      // 绑定值无参调用可取到真实值；方法调用出错退化为 (方法)
-      try {
-        rendered = formatValue(item.call(value))
-      } catch {
+      // 绑定值无参调用可取到真实值；方法调用出错退化为 (方法)。
+      // preview 方法会真的执行一次预览构建，格式化成输出时跳过它。
+      if (key === 'preview') {
         rendered = '(方法)'
+      } else {
+        try {
+          rendered = formatValue(item.call(value))
+        } catch {
+          rendered = '(方法)'
+        }
       }
     } else if (item && typeof item === 'object') {
       rendered = '(对象)'
