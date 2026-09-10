@@ -276,10 +276,13 @@ export function Editor({ nb, note }: Props) {
         }
       >
         <CodeArea
+          key={note.name}
           ref={codeRef}
           value={text}
           onChange={onChange}
           onFocusChange={setCodeFocused}
+          engine={nb.engine}
+          noteName={note.name}
           placeholder="写点 OOC…"
         />
       </main>

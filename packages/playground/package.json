@@ -11,6 +11,10 @@
         "test": "tsc -p tsconfig.test.json && node --test \"out/test/**/*.test.js\""
     },
     "dependencies": {
+        "@codemirror/commands": "^6.11.0",
+        "@codemirror/lint": "^6.9.7",
+        "@codemirror/state": "^6.7.4",
+        "@codemirror/view": "^6.43.11",
         "@headlessui/react": "^2.2.0",
         "@phosphor-icons/react": "^2.1.7",
         "idb": "^8.0.3",

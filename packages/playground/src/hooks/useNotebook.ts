@@ -132,6 +132,8 @@ export function useNotebook() {
     renameNote,
     removeNote,
     run,
+    // 共享引擎：Editor 里的实时重排/lint 也复用同一个 typeCheck（同一套 langium 校验）
+    engine: getEngine(),
   }
 }
 
