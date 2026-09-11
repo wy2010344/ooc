@@ -17,6 +17,7 @@
 ## 结构
 
 - `src/lib/engine.ts` — 单例引擎：虚拟 FileSystemProvider（笔记内存视图）+ 群组桥接 `storage/loop/js/db/ui`。Node 下创建安全（DOM/IndexedDB 惰性）。
+- `src/lib/preview/` — 预览桥接：**信号层直接复用 `wy-helper`**（`createSignal`/`collectSignal`/`memo`），`CtxI`（显式 ctx 的 Fc 渲染）+ `dom.<tag>`/`text.bind` 为自定义薄层。mve-core/mve-dom 的 renderForEach/hook* 依赖**隐式 ctx**（`hookCurrentStateHolder`），与显式 Fc 结构不兼容，不直接复用（见 SKILL.md）。
 - `src/lib/run.ts` — `runNote(engine, name, source)`：先类型检查再解释。**每次运行用唯一会话路径 `__ooc-run-N/<name>`**，避免 Langium 文档注册表重复 URI 报错；basename 保持笔记名供 `#import` 查找。
 - `src/lib/store.ts` — IndexedDB（经 **idb** 封装）：笔记 CRUD + 执行历史（`history` store）。不要手写 `openDB`/事务样板。
 - `src/hooks/useNotebook.ts` — 状态管理 + 演示笔记播种（首次打开）。
@@ -27,11 +28,12 @@
 1. 语言语法/语义改动一律去 `packages/language`，改完跑 `npm run langium:generate && npm run build && npm test`（根目录）。
 2. 改 LSP/引擎相关的浏览器集成交互后，必须补 `test/engine.test.ts`。
 3. **禁止**在 playground 引入原生 `.node` 库；`ui add`/`db notes` 这类宿主实验只应被"显式调用"触发，不许模块加载时副作用。
-4. 演示笔记固定用 `;` 分隔顶层语句（OOC 规则），不要教用户错误写法。
+4. **wy-helper 信号在 Node 下会挂起进程**：≤1.1.3 的 MessageChannel 端口被模块级常驻持有。测试命令已带 `--import ./test/preload-batch.mjs`（先置空 `globalThis.MessageChannel` 兜底，再优先用 `wy.setBatchRunner(fn => setTimeout(fn))` 显式注入≤1.1.4 的测试调度，批量语义不变）。**不要手写 `node --test` 不带该 preload**。
+5. 演示笔记固定用 `;` 分隔顶层语句（OOC 规则），不要教用户错误写法。
 
 ## 命令
 
 - `npm run dev`（本包目录）：本地 dev。
 - `npm run build`：tsc 类型检查 + vite 构建。
-- `npm test`（根目录）：`npm test -w packages/playground` 会在本包跑 `tsc -p tsconfig.test.json && node --test "out/test/**/*.test.js"`（node:test，不需要转译）。
+- `npm test`（根目录）：`npm test -w packages/playground` 会在本包跑 `tsc -p tsconfig.test.json && node --import ./test/preload-batch.mjs --test "out/test/**/*.test.js"`（node:test，不需要转译）。
 - `out/`、`dist/` 为产物，不入库。
