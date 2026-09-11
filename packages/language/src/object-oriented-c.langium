@@ -90,13 +90,13 @@ MessageOrChain:
     primary=Primary (message=Message)?;
 
 MessageChainExt:
-    '|>' value=Message;
+    '/' value=Message;
 
 MessagePipRight:
     '|' value=(NamedExpression | MessageChain);
 
 MessageInfixRight:
-    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'%'|'/') value=Primary;
+    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'%') value=Primary;
 
 NamedExpression:
     param=ID '->' expression=Expression;

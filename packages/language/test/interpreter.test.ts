@@ -90,7 +90,7 @@ describe('OOC Interpreter', () => {
                     value = 42
                 }
             };
-            outer inner |> value
+            outer inner / value
         `)
     expect(result).toBe(42)
   })
@@ -296,7 +296,7 @@ describe('OOC Interpreter', () => {
     ).rejects.toThrow('没有定义该方法')
   })
 
-  test('未处理消息抛出包含调用信息的错误对象', async () => {
+test('未处理消息抛出包含调用信息的错误对象', async () => {
     await expect(
       interpreter.interpret(`Math _ooc_notexist_method 1 2`),
     ).rejects.toThrow(OocMethodNotFoundError)
@@ -310,7 +310,30 @@ describe('OOC Interpreter', () => {
     }
   })
 
-  test('自定义对象未绑定触发 methodNotFound 方法', async () => {
+  test('运行时错误拼上源码行列位置', async () => {
+    const src = `first = 1;
+second = 2;
+Math _ooc_notexist_method 1 2;
+good = 3;`
+    try {
+      await interpreter.interpret(src, 'err-position.ooc')
+    } catch (error) {
+      const msg = (error as Error).message
+      expect(msg).toContain('没有定义该方法')
+      // 出错点在第 3 行的消息调用，message 末尾拼 `at <文件>:<行>:<列>`
+      expect(msg).toContain('err-position.ooc')
+      const suffix = /err-position\.ooc:(\d+):(\d+)/.exec(msg)
+      if (!suffix) {
+        throw new Error(`错误信息缺少源码位置: ${msg}`)
+      }
+      expect(Number(suffix[1])).toBe(3)
+      expect(Number(suffix[2])).toBeGreaterThan(1)
+      return
+    }
+    throw new Error('预期抛错但没有抛')
+  })
+
+  test('custom object 未绑定触发 methodNotFound 方法', async () => {
     const result = await interpreter.interpret(`
             obj = {
                 methodNotFound(name) { 'fallback:' + name }
@@ -392,6 +415,48 @@ describe('OOC Interpreter', () => {
     })
     const result = await withArr.interpret('arr map [x => x * 10]')
     expect(result).toEqual([10, 20, 30])
+  })
+
+  test('lambda 解释为原生 JS 函数，可被 JS 直接调用', async () => {
+    const result = await interpreter.interpret('f = [x => x * 2]; f')
+    // 与原生化（lambda → 原生 Function）保持一致：apply 调用与 typeof 都走 JS 生态
+    expect(typeof result).toBe('function')
+    expect((result as (x: number) => number)(21)).toBe(42)
+  })
+
+  test('lambda 内发的消息走 apply 消息（发送端可再次 apply 链式复用）', async () => {
+    const result = await interpreter.interpret(`
+            add = [v => item = v * 2; item + 1];
+            f = [x => add apply x];
+            f apply 20
+        `)
+    expect(result).toBe(41)
+  })
+
+  test('通用 not：不限于布尔，0 与空值视为假', async () => {
+    expect(await interpreter.interpret('(3 > 1) not')).toBe(false)
+    expect(await interpreter.interpret('(1 > 3) not')).toBe(true)
+    expect(await interpreter.interpret('0 not')).toBe(true)
+    expect(await interpreter.interpret('false not')).toBe(true)
+    expect(await interpreter.interpret('nil not')).toBe(true)
+    expect(await interpreter.interpret(`'' not`)).toBe(true)
+  })
+
+  test('级联 /：结果继续发消息（等价旧 |>），可串联', async () => {
+    expect(await interpreter.interpret(`'hello' / toUpperCase`)).toBe('HELLO')
+    expect(await interpreter.interpret(`'  hi  ' / trim / toUpperCase`)).toBe(
+      'HI',
+    )
+  })
+
+  test('级联 / 与 filter 组合', async () => {
+    const withArr = createInterpretAction(EmptyFileSystem, {
+      xs: [1, 2, 3, 4],
+    })
+    const result = await withArr.interpret(
+      'xs / filter [x => (x % 2) == 0] / length',
+    )
+    expect(result).toBe(2)
   })
 
   test('宿主注入的全局对象（storage 可变引用）', async () => {
@@ -638,10 +703,10 @@ describe('OOC #import 模块', () => {
   })
 })
 
-describe('除法运算符', () => {
-  test('基本除法：number / number → number', async () => {
+describe('除法运算', () => {
+  test('基本除法：number div number → number', async () => {
     const result = await interpreter.interpret(`
-        x: number = 12 / 3;
+        x: number = 12 div 3;
         x
     `)
     expect(result).toBe(4)
@@ -649,7 +714,7 @@ describe('除法运算符', () => {
 
   test('浮点除法', async () => {
     const result = await interpreter.interpret(`
-        x: number = 10 / 4;
+        x: number = 10 div 4;
         x
     `)
     expect(result).toBe(2.5)
@@ -657,8 +722,8 @@ describe('除法运算符', () => {
 
   test('除法与类型检查：返回 number', async () => {
     const diags = await diagnostics(`
-        x: number = 12 / 3;
-        y: string = 12 / 3
+        x: number = 12 div 3;
+        y: string = 12 div 3
     `)
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
@@ -666,10 +731,10 @@ describe('除法运算符', () => {
   test('除法与管道混合使用', async () => {
     const result = await interpreter.interpret(`
         calc = {
-            div(a, b) => a / b
+            div(a, b) => a div b
         };
-        calc div 12 4
+        calc div 12 4 / div 3
     `)
-    expect(result).toBe(3)
+    expect(result).toBe(1)
   })
 })

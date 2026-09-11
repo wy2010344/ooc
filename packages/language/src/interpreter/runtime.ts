@@ -1,9 +1,11 @@
 import { groupToMap } from 'wy-helper'
 import {
+  Expression,
   Method,
   MethodCallName,
   MethodDefName,
   Message,
+  Statement,
 } from '../generated/ast.js'
 import { numDef } from '../library/num.js'
 import { objectDefine } from '../library/object.js'
@@ -41,6 +43,48 @@ function getObjDefineName(n: MethodDefName) {
 export type ObjectValue = object
 function getName(n: { name: string }) {
   return n.name
+}
+
+/** 执行一个方法体：把参数（含 rest）绑进作用域后逐条求值表达式，返回最后一条的值。
+ *  OOC 对象方法与原生 JS 函数型 lambda（见 evaluate.ts createLambdaValue）共用，
+ *  receiver 绑定到 `responser`。guard 需引用参数时，先 bindMethod 再在返回的作用域上求值。 */
+export function bindMethod(
+  method: { params: Array<{ name: string }>; restParam?: { name: string } | null },
+  baseScope: Scope,
+  receiver: unknown,
+  args: unknown[],
+): Scope {
+  let s = addScope(baseScope, 'responser', receiver)
+  method.params.forEach((param, index) => {
+    s = addScope(s, param.name, args[index])
+  })
+  if (method.restParam) {
+    s = addScope(
+      s,
+      method.restParam.name,
+      Array.prototype.slice.call(args, method.params.length),
+    )
+  }
+  return s
+}
+
+/** 在已绑定参数的作用域上逐条执行方法体表达式，返回最后一条的值。 */
+export function runBody(
+  expressions: Array<Expression | Statement>,
+  s: Scope,
+): unknown {
+  let last = null
+  expressions.forEach((e) => {
+    switch (e.$type) {
+      case 'Assignment':
+        s = addScope(s, e.name, interpretExpression(e.expression, s))
+        return
+      default:
+        last = interpretExpression(e, s)
+        return
+    }
+  })
+  return last
 }
 export function objectValue(
   methods: Method[],
@@ -98,40 +142,14 @@ export function objectValue(
               return pair.value
             case 'call':
               const method = pair.value
-              let s = addScope(scope, 'responser', this)
-              method.params.forEach((param, index) => {
-                s = addScope(s, param.name, args[index])
-              })
-
-              if (method.restParam) {
-                s = addScope(
-                  s,
-                  method.restParam.name,
-                  Array.prototype.slice.call(args, method.params.length),
-                )
-              }
+              // 先绑参数再求值 guard：guard 可引用参数（`#guard a > 5`）
+              const s = bindMethod(method, scope, this, arguments as unknown as unknown[])
               if (
                 !method.guardExpression ||
                 (method.guardExpression &&
                   interpretExpression(method.guardExpression, s))
               ) {
-                //继续
-                let last = null
-                method.expressions.forEach((e) => {
-                  switch (e.$type) {
-                    case 'Assignment':
-                      s = addScope(
-                        s,
-                        e.name,
-                        interpretExpression(e.expression, s),
-                      )
-                      return
-                    default:
-                      last = interpretExpression(e, s)
-                      return
-                  }
-                })
-                return last
+                return runBody(method.expressions, s)
               }
           }
         }
@@ -210,7 +228,12 @@ export function sendMessage(o: any, value: string, args: any[]): any {
   // if (o instanceof ObjectValue) {
   //   return o.send(value, o, args)
   // }
-  const fun = o[value]
+  // 原生 JS 函数（lambda 型）之上的 apply：`fn apply x` 直接调用函数本体，
+  // 否则会命中 Function.prototype.apply（对非数组 args 抛 TypeError）。
+  if (typeof o === 'function' && value === 'apply') {
+    return o(...args)
+  }
+  const fun = o == null ? undefined : o[value]
   if (typeof fun === 'function') {
     //找到对象方法。OOC 创建的对象（oocObjects）内部走原样派发；
     //宿主原生对象则把 OOC lambda 实参包成 JS 可调用回调。

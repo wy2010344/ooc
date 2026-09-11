@@ -52,7 +52,7 @@ const builtinMethods: Record<string, Map<string, MethodSig[]>> = {
     ['+', [builtinMethod([numberType], numberType)]],
     ['-', [builtinMethod([numberType], numberType)]],
     ['*', [builtinMethod([numberType], numberType)]],
-    ['/', [builtinMethod([numberType], numberType)]],
+    ['div', [builtinMethod([numberType], numberType)]],
     ['%', [builtinMethod([numberType], numberType)]],
     ['>', [builtinMethod([numberType], booleanType)]],
     ['<', [builtinMethod([numberType], booleanType)]],
@@ -92,6 +92,7 @@ const commonMethods: Map<string, MethodSig[]> = new Map([
   ['||', [builtinMethod([anyType], anyType)]],
   ['!!', [builtinMethod([], booleanType)]],
   ['~!', [builtinMethod([], booleanType)]],
+  ['not', [builtinMethod([], booleanType)]],
 ])
 
 export function getBuiltinMethods(typeName: string): Map<string, MethodSig[]> {

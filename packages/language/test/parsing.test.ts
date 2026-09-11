@@ -86,7 +86,7 @@ describe('Parsing tests', () => {
 
   test('parse complex nested pipe with multiple arguments', async () => {
     document = await parse(`
-            x = obj method1 10 20 |> method2 30 |> method3;
+            x = obj method1 10 20 / method2 30 / method3;
         `)
     expect(checkDocumentValid(document)).toBeUndefined()
   })

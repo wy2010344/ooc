@@ -15,11 +15,39 @@ import {
   getMethodCallName,
   sendMessage,
   sendMessageWith,
-  type ObjectValue,
+  bindMethod,
+  runBody,
 } from './runtime.js'
 import { addScope, getScope, type Scope } from './scope.js'
 
 export type InterpretAction = (name: string, basePath?: string) => Promise<any>
+
+/**
+ * 最近一次求值的表达式所在位置（0 基行/列，来自 CST）。解释器在每一步
+ * interpretExpression/interpretPrimary 里覆盖更新，O(1) 零开销；
+ * 同步执行（import 用 await 无用户代码并发），模块级游标安全。
+ * 错误逃逸到 createInterpretAction 边界时被消费，拼成 `at <文件>:<行>:<列>`。
+ */
+let errorPosition: { line: number; character: number } | null = null
+
+/** 新一轮解释前清空位置游标（import 加载的异文档错误不应污染主文档坐标）。 */
+export function clearErrorPosition(): void {
+  errorPosition = null
+}
+
+/** 取走最近一次求值位置并清空（宿主边界消费一次）。无位置返回 null。 */
+export function consumeErrorPosition(): { line: number; character: number } | null {
+  const p = errorPosition
+  errorPosition = null
+  return p
+}
+
+function track(node: { $cstNode?: { range: { start: { line: number; character: number } } } } | undefined): void {
+  const pos = node?.$cstNode?.range.start
+  if (pos) {
+    errorPosition = pos
+  }
+}
 
 export async function interpret(
   model: Model,
@@ -27,6 +55,7 @@ export async function interpret(
   rootPath: string,
   interpretAction: InterpretAction,
 ) {
+  clearErrorPosition()
   // 收集导入语句（ImportStatement 与 ImportList 均为导入）
   const imports = model.expressions.filter(
     (x) => x.$type === 'ImportStatement' || x.$type === 'ImportList',
@@ -66,6 +95,7 @@ export async function interpret(
 }
 
 export function interpretExpression(e: Expression, scope: Scope): any {
+  track(e)
   switch (e.$type) {
     case 'MessageOrChain':
       const o = interpretPrimary(e.primary, scope)
@@ -115,6 +145,7 @@ export function getStrValue(e: Str) {
 }
 
 export function interpretPrimary(e: Primary, scope: Scope): any {
+  track(e)
   switch (e.$type) {
     case 'Bool':
       return e.value == 'true'
@@ -143,12 +174,15 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
 }
 
 /**
- * lambda `[x -> body]` 与对象 `{ apply(x) { body } }` 语义相同：
- * 生成一个只包含 apply 方法的 ObjectValue。
+ * lambda `[x -> body]` 就像 JS 箭头函数：直接解释成真正的 JS 函数。
+ * 这样宿主原生方法（Array.forEach/map 等）天然能调用它，先复用 JS 生态；
+ * `fn apply x` 在 sendMessage 里对函数接收者特判为 fn(x)。
+ * 注意：因此 lambda 没有 OOC 对象语义（无原型、无 methodNotFound），
+ * 需要对象语义时用 `{ apply(x) { ... } }`。
  */
-function createLambdaValue(e: LambdaDef, scope: Scope): ObjectValue {
-  // 合成的 apply 方法节点：运行时只读取 name/params/restParam/guardExpression/expressions，
-  // $container 等链接信息由 Langium 在真实解析时填充，此处不需要。
+function createLambdaValue(e: LambdaDef, scope: Scope): Function {
+  // 合成的匿名 apply 方法：只读 params/expressions，供 bindMethod/runBody 使用；
+  // 不需要真实 $container 等链接信息。
   const applyMethod = {
     $type: 'MethodAll',
     name: {
@@ -158,5 +192,10 @@ function createLambdaValue(e: LambdaDef, scope: Scope): ObjectValue {
     params: e.params,
     expressions: e.expressions,
   } as unknown as MethodAll
-  return objectValue([applyMethod], scope, undefined)
+  // 箭头式：函数体始终在自己的作用域 + 参数作用域中求值，self 即函数本身
+  const fn = (...args: unknown[]) => {
+    const s = bindMethod(applyMethod, scope, fn, args)
+    return runBody(applyMethod.expressions, s)
+  }
+  return fn
 }

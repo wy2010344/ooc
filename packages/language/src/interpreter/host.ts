@@ -12,7 +12,7 @@ import {
   joinPath,
   resolveModuleName,
 } from '../module-path.js'
-import { interpret, type InterpretAction } from './evaluate.js'
+import { interpret, type InterpretAction, consumeErrorPosition } from './evaluate.js'
 import { OocCircularImportError } from './errors.js'
 import { type Globals, withGlobals } from './scope.js'
 import {
@@ -169,10 +169,21 @@ export function createInterpretAction(
     if (syntax) {
       throw syntax
     }
-    const model = document.parseResult.value as Model
+const model = document.parseResult.value as Model
     const importAction: InterpretAction = (name, basePath) =>
       interpretPath(name, basePath, importChain)
-    return executeOOC(model, fileName, importAction, globals)
+    try {
+      return await executeOOC(model, fileName, importAction, globals)
+    } catch (error) {
+      // 运行时错误拼上源码位置：消费最近一次求值节点的 CST 坐标
+      const pos = consumeErrorPosition()
+      if (error instanceof Error && pos) {
+        error.message =
+          `${error.message}\n` +
+          `  at ${fileName}:${pos.line + 1}:${pos.character + 1}`
+      }
+      throw error
+    }
   }
 
   return {
