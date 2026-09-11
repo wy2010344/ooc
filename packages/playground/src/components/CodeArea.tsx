@@ -4,7 +4,7 @@
  * 工具链（见 src/lib/ooc-editor.ts），不再需要手工同步滚动位置。
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { Annotation, EditorState } from '@codemirror/state'
+import { Annotation, Compartment, EditorState } from '@codemirror/state'
 import {
   EditorView,
   keymap,
@@ -27,6 +27,12 @@ interface Props {
   engine: Engine
   /** 当前笔记名（lint 用的文档名，供 #import 相对解析） */
   noteName: string
+  /** 只读：默认开，避免滚动/阅读时键盘乱弹；点按正文可解除（见 onReadOnlyChange） */
+  readOnly: boolean
+  /** 代码区是否自动换行（false 时横向滚动） */
+  wrap: boolean
+  /** 只读被点按解除时通知父级（配合菜单里的「锁定只读」切换） */
+  onReadOnlyChange?: (readOnly: boolean) => void
 }
 
 export interface CodeAreaHandle {
@@ -37,6 +43,10 @@ export interface CodeAreaHandle {
 
 /** 外部同步（切换笔记等）发起的变更，不该再触发 onChange 落盘 */
 const externalUpdate = Annotation.define<boolean>()
+
+/** 只读/自动换行走 Compartment，切换时 reconfigure 而非重建编辑器 */
+const readOnlyComp = new Compartment()
+const wrapComp = new Compartment()
 
 /** 复用 index.css 的 hl-* 配色，编辑器本体透明融入页面背景 */
 const editorTheme = EditorView.theme({
@@ -75,7 +85,17 @@ const editorTheme = EditorView.theme({
 })
 
 export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
-  { value, onChange, placeholder: hint, onFocusChange, engine, noteName },
+  {
+    value,
+    onChange,
+    placeholder: hint,
+    onFocusChange,
+    engine,
+    noteName,
+    readOnly,
+    wrap,
+    onReadOnlyChange,
+  },
   ref,
 ) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -83,8 +103,12 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
   // 用 ref 拿最新回调，避免 CM6 扩展在闭包里抓旧 props
   const onChangeRef = useRef(onChange)
   const onFocusChangeRef = useRef(onFocusChange)
+  const readOnlyRef = useRef(readOnly)
+  const onReadOnlyChangeRef = useRef(onReadOnlyChange)
   onChangeRef.current = onChange
   onFocusChangeRef.current = onFocusChange
+  readOnlyRef.current = readOnly
+  onReadOnlyChangeRef.current = onReadOnlyChange
 
   // 仅首个挂载创建编辑器；noteName 随 note 切换由 Editor 的 key 重建本组件
   useEffect(() => {
@@ -97,7 +121,8 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
         doc: value,
         extensions: [
           history(),
-          EditorView.lineWrapping,
+          readOnlyComp.of(EditorState.readOnly.of(readOnlyRef.current)),
+          wrapComp.of(EditorView.lineWrapping),
           placeholder(hint ?? ''),
           keymap.of([
             // 物理键盘 Tab：插入 4 空格而非切换焦点
@@ -115,10 +140,36 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
             )
             if (!isExternal) onChangeRef.current(u.state.doc.toString())
           }),
+          // 只读时不碰 focus（避免滚动/阅读弹键盘）；点按（指针没移动）才解除只读进入编辑
           EditorView.domEventHandlers({
-            focus: () => onFocusChangeRef.current?.(true),
+            pointerdown: (_e, v) => {
+              if (!readOnlyRef.current) return
+              // 记录起点，pointerup 时判断是否为「点按」而非滚动/拖选
+              const rect = v.dom.getBoundingClientRect()
+              v.dom.dataset.tapX = String(
+                (_e as PointerEvent).clientX - rect.left,
+              )
+              v.dom.dataset.tapY = String(
+                (_e as PointerEvent).clientY - rect.top,
+              )
+            },
+            pointerup: (e, v) => {
+              if (!readOnlyRef.current) return
+              const x = Number(v.dom.dataset.tapX ?? NaN)
+              const y = Number(v.dom.dataset.tapY ?? NaN)
+              delete v.dom.dataset.tapX
+              delete v.dom.dataset.tapY
+              const rect = v.dom.getBoundingClientRect()
+              const dx = (e as PointerEvent).clientX - rect.left - x
+              const dy = (e as PointerEvent).clientY - rect.top - y
+              if (Math.hypot(dx, dy) < 10) {
+                // 点按正文 → 解除只读并聚焦，键盘此时才弹出
+                onReadOnlyChangeRef.current?.(false)
+                requestAnimationFrame(() => v.focus())
+              }
+            },
             blur: () => onFocusChangeRef.current?.(false),
-            pointerdown: () => view.focus(),
+            focus: () => onFocusChangeRef.current?.(true),
           }),
           editorTheme,
         ],
@@ -133,6 +184,19 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
     // 一次性创建；value 由下方 effect 同步
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 只读/换行开关：reconfigure Compartment
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: readOnlyComp.reconfigure(EditorState.readOnly.of(readOnly)),
+    })
+  }, [readOnly])
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: wrapComp.reconfigure(wrap ? EditorView.lineWrapping : []),
+    })
+  }, [wrap])
 
   // 外部值变化（切笔记、回填源码）同步进 CM6，不触发 onChange
   useEffect(() => {

@@ -7,9 +7,12 @@ import {
 } from '@headlessui/react'
 import {
   ArrowLeft,
+  ArrowsLeftRight,
   ClockCounterClockwise,
   DotsThreeVertical,
   Eye,
+  Lock,
+  LockOpen,
   Play,
   Trash,
   Warning,
@@ -36,6 +39,9 @@ export function Editor({ nb, note }: Props) {
   const [renameErr, setRenameErr] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  // 编辑器默认只读：阅读时键盘不敏感；点按正文或菜单「解除只读」进入编辑
+  const [readOnly, setReadOnly] = useState(true)
+  const [wrap, setWrap] = useState(true)
   const codeRef = useRef<CodeAreaHandle>(null)
   const [codeFocused, setCodeFocused] = useState(false)
 
@@ -232,6 +238,26 @@ export function Editor({ nb, note }: Props) {
             </MenuItem>
             <MenuItem>
               <button
+                onClick={() => setReadOnly((r) => !r)}
+                aria-pressed={readOnly}
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                {readOnly ? <LockOpen size={15} /> : <Lock size={15} />}
+                {readOnly ? '解除只读' : '锁定只读'}
+              </button>
+            </MenuItem>
+            <MenuItem>
+              <button
+                onClick={() => setWrap((w) => !w)}
+                aria-pressed={wrap}
+                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                <ArrowsLeftRight size={15} />
+                {wrap ? '关闭自动换行' : '开启自动换行'}
+              </button>
+            </MenuItem>
+            <MenuItem>
+              <button
                 onClick={enterRename}
                 className="w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 hover:bg-stone-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
@@ -284,6 +310,9 @@ export function Editor({ nb, note }: Props) {
           engine={nb.engine}
           noteName={note.name}
           placeholder="写点 OOC…"
+          readOnly={readOnly}
+          wrap={wrap}
+          onReadOnlyChange={setReadOnly}
         />
       </main>
 
