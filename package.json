@@ -28,8 +28,5 @@
         "packages/extension",
         "packages/example",
         "packages/playground"
-    ],
-    "dependencies": {
-        "wy-helper": "^1.1.1"
-    }
+    ]
 }

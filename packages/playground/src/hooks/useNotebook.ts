@@ -139,6 +139,66 @@ export function useNotebook() {
 
 export type Notebook = ReturnType<typeof useNotebook>
 
+/** 预览演示源码（播种 + 测试共用，避免两份漂移） */
+export const PREVIEW_DEMO = `// 预览：运行后点输出区的「预览」打开全屏。
+// 组件 = fc apply [ctx, 参数 => 用 ctx.addNode 往界面里放节点]
+// 响应式状态：createSignal apply 初值 → { get, set }；渲染里读到的信号一变，renderForEach 区域自动重建。
+list = createSignal apply emptyList;
+Card = fc apply [ctx, title, count =>
+    ctx addNode (
+        dom div {'className' => 'rounded-xl bg-emerald-100 p-3 dark:bg-emerald-950/50'}
+            (text apply title)
+            (dom div {'className' => 'mt-1 font-mono text-sm text-emerald-800 dark:text-emerald-400'}
+                (text apply count)
+            )
+    )
+];
+
+{
+    preview(ctx){
+        // 关闭预览时执行：可在这里清理资源
+        ctx addDestroy [console log '预览关闭：清理执行';];
+        ctx addNode (
+            dom div {'className' => 'space-y-3'}
+                (text apply '组件示例')
+                (Card apply '标题' 8)
+                // 点击时再 addNode：构造期结束后的 ctx 仍能把节点挂进预览（界面会"动"）
+                (dom button {
+                    'className' => 'rounded-full bg-amber-600 px-3 py-1.5 text-sm text-white',
+                    'onClick' => [e => ctx addNode (
+                        dom div {'className' => 'rounded-lg bg-amber-100 px-3 py-2 text-amber-800 dark:bg-amber-950/50'}
+                            (text apply '点击生效：界面被行为改变了')
+                    )]
+                } (text apply '点我，向预览里加一段'))
+                // 响应式列表：list 变化后整个列表区域重建（改数组要用 toSplice 返回新数组，旧引用不变）
+                // 注意：forEach/creater 要用对象方法（MethodAll）而非绑定值——绑定在消息调用时
+                // 只返回绑定结果、不收参数，主机 renderForEach 会 call 不到回调。
+                (ctx renderForEach {
+                    forEach(block) { (list get) forEach [item => block apply item item] },
+                    creater(ic, et, key) {
+                        ic addNode (
+                            dom div {'className' => 'rounded-lg bg-emerald-100 px-3 py-2 text-sm text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100'}
+                                (text apply ((et value) name))
+                        )
+                    }
+                })
+                (dom input {'id' => 'new-item', 'className' => 'w-full rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900'})
+                (dom button {
+                    'className' => 'rounded-full bg-emerald-700 px-3 py-1.5 text-sm text-white dark:bg-emerald-600',
+                    'onClick' => [e =>
+                        xs = list get;
+                        list set (xs |> toSplice 0 0 {'name' => (ui get '#new-item'), 'done' => false})
+                    ]
+                } (text apply '添加一项'))
+                (dom button {
+                    'className' => 'rounded-full bg-stone-300 px-3 py-1.5 text-sm text-stone-700 dark:bg-zinc-800 dark:text-zinc-200',
+                    'onClick' => [e => list get |> toSplice 0 1 | list set]
+                } (text apply '删第一项'))
+        )
+    }
+}
+`;
+
 /** 首次打开时的演示笔记（播种） */
 const DEMO_NOTES: Array<{ name: string; source: string }> = [
   {
@@ -155,41 +215,6 @@ const DEMO_NOTES: Array<{ name: string; source: string }> = [
   },
   {
     name: '预览.ooc',
-    source: `// 预览：运行后点输出区的「预览」打开全屏。
-// 组件 = fc apply [ctx, 参数 => 用 ctx.addNode 往界面里放节点]
-Card = fc apply [ctx, title, count =>
-    ctx addNode (
-        dom div {'className' => 'rounded-xl bg-emerald-100 p-3 dark:bg-emerald-950/50'}
-            (text apply title)
-            (dom div {'className' => 'mt-1 font-mono text-sm text-emerald-800 dark:text-emerald-400'}
-                (text apply count)
-            )
-    )
-];
-
-{
-    preview(ctx){
-        // 关闭预览时执行：可在这里清理资源
-        ctx addDestroy [console log '预览关闭：清理执行';];
-        // s_ 前缀的键直接写 CSS 样式：s_cursor => 'pointer'
-        ctx addNode (
-            dom div {'className' => 'space-y-3', 's_cursor' => 'pointer'}
-                (text apply '组件示例')
-                (Card apply '标题' 8)
-                // 按钮的 onClick 绑定 lambda：点击时再 addNode，界面会"动"
-                (dom button {
-                    'className' => 'rounded-full bg-emerald-700 px-3 py-1.5 text-sm text-white dark:bg-emerald-600',
-                    'onClick' => [ctx addNode (
-                        dom div {'className' => 'rounded-lg bg-amber-100 px-3 py-2 text-amber-800 dark:bg-amber-950/50'}
-                            (text apply '点击生效：界面被行为改变了')
-                    );]
-                }
-                    (text apply '点我，向预览里加一段')
-                )
-                (dom input {'className' => 'w-full rounded-lg border border-stone-300 px-2 py-1 dark:border-zinc-700'})
-        )
-    }
-}
-`,
+    source: PREVIEW_DEMO,
   },
 ]

@@ -5,6 +5,7 @@
  */
 
 import { invoke } from 'object-oriented-c-language'
+import { collectSignal } from './reactive.js'
 
 /** 上下文：provide/consume 按对象身份在父子 Ctx 链上查找 */
 export interface Context<T> {
@@ -54,6 +55,15 @@ interface NodeLike {
   appendChild(n: unknown): unknown
 }
 
+/** 渲染区容器：真实 DOM div 或测试假元素的最小面 */
+interface RenderBox {
+  appendChild(n: unknown): unknown
+  replaceChildren?(...ns: unknown[]): void
+  children?: unknown[]
+  style?: Record<string, string>
+  parentNode?: unknown
+}
+
 export function createContext<T>(value: T): Context<T> {
   return new ContextI<T>(value)
 }
@@ -74,6 +84,7 @@ export function isFc(v: unknown): v is Fc {
 export class CtxI implements Ctx {
   private readonly _nodes: unknown[] = []
   private readonly _destroyList: Fc[] = []
+  private readonly _dispose: Array<() => void> = []
   private readonly _contexts: [Context<unknown>, unknown][] = []
   private _destroyed = false
 
@@ -97,9 +108,7 @@ export class CtxI implements Ctx {
   }
 
   addNode(...vs: unknown[]): void {
-    if (this._destroyed) {
-      throw new Error('Ctx 已销毁，不能再 addNode')
-    }
+    this._ensureAlive('addNode')
     for (const v of vs) {
       if (isFc(v)) {
         // FC 直接在此 Ctx 上渲染（挂到 target；无 target 时收集）
@@ -113,16 +122,22 @@ export class CtxI implements Ctx {
   }
 
   addDestroy(fn: Fc): void {
-    if (this._destroyed) {
-      throw new Error('Ctx 已销毁，不能再 addDestroy')
-    }
+    this._ensureAlive('addDestroy')
     this._destroyList.push(fn)
   }
 
   destroy(): void {
     if (this._destroyed) return
     this._destroyed = true
-    // 逆序执行销毁回调，与 mve 一致
+    // 先释放响应式订阅，再逆序执行销毁回调（与 mve 一致）
+    for (const fn of this._dispose) {
+      try {
+        fn()
+      } catch {
+        // 订阅清理失败不影响整体销毁流程
+      }
+    }
+    this._dispose.length = 0
     for (let i = this._destroyList.length - 1; i >= 0; i--) {
       invoke(this._destroyList[i], [])
     }
@@ -141,18 +156,61 @@ export class CtxI implements Ctx {
   renderForEach<T, K = T, O = unknown>(
     o: ForEachArg<T, K, O>,
   ): { apply(): unknown } {
-    // 静态渲染：遍历 forEach 提供的数据，每项在独立子 Ctx 里跑 creater，
-    // 节点顺序追加进当前挂载目标。重渲染（响应式）后续再做。
-    let index = 0
+    this._ensureAlive('renderForEach')
+    // 有 DOM 与挂载目标时：整段渲染放进一个不改布局的容器（display:contents），
+    // 用 collectSignal 登记本次渲染读到的信号；任一信号变化后整段重建。
+    // 信号流：list = createSignal apply emptyList → 渲染读 list get →
+    // 事件里 list set (toSplice apply (list get) …) → 本区域自动刷新。
     const me = this
-    o.forEach({
-      apply(key: K, value: T) {
-        // 子项挂进同一目标，但各有自己的 Ctx（provide/consume 独立链）
-        const itemCtx = new CtxI(me._target, me)
-        void o.creater(itemCtx, { key, index: index++, value }, key)
-        return { apply(): O { return undefined as unknown as O } }
-      },
-    })
+    const doc = globalThis.document
+    if (doc && this._target) {
+      let container: RenderBox | null = null
+      const renderRegion = () => {
+        if (me._destroyed) return
+        if (!container || container.parentNode !== me._target) {
+          const box = doc.createElement('div') as unknown as RenderBox
+          if (box.style) box.style.display = 'contents'
+          me._target!.appendChild(box)
+          container = box
+        }
+        if (container.replaceChildren) {
+          container.replaceChildren()
+        } else if (container.children) {
+          ;(container.children as unknown[]).length = 0
+        }
+        let index = 0
+        o.forEach({
+          apply(key: K, value: T) {
+            // 子项挂进同一容器，但各有自己的 Ctx（provide/consume 独立链）
+            if (!me._destroyed) {
+              const itemCtx = new CtxI(container as unknown as NodeLike & globalThis.Node, me)
+              o.creater(itemCtx, { key, index, value }, key)
+            }
+            index++
+            return { apply(): O { return undefined as unknown as O } }
+          },
+        })
+      }
+      const collector = collectSignal(() => renderRegion())
+      collector.collect(() => renderRegion())
+      me._dispose.push(() => {
+        try {
+          collector.destroy()
+        } catch {
+          // 订阅可能已在分批刷新中失效，忽略
+        }
+      })
+    } else {
+      // 无 DOM/目标（Node 测试、仅收集）：静态渲染一次，等同旧行为
+      let index = 0
+      o.forEach({
+        apply(key: K, value: T) {
+          const itemCtx = new CtxI(me._target, me)
+          void o.creater(itemCtx, { key, index: index++, value }, key)
+          return { apply(): O { return undefined as unknown as O } }
+        },
+      })
+    }
     return { apply(): unknown { return undefined } }
   }
 
@@ -168,6 +226,12 @@ export class CtxI implements Ctx {
       holder = holder.parent
     }
     return undefined
+  }
+
+  private _ensureAlive(op: string): void {
+    if (this._destroyed) {
+      throw new Error(`Ctx 已销毁，不能再${op}`)
+    }
   }
 
   private _toNode(v: unknown): globalThis.Node {

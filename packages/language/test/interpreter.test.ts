@@ -386,6 +386,14 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(84)
   })
 
+  test('原生数组高阶方法接收 OOC lambda（自动包成 JS 回调）', async () => {
+    const withArr = createInterpretAction(EmptyFileSystem, {
+      arr: [1, 2, 3],
+    })
+    const result = await withArr.interpret('arr map [x => x * 10]')
+    expect(result).toEqual([10, 20, 30])
+  })
+
   test('宿主注入的全局对象（storage 可变引用）', async () => {
     const withStorage = createInterpretAction(EmptyFileSystem, {
       storage: {

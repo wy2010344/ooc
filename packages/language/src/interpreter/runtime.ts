@@ -20,6 +20,10 @@ import { OocMethodNotFoundError } from './errors.js'
 /** 空对象单例：`{}` 字面量共享同一个实例 */
 const EMPTY_OBJECT: Record<string, unknown> = {}
 
+/** OOC 创建对象的注册表。用 WeakSet 而非对象属性：属性名会穿过宿主
+ *  Proxy 的 get 陷阱（如 dom 代理直接抛「不支持的元素」），WeakSet 无泄漏。 */
+const oocObjects = new WeakSet<object>()
+
 // 定义值类型
 export type Value = number | string | boolean | null | ObjectValue
 
@@ -50,6 +54,7 @@ export function objectValue(
   // 顶层对象（无 parent）直接新建普通对象 {}，而非 Object.create(null)，
   // 保留 Object.prototype，JS 侧 toString/拼接等原生能力可用。
   const currentObject = parent ? Object.create(parent) : {}
+  oocObjects.add(currentObject)
   scope = addScope(scope, 'currentObject', currentObject)
   groupToMap(
     methods.map((method) => {
@@ -178,14 +183,41 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
   return sendMessage(o, getMethodCallName(name), args)
 }
 
+/**
+ * 宿主原生方法收到 OOC lambda 时，把它包成真正的 JS 函数：
+ * Array.forEach/map 等原生高阶方法要求回调可调用，而 OOC lambda 是
+ * 带 apply 方法的 ObjectValue，直接传会报 "object is not a function"。
+ * 包出来的是普通 JS 函数（typeof === 'function'），但保留 $$oocCall 引用，
+ * 宿主若走 invoke() 也能正确回灌到解释器。
+ */
+function toNativeCallback(
+  arg: unknown,
+): unknown {
+  if (
+    arg &&
+    typeof arg === 'object' &&
+    oocObjects.has(arg) &&
+    typeof (arg as { apply?: unknown }).apply === 'function'
+  ) {
+    const fn = (...rest: unknown[]) => sendMessage(arg, 'apply', rest)
+    ;(fn as { $$oocCall?: object }).$$oocCall = arg
+    return fn
+  }
+  return arg
+}
+
 export function sendMessage(o: any, value: string, args: any[]): any {
   // if (o instanceof ObjectValue) {
   //   return o.send(value, o, args)
   // }
   const fun = o[value]
   if (typeof fun === 'function') {
-    //能找到对象方法定义，包括proxy其实也在里面
-    return fun.apply(o, args)
+    //找到对象方法。OOC 创建的对象（oocObjects）内部走原样派发；
+    //宿主原生对象则把 OOC lambda 实参包成 JS 可调用回调。
+    if (o && typeof o === 'object' && oocObjects.has(o)) {
+      return fun.apply(o, args)
+    }
+    return fun.apply(o, args.map(toNativeCallback))
   }
   if (value === 'methodNotFound') {
     // 此处是未知消息的最终兜底：上一次派发已将原消息名放在第一个实参。
@@ -220,5 +252,10 @@ export function sendMessage(o: any, value: string, args: any[]): any {
  * 全局对象（如 loop）要执行它必须走这里。
  */
 export function invoke(fn: unknown, args: unknown[] = []): any {
+  // 兼容 toNativeCallback 包出的 JS 函数：直接走原始 lambda，绕开 apply 劫持
+  const origin = (fn as { $$oocCall?: object } | null)?.$$oocCall
+  if (origin) {
+    return sendMessage(origin, 'apply', args)
+  }
   return sendMessage(fn, 'apply', args)
 }
