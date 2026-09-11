@@ -39,6 +39,10 @@ interface Props {
 export interface CodeAreaHandle {
   /** 在光标处插入文本（移动端快捷键用），替换选中区域 */
   insert: (text: string) => void
+  /** 成对插入 open+close，并把光标停在开括号之后（[] () {} 合成键用） */
+  insertPair: (open: string, close: string) => void
+  /** 反向缩进：光标所在行去掉最多 4 个前导空格（⇧+Tab，移动端无硬件 Shift 时用） */
+  outdent: () => void
   focus: () => void
 }
 
@@ -234,7 +238,33 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
         view.focus()
         insertAtCaret(view, text)
       }
-      return { insert, focus: () => viewRef.current?.focus() }
+      const insertPair = (open: string, close: string) => {
+        const view = viewRef.current
+        if (!view) return
+        view.focus()
+        const sel = view.state.selection.main
+        view.dispatch(
+          view.state.update({
+            changes: { from: sel.from, to: sel.to, insert: open + close },
+            // 光标停在开括号之后，方便直接往里打字
+            selection: { anchor: sel.from + open.length },
+            scrollIntoView: true,
+          }),
+        )
+      }
+      const outdent = () => {
+        const view = viewRef.current
+        if (!view) return
+        view.focus()
+        const sel = view.state.selection.main
+        const line = view.state.doc.lineAt(sel.from)
+        const m = /^ {1,4}/.exec(line.text)
+        if (!m) return
+        view.dispatch({
+          changes: { from: line.from, to: line.from + m[0].length, insert: '' },
+        })
+      }
+      return { insert, insertPair, outdent, focus: () => viewRef.current?.focus() }
     },
     [],
   )

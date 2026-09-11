@@ -96,6 +96,18 @@ export const store = {
     await db.delete('notes', name.toLowerCase())
   },
 
+  /** 清空全部笔记（开发面板「仅保留最新演示」用） */
+  async clearNotes(): Promise<void> {
+    const db = await getDb()
+    const keys = await db.getAllKeys('notes')
+    if (keys.length === 0) return
+    const tx = db.transaction('notes', 'readwrite')
+    for (const k of keys) {
+      await tx.store.delete(k)
+    }
+    await tx.done
+  },
+
   /* ---------- 执行历史 ---------- */
 
   async logRun(item: Omit<RunHistoryItem, 'id'>): Promise<void> {

@@ -295,11 +295,8 @@ export function Editor({ nb, note }: Props) {
 
       {/* 代码区（聚焦时底部留出快捷条高度，避免行被盖住） */}
       <main
-        className={
-          codeFocused
-            ? 'min-h-0 flex-1 pb-[52px]'
-            : 'min-h-0 flex-1'
-        }
+        className="min-h-0 flex-1"
+        style={codeFocused ? { paddingBottom: QUICK_KEYS_BAR_H } : undefined}
       >
         <CodeArea
           key={note.name}
@@ -366,6 +363,8 @@ export function Editor({ nb, note }: Props) {
         <QuickKeysBar
           top={barTop}
           onInsert={(s) => codeRef.current?.insert(s)}
+          onInsertPair={(o, c) => codeRef.current?.insertPair(o, c)}
+          onOutdent={() => codeRef.current?.outdent()}
         />
       )}
     </div>
