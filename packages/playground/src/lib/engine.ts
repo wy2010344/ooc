@@ -8,8 +8,8 @@ import {
 } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
-import { addEffect, createSignal, memo } from './preview/reactive.js'
-import { context, dom, fc, text } from './preview/dom.js'
+import { collectSignal, createSignal, memo } from 'wy-helper'
+import { context, dom, fc, forEach, text } from './preview/dom.js'
 
 export interface NotebookEntry {
   name: string
@@ -84,47 +84,20 @@ export function createVirtualFs(
  *     db.read '名字' 读取笔记源码
  *     ui.dom '选择器' '属性' '值' 修改页面元素
  *     ui.add '标签' '文本' 追加一个元素
- *     ui.get '选择器' 读取 input 的值
- *   fc / dom / text / context  —— 预览渲染（详见 src/lib/preview/）：
- *     组件：fc apply [ctx,...]；元素：dom.div props children；文本：text / text apply
- *   createSignal / createMemo / createEffect  —— 项目内 reactive 模块（src/lib/preview/reactive.ts，
- *     词语义参考 wy-helper/mve 的信号，调度不依赖 MessageChannel，Node 测试可安全退出）：
+ *     ui.get '选择器' 读取 input 的值（旧模式，受控输入应改用 dom input value => 信号）
+ *   fc / dom / text / context / forEach  —— 预览渲染（详见 src/lib/preview/）：
+ *     组件：fc apply [ctx,...]；元素：dom.div props children；文本：text bind '...'；
+ *     列表区域：forEach apply {...}（内部 Ctx.renderForEach，无需自取 ctx）；
+ *     受控输入：dom input value => 信号对象（显示 get，用户输入写回 set，读值走信号）。
+ *   createSignal / createMemo / createEffect  —— 信号引擎直接复用 wy-helper
+ *     （createSignal/collectSignal/memo），不再自研平行实现。批处理调度默认 MessageChannel，
+ *     测试环境由 test/preload-batch.mjs 在导入前置空 globalThis.MessageChannel 切到 setTimeout：
  *     响应式状态。signal 是 { get() / set() }，渲染期被读取的信号变化后，
  *     renderForEach 所在区域自动重建（见 preview/ctx.ts）。
- *   emptyList / toSplice  —— 列表辅助：
- *     emptyList 是空数组起点；toSplice 按 (数组, 起, 删, ...增) 返回新数组，
- *     配合 list set 时旧数组不变、信号能察觉变化重渲染。
- *     桥接产出的数组自带非枚举 toSplice 方法，`list get |> toSplice 1 0 {...}` 可用。
+ *   Array 等 globalThis 全局 JS 对象直接发消息即可（深度接 JS 生态），如 `(Array of)` 造空数组；
+ *     数组不可变改法 `xs / toSpliced 1 0 {...}`（数组原生方法，返回新数组、旧数组不动），
+ *     配合 list set，信号能察觉变化重渲染。
  */
-
-/** 给数组挂上非枚举 toSplice 方法（不污染 Array.prototype，只作用于桥接产出的数组） */
-function decorateWithToSplice(xs: unknown[]): unknown[] {
-  Object.defineProperty(xs, 'toSplice', {
-    enumerable: false,
-    configurable: true,
-    writable: true,
-    value(this: unknown[], start: number, deleteCount = 0, ...items: unknown[]) {
-      return toSplice(this, start, deleteCount, ...items)
-    },
-  })
-  return xs
-}
-
-/** 不可变 splice：返回新数组，原数组不动 */
-function toSplice(
-  xs: unknown[],
-  start: number,
-  deleteCount = 0,
-  ...items: unknown[]
-): unknown[] {
-  const s = Math.max(0, Number(start) || 0)
-  const d = Math.max(0, Number(deleteCount) || 0)
-  const head = Array.prototype.slice.call(xs, 0, s)
-  const tail = Array.prototype.slice.call(xs, s + d)
-  return decorateWithToSplice(head.concat(items, tail))
-}
-
-const emptyList = decorateWithToSplice([])
 
 export function createGlobals(listNotes: () => NotebookEntry[]) {
   const db = {
@@ -181,22 +154,30 @@ export function createGlobals(listNotes: () => NotebookEntry[]) {
     // createMemo apply <lambda> → 记忆化 signal（lambda 读取的信号变化后重算）
     createMemo: {
       apply(get: unknown) {
-        const m = memo((last?: unknown, inited?: boolean) =>
+        const m = memo<unknown>((last?: unknown, inited?: boolean) =>
           invoke(get, [last, inited]),
         )
-        return { get: () => m.get() }
+        return { get: () => m() }
       },
     },
-    // createEffect apply <lambda> → 在批次刷新时执行 lambda（信号变化驱动）
+    // createEffect apply <lambda> → 立即执行一次 lambda，读到的信号变化后重跑。
+    // wy-helper 的 addEffect 只排程不追踪依赖，故用 collectSignal 压实：
+    // collect 收集 lambda 读到的信号，后续批次由回调重跑。
     createEffect: {
       apply(fn: unknown) {
-        addEffect(() => invoke(fn, []))
+        let started = false
+        const collector = collectSignal(() => {
+          if (started) invoke(fn, [])
+        })
+        collector.collect(() => {
+          started = true
+          return invoke(fn, [])
+        })
         return null
       },
     },
-    emptyList,
-    // toSplice apply <数组> <起> <删> ...<增> → 新数组（也可用数组自带的 |> toSplice）
-    toSplice: { apply: toSplice },
+    // 区域组件：forEach apply <区域对象> → 组件（内部 Ctx.renderForEach，无需自取 ctx）
+    forEach,
   } as const
 }
 

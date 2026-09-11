@@ -5,7 +5,7 @@
  */
 
 import { invoke } from 'object-oriented-c-language'
-import { collectSignal } from './reactive.js'
+import { collectSignal } from 'wy-helper'
 
 /** 上下文：provide/consume 按对象身份在父子 Ctx 链上查找 */
 export interface Context<T> {
@@ -46,6 +46,8 @@ export interface Ctx {
   consume<T>(context: Context<T>): T
   readonly destroyed: boolean
   readonly nodes: ReadonlyArray<unknown>
+  // 注册销毁钩子（用于响应式订阅清理；与 addDestroy 不同，它在 Ctx 重建时自动执行）
+  onDispose(fn: () => void): void
   renderForEach<T, K = T, O = unknown>(
     o: ForEachArg<T, K, O>,
   ): { apply(): unknown }
@@ -126,6 +128,11 @@ export class CtxI implements Ctx {
     this._destroyList.push(fn)
   }
 
+  /** 注册销毁钩子：Ctx 销毁时同步执行（不同于 addDestroy 的逆序），用于清理响应式订阅 */
+  onDispose(fn: () => void): void {
+    this._dispose.push(fn)
+  }
+
   destroy(): void {
     if (this._destroyed) return
     this._destroyed = true
@@ -159,8 +166,8 @@ export class CtxI implements Ctx {
     this._ensureAlive('renderForEach')
     // 有 DOM 与挂载目标时：整段渲染放进一个不改布局的容器（display:contents），
     // 用 collectSignal 登记本次渲染读到的信号；任一信号变化后整段重建。
-    // 信号流：list = createSignal apply emptyList → 渲染读 list get →
-    // 事件里 list set (toSplice apply (list get) …) → 本区域自动刷新。
+    // 信号流（wy-helper）：list = createSignal apply (Array of) → 渲染读 list get →
+    // 事件里 list set (list get / toSpliced 0 0 …) → 本区域自动刷新。
     const me = this
     const doc = globalThis.document
     if (doc && this._target) {

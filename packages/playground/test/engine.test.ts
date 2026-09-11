@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { sendMessage } from 'object-oriented-c-language'
-import { createSignal } from '../src/lib/preview/reactive.js'
+import { createSignal } from 'wy-helper'
 import { createEngine, formatValue } from '../src/lib/engine.js'
 import { PREVIEW_DEMO, TODO_DEMO } from '../src/hooks/useNotebook.js'
 import { runNote } from '../src/lib/run.js'
@@ -82,13 +82,13 @@ test('formatValue 递归展开绑定', () => {
 test('演示笔记：注释+除法+无优先级左结合', async () => {
   const engine = createEngine(notes)
   // hello.ooc（用 ; 分隔顶层语句）
-  const a = await runNote(engine, 'hello', "msg = 'hi';\nmsg |> toUpperCase\n")
+  const a = await runNote(engine, 'hello', "msg = 'hi';\nmsg / toUpperCase\n")
   assert.equal(a.output, 'HI')
   // 算术.ooc（除法、取余、括号）
   const b = await runNote(
     engine,
     '算术',
-    '1 + 2 * 3\n(1 + 2) * 3\n12 / 3\n7 % 3\n',
+    '1 + 2 * 3\n(1 + 2) * 3\n12 div 3\n7 % 3\n',
   )
   assert.notEqual(b.error, null, '缺 ; 的多条顶层语句应报语法错误')
 })
@@ -151,7 +151,7 @@ test('Ctx.provide/consume 沿子 Ctx 链可见', () => {
 })
 
 test('dom/text 桥接返回可渲染的 FC（渲染需要 DOM，Node 下跳过挂载）', () => {
-  const fcDiv = dom.div({ className: 'box' }, text.apply('内容'))
+  const fcDiv = dom.div({ className: 'box' }, text.bind('内容'))
   assert.equal(typeof fcDiv.apply, 'function')
   const fcText = fc.apply(() => undefined)
   assert.equal(typeof fcText.apply, 'function')
@@ -160,21 +160,90 @@ test('dom/text 桥接返回可渲染的 FC（渲染需要 DOM，Node 下跳过�
   assert.equal(typeof lazy.apply, 'function')
 })
 
-test('createSignal/toSplice 桥接：不可变更新信号列表', async () => {
+test('createSignal + JS 数组生态：不可变更新信号列表', async () => {
   const engine = createEngine(notes)
   const r = await runNote(
     engine,
     '信号',
     // 注：OOC 里 `list get length` 会把 length 解析成 get 的参数（Ref），
     // 运行时报错；读长度须先绑定变量（`xs = list get`）。
-    "list = createSignal apply emptyList;\n" +
-      "xs = list get; list set (toSplice apply xs 0 0 'a');\n" +
-      "ys = list get; list set (ys |> toSplice (ys length) 0 'b');\n" +
+    // Array 是 globalThis 全局对象，`(Array of)` 发 of 消息造空数组。
+    "list = createSignal apply (Array of);\n" +
+      "xs = list get; list set (xs / toSpliced 0 0 'a');\n" +
+      "ys = list get; list set (ys / toSpliced (ys length) 0 'b');\n" +
       "zs = list get; zs length\n",
   )
   assert.equal(r.error, null, r.error ?? '')
-  // 两次添加后长度 2；管道 |> toSplice 与 toSplice apply 两种改法都能走通
+  // 两次添加后长度 2；头部插入与追加都走 / toSpliced 级联调用数组原生方法
   assert.equal(r.output, '2')
+})
+
+test('响应式 text/textContent：props 读到的信号变化后文本原地更新', async () => {
+  // dom/text 桥接层：给 props/text 传函数值即视为「派生」——包 collectSignal 求值，
+  // 信号一变就地重写文本/属性，事件属性不在其列。此处用 JS 直接喂函数等价模拟
+  // OOC 里 `textContent => (signal get)` 的绑定。
+  const sig = createSignal('苹果')
+  class FakeNode {}
+  const makeFakeEl = (tag: string) =>
+    Object.assign(new FakeNode(), {
+      tagName: tag.toUpperCase(),
+      style: {} as Record<string, string>,
+      children: [] as unknown[],
+      parentNode: null,
+      textContent: '',
+      appendChild(n: unknown) {
+        this.children.push(n)
+        const node = n as { nodeType?: number; textContent?: string; parentNode?: unknown }
+        node.parentNode = this
+        if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
+        return n
+      },
+    })
+  const fakeDoc = {
+    createElement: makeFakeEl,
+    createTextNode(s: unknown) {
+      // 文本节点也 instanceof FakeNode：Ctx._toNode 的 `instanceof Node` 判定才会
+      // 直接挂载，否则会被 String() 二次包装成 '[object Object]'
+      return Object.assign(new FakeNode(), {
+        nodeType: 3,
+        textContent: String(s),
+      })
+    },
+  }
+  const prevDoc = (globalThis as { document?: unknown }).document
+  const prevNode = (globalThis as { Node?: unknown }).Node
+  ;(globalThis as { document: unknown }).document = fakeDoc
+  ;(globalThis as { Node: unknown }).Node = FakeNode
+  try {
+    const box = makeFakeEl('box') as unknown as {
+      children: unknown[]
+    }
+    const ctx = new CtxI(box as never)
+    // textContent 绑定一个读信号的回调 + 一个同样读信号的派生文本
+    const fc = dom.div(
+      { textContent: () => sig.get() },
+      text.bind(() => '剩余 ' + sig.get() + ' 项'),
+    )
+    fc.apply(ctx)
+    await tick()
+    const div = box.children[0] as { children: unknown[]; textContent: string }
+    const derive = div.children[0] as { nodeType: number; textContent: string }
+    assert.equal(div.textContent, '苹果')
+    assert.equal(derive.textContent, '剩余 苹果 项')
+
+    sig.set('香蕉')
+    await tick()
+    assert.equal(div.textContent, '香蕉', 'textContent 绑定应随信号变化')
+    assert.equal(derive.textContent, '剩余 香蕉 项', '派生文本应随信号变化')
+
+    ctx.destroy()
+    sig.set('梨')
+    await tick()
+    assert.equal(div.textContent, '香蕉', 'Ctx 销毁后订阅已清理，不再更新')
+  } finally {
+    ;(globalThis as { document: unknown }).document = prevDoc
+    ;(globalThis as { Node?: unknown }).Node = prevNode
+  }
 })
 
 test('renderForEach 响应信号变化自动重建区域', async () => {
@@ -243,7 +312,7 @@ test('renderForEach 响应信号变化自动重建区域', async () => {
 })
 
 test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响应式重建', async () => {
-  // 跑真实演示源码：createSignal + toSplice 管道 + renderForEach + ui get 全链路。
+  // 跑真实演示源码：createSignal + toSpliced 管道 + forEach 区域组件 + 受控输入框全链路。
   // 假 document 要能承住 dom/FC 的创建与挂载，还要记下事件回调供模拟点击。
   // Ctx._toNode 靠 `instanceof Node` 判断节点：假元素/文本都挂到 FakeNode 下，
   // 否则会被 String() 成文本，元素树就散了。
@@ -256,6 +325,8 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
     textContent: string
     attrs: Record<string, unknown>
     handlers: Record<string, (e: unknown) => void>
+    value: string
+    checked: boolean
     appendChild(n: unknown): unknown
     replaceChildren(...cs: unknown[]): void
     setAttribute(k: string, v: unknown): void
@@ -268,6 +339,8 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
       children: [] as unknown[],
       parentNode: null,
       textContent: '',
+      value: '',
+      checked: false,
       attrs: {} as Record<string, unknown>,
       handlers: {} as Record<string, (e: unknown) => void>,
       appendChild(n: unknown) {
@@ -302,12 +375,6 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
         textContent: String(s),
       }) as unknown
     },
-    // ui get '#new-item' → 读到输入框当前值
-    querySelector(sel: string) {
-      if (sel === '#new-item')
-        return Object.assign(new FakeNode(), { value: '新项目' }) as unknown as HTMLInputElement
-      return null
-    },
   }
   const prevDoc = (globalThis as { document?: unknown }).document
   const prevNode = (globalThis as { Node?: unknown }).Node
@@ -331,6 +398,25 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
       }
       return null
     }
+    // 区域容器（display:contents）随组件的 [forEach apply] 挂在元素树相应位置，递归查找
+    const findRegion = (n: unknown): FakeEl | null => {
+      const node = n as { style?: Record<string, string>; children?: unknown[] }
+      if (node.style?.display === 'contents') return n as FakeEl
+      for (const c of node.children ?? []) {
+        const hit = findRegion(c)
+        if (hit) return hit
+      }
+      return null
+    }
+    const findInput = (n: unknown): FakeEl | null => {
+      const node = n as { tagName?: string; children?: unknown[] }
+      if (node.tagName === 'INPUT') return n as FakeEl
+      for (const c of node.children ?? []) {
+        const hit = findInput(c)
+        if (hit) return hit
+      }
+      return null
+    }
     const engine = createEngine(notes)
     const r = await runNote(engine, '预览.ooc', PREVIEW_DEMO)
     assert.equal(r.error, null, r.error ?? '')
@@ -341,22 +427,29 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
     sendMessage(r.value, 'preview', [ctx])
     await tick()
 
-    // 初态：响应式列表区域为空
-    const region = box.children.find(
-      (c) => (c as FakeEl).style?.display === 'contents',
-    ) as FakeEl
+    // 初态：响应式列表区域为空，输入框是受控组件（value => newName 信号）
+    const region = findRegion(box)
     assert.ok(region, '应创建 display:contents 的列表容器')
     assert.equal(region.children.length, 0, '初始列表应为空')
+    const inputEl = findInput(box)
+    assert.ok(inputEl, '应找到输入框')
+    assert.equal(inputEl!.value, '', '受控输入框初始值来自信号')
 
-    // 点「添加一项」：读取 #new-item、toSplice 不可变更新信号，区域重建出 1 项
+    // 模拟输入：敲字触发 input 事件 → 受控绑定写回 newName 信号
+    inputEl!.value = '新项目'
+    inputEl!.handlers.input!({})
+    await tick()
+
+    // 点「添加一项」：读 newName 信号并清空信号，区域重建出 1 项
     const addBtn = findButton(box, '添加一项')
     assert.ok(addBtn, '应找到「添加一项」按钮')
     addBtn!.handlers.click!({})
     await tick()
     assert.equal(region.children.length, 1, '添加后列表应变 1 项')
     assert.ok(textOf(region).includes('新项目'), '应渲染出输入框里的名字')
+    assert.equal(inputEl!.value, '', '添加后信号清空，受控输入框同步清空')
 
-    // 点「删第一项」：|> toSplice 0 1 删掉首个，区域重建回空
+    // 点「删第一项」：/ toSpliced 0 1 删掉首个，区域重建回空
     const delBtn = findButton(box, '删第一项')
     assert.ok(delBtn, '应找到「删第一项」按钮')
     delBtn!.handlers.click!({})
@@ -370,9 +463,9 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
   }
 })
 
-test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个区域重建', async () => {
-  // createSignal + renderForEach + toSplice + ui get 的组合拳：剩余项数区域
-  // 与列表区域都响应 list 变化，每次点击后自动重建。
+test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表重建 + text bind 派生剩余数', async () => {
+  // createSignal + forEach + toSpliced + 受控输入框（value => 信号）的组合拳：
+  // 剩余项数用 text bind 派生文本（原地重写），列表区域响应 list 变化自动重建。
   class FakeNode {}
   type FakeEl = {
     tagName?: string
@@ -382,6 +475,8 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
     textContent: string
     attrs: Record<string, unknown>
     handlers: Record<string, (e: unknown) => void>
+    value: string
+    checked: boolean
     appendChild(n: unknown): unknown
     replaceChildren(...cs: unknown[]): void
     setAttribute(k: string, v: unknown): void
@@ -394,6 +489,8 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
       children: [] as unknown[],
       parentNode: null,
       textContent: '',
+      value: '',
+      checked: false,
       attrs: {} as Record<string, unknown>,
       handlers: {} as Record<string, (e: unknown) => void>,
       appendChild(n: unknown) {
@@ -451,9 +548,15 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
     }
     return null
   }
-  const todoInput = Object.assign(new FakeNode(), {
-    value: '',
-  }) as unknown as HTMLInputElement
+  const findInput = (n: unknown): FakeEl | null => {
+      const node = n as { tagName?: string; children?: unknown[] }
+      if (node.tagName === 'INPUT') return n as FakeEl
+      for (const c of node.children ?? []) {
+        const hit = findInput(c)
+        if (hit) return hit
+      }
+      return null
+    }
   const fakeDoc = {
     createElement: makeFakeEl,
     createTextNode(s: unknown) {
@@ -461,10 +564,6 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
         nodeType: 3,
         textContent: String(s),
       }) as unknown
-    },
-    querySelector(sel: string) {
-      if (sel === '#todo-input') return todoInput
-      return null
     },
   }
   const prevDoc = (globalThis as { document?: unknown }).document
@@ -482,25 +581,35 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
     sendMessage(r.value, 'preview', [ctx])
     await tick()
 
-    const regions = box.children.filter(
-      (c) => (c as FakeEl).style?.display === 'contents',
-    ) as FakeEl[]
-    assert.equal(regions.length, 2, '应有「剩余项数」与「列表」两个响应式区域')
-    const counter = regions.find((reg) => textOf(reg).includes('剩余'))!
-    const listReg = regions.find((reg) => textOf(reg).includes('搭一个') || textOf(reg).includes('让列表'))!
-    assert.ok(counter && listReg, '应能区分计数区域与列表区域')
-    assert.ok(textOf(counter).includes('剩余 1 项'), `初始剩余 1 项，实际: ${textOf(counter)}`)
+    const regions: FakeEl[] = []
+    const collectRegions = (n: unknown): void => {
+      const node = n as { style?: Record<string, string>; children?: unknown[] }
+      if (node.style?.display === 'contents') regions.push(n as FakeEl)
+      for (const c of node.children ?? []) collectRegions(c)
+    }
+    collectRegions(box)
+    // 「剩余 x 项」改成了 text bind 的派生文本（原地重写，不再占一个区域），
+    // 响应式区域只剩列表区一个（挂在 [forEach apply] 所在元素树位置）
+    assert.equal(regions.length, 1, '只剩列表一个响应式区域')
+    const listReg = regions[0]!
+    assert.ok(textOf(box).includes('剩余 1 项'), `初始剩余 1 项，实际: ${textOf(box)}`)
     assert.equal(listReg.children.length, 2, '初始 2 项')
 
-    // 添加：写入输入框后点「添加」，两个区域都重建
-    todoInput.value = '第三项'
+    // 添加：受控输入框模拟输入（触发 input 事件写回 inputText 信号），点「添加」
+    const inputEl = findInput(box)
+    assert.ok(inputEl, '应找到受控输入框')
+    assert.equal(inputEl!.value, '', '初始值来自 inputText 信号')
+    inputEl!.value = '第三项'
+    inputEl!.handlers.input!({})
+    await tick()
     const addBtn = findButton(box, '添加')
     assert.ok(addBtn, '应找到「添加」按钮')
     addBtn!.handlers.click!({})
     await tick()
-    assert.ok(textOf(counter).includes('剩余 2 项'), `添加后剩 2 项，实际: ${textOf(counter)}`)
+    assert.ok(textOf(box).includes('剩余 2 项'), `添加后剩 2 项，实际: ${textOf(box)}`)
     assert.equal(listReg.children.length, 3, '添加后 3 行')
     assert.ok(textOf(listReg).includes('第三项'), '应渲染出新项')
+    assert.equal(inputEl!.value, '', '添加后信号清空，受控输入框同步清空')
 
     // 切换完成态：点某行的切换按钮（状态文字 [ ] → [x]），只改该行、剩余数 -1
     const rowToggle = findRow(listReg, '让列表响应信号')
@@ -511,7 +620,7 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
     assert.ok(toggleBtn, '该行应有 [ ] 状态的切换按钮')
     toggleBtn!.handlers.click!({})
     await tick()
-    assert.ok(textOf(counter).includes('剩余 1 项'), `切换后剩 1 项，实际: ${textOf(counter)}`)
+    assert.ok(textOf(box).includes('剩余 1 项'), `切换后剩 1 项，实际: ${textOf(box)}`)
     const toggledRow = findRow(listReg, '让列表响应信号')
     assert.ok(toggledRow, '重建后仍能找到该行')
     assert.ok(textOf(toggledRow!).includes('[x]'), `该行应变 [x]，实际: ${textOf(toggledRow!)}`)
@@ -527,7 +636,7 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个�
     delBtn!.handlers.click!({})
     await tick()
     assert.equal(listReg.children.length, 2, '删除后剩 2 行')
-    assert.ok(textOf(counter).includes('剩余 1 项'), '删掉已完成项后剩余仍 1')
+    assert.ok(textOf(box).includes('剩余 1 项'), '删掉已完成项后剩余仍 1')
     assert.ok(!textOf(listReg).includes('让列表响应信号'), '该行已移除')
 
     ctx.destroy()
