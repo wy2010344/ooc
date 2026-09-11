@@ -139,6 +139,66 @@ export function useNotebook() {
 
 export type Notebook = ReturnType<typeof useNotebook>
 
+/** 待办清单演示源码（播种 + 测试共用）：createSignal + renderForEach + toSplice 完整示范 */
+export const TODO_DEMO = `// 待办清单：createSignal + renderForEach + toSplice 的响应式示范
+// 运行后点输出区的「预览」打开：输入 → 添加；点行切换完成态；点「删除」移除。
+list = createSignal apply emptyList;
+list set (list get |> toSplice 0 0 {'name' => '搭一个 OOC 预览', 'done' => true});
+list set (list get |> toSplice 0 0 {'name' => '让列表响应信号', 'done' => false});
+add = [v => list set ((list get) |> toSplice 0 0 {'name' => v, 'done' => false})];
+toggle = [i => item = (list get) at i; list set ((list get) |> toSplice i 1 {'name' => (item name), 'done' => ((item done) == false)})];
+remove = [i => list get |> toSplice i 1 | list set];
+statusOf = [d => d && '[x] ' || '[ ] '];
+{
+    preview(ctx){
+        // 关闭预览时执行：可在这里清理资源
+        ctx addDestroy [console log '待办预览关闭';];
+        ctx addNode (
+            dom div {'className' => 'space-y-3'}
+                (text apply '待办清单')
+                // 剩余项数区域：forEach 里读未完成项数量，信号变化后整段重算
+                (ctx renderForEach {
+                    forEach(block) { m = ((list get) filter [x => (x done) == false]) length; block apply 0 m },
+                    creater(ic, et, key) {
+                        ic addNode (
+                            dom div {'className' => 'text-sm text-stone-600 dark:text-zinc-400'}
+                                (text apply '剩余 ')
+                                (text apply (et value))
+                                (text apply ' 项')
+                        )
+                    }
+                })
+                // 列表区域：每行可切换完成态 / 删除，读到的信号一变化整段重建
+                (ctx renderForEach {
+                    forEach(block) { (list get) forEach [item => block apply item item] },
+                    creater(ic, et, key) {
+                        ic addNode (
+                            dom div {'className' => 'flex items-center gap-2 rounded-lg bg-stone-100 px-3 py-2 dark:bg-zinc-800'}
+                                (dom button {
+                                    'className' => 'flex flex-1 items-center gap-2 text-left',
+                                    'onClick' => [e => toggle apply (et index)]
+                                }
+                                    (text apply (statusOf apply ((et value) done)))
+                                    (text apply ((et value) name)))
+                                (dom button {
+                                    'className' => 'rounded-full bg-rose-100 px-2 py-1 text-xs text-rose-700 dark:bg-rose-950/50',
+                                    'onClick' => [e => remove apply (et index)]
+                                } (text apply '删除'))
+                        )
+                    }
+                })
+                (dom div {'className' => 'flex gap-2'}
+                    (dom input {'id' => 'todo-input', 'className' => 'w-full rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900'})
+                    (dom button {
+                        'className' => 'rounded-full bg-emerald-700 px-3 py-1.5 text-sm text-white dark:bg-emerald-600',
+                        'onClick' => [e => add apply (ui get '#todo-input')]
+                    } (text apply '添加'))
+                )
+        )
+    }
+}
+`;
+
 /** 预览演示源码（播种 + 测试共用，避免两份漂移） */
 export const PREVIEW_DEMO = `// 预览：运行后点输出区的「预览」打开全屏。
 // 组件 = fc apply [ctx, 参数 => 用 ctx.addNode 往界面里放节点]
@@ -216,5 +276,9 @@ const DEMO_NOTES: Array<{ name: string; source: string }> = [
   {
     name: '预览.ooc',
     source: PREVIEW_DEMO,
+  },
+  {
+    name: '待办清单.ooc',
+    source: TODO_DEMO,
   },
 ]

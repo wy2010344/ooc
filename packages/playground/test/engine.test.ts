@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { sendMessage } from 'object-oriented-c-language'
 import { createSignal } from '../src/lib/preview/reactive.js'
 import { createEngine, formatValue } from '../src/lib/engine.js'
-import { PREVIEW_DEMO } from '../src/hooks/useNotebook.js'
+import { PREVIEW_DEMO, TODO_DEMO } from '../src/hooks/useNotebook.js'
 import { runNote } from '../src/lib/run.js'
 import { CtxI, createContext, type Fc } from '../src/lib/preview/ctx.js'
 import { dom, fc, hasPreview, text } from '../src/lib/preview/dom.js'
@@ -362,6 +362,173 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
     delBtn!.handlers.click!({})
     await tick()
     assert.equal(region.children.length, 0, '删除后列表应回到空')
+
+    ctx.destroy()
+  } finally {
+    ;(globalThis as { document: unknown }).document = prevDoc
+    ;(globalThis as { Node?: unknown }).Node = prevNode
+  }
+})
+
+test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动两个区域重建', async () => {
+  // createSignal + renderForEach + toSplice + ui get 的组合拳：剩余项数区域
+  // 与列表区域都响应 list 变化，每次点击后自动重建。
+  class FakeNode {}
+  type FakeEl = {
+    tagName?: string
+    style: Record<string, string>
+    children: unknown[]
+    parentNode: unknown
+    textContent: string
+    attrs: Record<string, unknown>
+    handlers: Record<string, (e: unknown) => void>
+    appendChild(n: unknown): unknown
+    replaceChildren(...cs: unknown[]): void
+    setAttribute(k: string, v: unknown): void
+    addEventListener(t: string, cb: (e: unknown) => void): void
+  }
+  const makeFakeEl = (tag: string): FakeEl => {
+    const el = Object.assign(new FakeNode(), {
+      tagName: tag.toUpperCase(),
+      style: {} as Record<string, string>,
+      children: [] as unknown[],
+      parentNode: null,
+      textContent: '',
+      attrs: {} as Record<string, unknown>,
+      handlers: {} as Record<string, (e: unknown) => void>,
+      appendChild(n: unknown) {
+        this.children.push(n)
+        const node = n as { parentNode?: unknown; nodeType?: number; textContent?: string }
+        node.parentNode = this
+        if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
+        return n
+      },
+      replaceChildren(...cs: unknown[]) {
+        this.children = cs
+        this.textContent = ''
+        for (const c of cs as unknown[]) {
+          const node = c as { nodeType?: number; textContent?: unknown }
+          if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
+        }
+      },
+      setAttribute(k: string, v: unknown) {
+        this.attrs[k] = v
+      },
+      addEventListener(t: string, cb: (e: unknown) => void) {
+        this.handlers[t] = cb
+      },
+    })
+    return el
+  }
+  const textOf = (n: unknown): string => {
+    const node = n as { nodeType?: number; textContent?: string; children?: unknown[] }
+    if (node.nodeType === 3) return node.textContent ?? ''
+    let s = node.textContent ?? ''
+    for (const c of node.children ?? []) s += textOf(c)
+    return s
+  }
+  const findButton = (n: unknown, needle: string): FakeEl | null => {
+    const node = n as { tagName?: string; children?: unknown[]; handlers?: Record<string, unknown> }
+    if (node.tagName === 'BUTTON' && textOf(n).includes(needle)) return n as FakeEl
+    for (const c of node.children ?? []) {
+      const hit = findButton(c, needle)
+      if (hit) return hit
+    }
+    return null
+  }
+  const findRow = (n: unknown, needle: string): FakeEl | null => {
+    // 找「正文包含 needle、且自带删除按钮」的行容器（避开根 div/区域容器）
+    const node = n as { tagName?: string; children?: unknown[] }
+    if (node.tagName === 'DIV' && textOf(n).includes(needle)) {
+      const directButtons = (node.children ?? []).filter(
+        (c: unknown) => (c as FakeEl).tagName === 'BUTTON',
+      )
+      if (directButtons.some((b: unknown) => textOf(b).includes('删除'))) return n as FakeEl
+    }
+    for (const c of node.children ?? []) {
+      const hit = findRow(c, needle)
+      if (hit) return hit
+    }
+    return null
+  }
+  const todoInput = Object.assign(new FakeNode(), {
+    value: '',
+  }) as unknown as HTMLInputElement
+  const fakeDoc = {
+    createElement: makeFakeEl,
+    createTextNode(s: unknown) {
+      return Object.assign(new FakeNode(), {
+        nodeType: 3,
+        textContent: String(s),
+      }) as unknown
+    },
+    querySelector(sel: string) {
+      if (sel === '#todo-input') return todoInput
+      return null
+    },
+  }
+  const prevDoc = (globalThis as { document?: unknown }).document
+  const prevNode = (globalThis as { Node?: unknown }).Node
+  ;(globalThis as { document: unknown }).document = fakeDoc
+  ;(globalThis as { Node: unknown }).Node = FakeNode
+  try {
+    const engine = createEngine(notes)
+    const r = await runNote(engine, '待办清单.ooc', TODO_DEMO)
+    assert.equal(r.error, null, r.error ?? '')
+    assert.ok(hasPreview(r.value), '演示导出应带 preview')
+
+    const box = makeFakeEl('box')
+    const ctx = new CtxI(box as never)
+    sendMessage(r.value, 'preview', [ctx])
+    await tick()
+
+    const regions = box.children.filter(
+      (c) => (c as FakeEl).style?.display === 'contents',
+    ) as FakeEl[]
+    assert.equal(regions.length, 2, '应有「剩余项数」与「列表」两个响应式区域')
+    const counter = regions.find((reg) => textOf(reg).includes('剩余'))!
+    const listReg = regions.find((reg) => textOf(reg).includes('搭一个') || textOf(reg).includes('让列表'))!
+    assert.ok(counter && listReg, '应能区分计数区域与列表区域')
+    assert.ok(textOf(counter).includes('剩余 1 项'), `初始剩余 1 项，实际: ${textOf(counter)}`)
+    assert.equal(listReg.children.length, 2, '初始 2 项')
+
+    // 添加：写入输入框后点「添加」，两个区域都重建
+    todoInput.value = '第三项'
+    const addBtn = findButton(box, '添加')
+    assert.ok(addBtn, '应找到「添加」按钮')
+    addBtn!.handlers.click!({})
+    await tick()
+    assert.ok(textOf(counter).includes('剩余 2 项'), `添加后剩 2 项，实际: ${textOf(counter)}`)
+    assert.equal(listReg.children.length, 3, '添加后 3 行')
+    assert.ok(textOf(listReg).includes('第三项'), '应渲染出新项')
+
+    // 切换完成态：点某行的切换按钮（状态文字 [ ] → [x]），只改该行、剩余数 -1
+    const rowToggle = findRow(listReg, '让列表响应信号')
+    assert.ok(rowToggle, '应找到「让列表响应信号」行')
+    const toggleBtn = (rowToggle!.children as FakeEl[]).find(
+      (c) => c.tagName === 'BUTTON' && textOf(c).includes('[ ]'),
+    )
+    assert.ok(toggleBtn, '该行应有 [ ] 状态的切换按钮')
+    toggleBtn!.handlers.click!({})
+    await tick()
+    assert.ok(textOf(counter).includes('剩余 1 项'), `切换后剩 1 项，实际: ${textOf(counter)}`)
+    const toggledRow = findRow(listReg, '让列表响应信号')
+    assert.ok(toggledRow, '重建后仍能找到该行')
+    assert.ok(textOf(toggledRow!).includes('[x]'), `该行应变 [x]，实际: ${textOf(toggledRow!)}`)
+    assert.equal(listReg.children.length, 3, '切换不改变行数')
+
+    // 删除该行：行数 -1，剩余维持 1
+    const rowDelete = findRow(listReg, '让列表响应信号')
+    assert.ok(rowDelete, '重建后仍能找到该行')
+    const delBtn = (rowDelete!.children as FakeEl[]).find(
+      (c) => c.tagName === 'BUTTON' && textOf(c).includes('删除'),
+    )
+    assert.ok(delBtn, '该行应有删除按钮')
+    delBtn!.handlers.click!({})
+    await tick()
+    assert.equal(listReg.children.length, 2, '删除后剩 2 行')
+    assert.ok(textOf(counter).includes('剩余 1 项'), '删掉已完成项后剩余仍 1')
+    assert.ok(!textOf(listReg).includes('让列表响应信号'), '该行已移除')
 
     ctx.destroy()
   } finally {

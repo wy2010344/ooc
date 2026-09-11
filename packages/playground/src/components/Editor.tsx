@@ -41,7 +41,7 @@ export function Editor({ nb, note }: Props) {
   const [previewOpen, setPreviewOpen] = useState(false)
   // 编辑器默认只读：阅读时键盘不敏感；点按正文或菜单「解除只读」进入编辑
   const [readOnly, setReadOnly] = useState(true)
-  const [wrap, setWrap] = useState(true)
+  const [wrap, setWrap] = useState(false)
   const codeRef = useRef<CodeAreaHandle>(null)
   const [codeFocused, setCodeFocused] = useState(false)
 

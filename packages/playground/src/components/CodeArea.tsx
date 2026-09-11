@@ -8,6 +8,7 @@ import { Annotation, Compartment, EditorState } from '@codemirror/state'
 import {
   EditorView,
   keymap,
+  lineNumbers,
   placeholder,
 } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -64,6 +65,16 @@ const editorTheme = EditorView.theme({
     padding: '1rem 1rem',
     caretColor: '#059669',
     minHeight: '100%',
+  },
+  '.cm-gutters': {
+    backgroundColor: 'transparent',
+    borderRight: 'none',
+    color: 'color-mix(in oklab, currentColor 35%, transparent)',
+    fontSize: '12px',
+  },
+  '.cm-activeLineGutter': {
+    backgroundColor: 'color-mix(in oklab, currentColor 8%, transparent)',
+    color: 'currentColor',
   },
   '.cm-line': {
     padding: '0',
@@ -123,6 +134,7 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
           history(),
           readOnlyComp.of(EditorState.readOnly.of(readOnlyRef.current)),
           wrapComp.of(EditorView.lineWrapping),
+          lineNumbers(),
           placeholder(hint ?? ''),
           keymap.of([
             // 物理键盘 Tab：插入 4 空格而非切换焦点
