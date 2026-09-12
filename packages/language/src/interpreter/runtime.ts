@@ -22,12 +22,71 @@ import { OocMethodNotFoundError } from './errors.js'
 /** 空对象单例：`{}` 字面量共享同一个实例 */
 const EMPTY_OBJECT: Record<string, unknown> = {}
 
+/**
+ * 语言定义值的「元信息」承载符。宿主/桥接层（如 ObjectValue）用它判断值是否
+ * OOC 定义对象并读取反射信息。Symbol 键不进 Object.keys/for...in，消息查找按
+ * 字符串消息名也不会命中它——元信息对语言内发消息不可见，只能经桥接显式读取。
+ */
+export const OOC_META = Symbol('ooc:meta')
+
+/** 单条成员元信息：本层字面量定义了什么消息、属哪一类 */
+export interface OocMemberMeta {
+  name: string
+  type: 'bind' | 'mutable' | 'call'
+}
+
+/** 对象元信息：只含本层定义，原型链父层的元信息沿链读取 */
+export interface OocMeta {
+  members: OocMemberMeta[]
+}
+
+/** 读值上的元信息；非 OOC 定义值（lambda/宿主值/原始值）返回 undefined */
+export function readOocMeta(v: unknown): OocMeta | undefined {
+  if (!v || (typeof v !== 'object' && typeof v !== 'function')) {
+    return undefined
+  }
+  return (v as Record<symbol, unknown>)[OOC_META] as OocMeta | undefined
+}
+
+/** 创建元信息：非枚举挂到对象上，构造时烧录、事后不可伪造 */
+function attachMeta(target: object, members: OocMemberMeta[]): void {
+  Object.defineProperty(target, OOC_META, {
+    enumerable: false,
+    value: { members },
+  })
+}
+
+/**
+ * 折叠同名成员元信息：guard 重载（同名多条方法定义）与同名 bind 混排都会让
+ * 同一 key 出现多次，烧录时折叠为一条。bind 是一次性缓存（静态），同名若还
+ * 存在动态定义（call/mutable）则整个 key 升为动态；顺序取首现，便于遍历。
+ */
+function foldMemberMeta(
+  pairs: Array<{ name: string; type: OocMemberMeta['type'] }>,
+): OocMemberMeta[] {
+  const folded = new Map<string, OocMemberMeta>()
+  for (const { name, type } of pairs) {
+    const exist = folded.get(name)
+    if (!exist) {
+      folded.set(name, { name, type })
+      continue
+    }
+    if (exist.type === 'bind' && type !== 'bind') {
+      exist.type = type
+    }
+  }
+  return [...folded.values()]
+}
+
+// 空对象也烧录元信息：`{}` 同样是语言定义值（members 为空）
+attachMeta(EMPTY_OBJECT, [])
+
 /** OOC 创建对象的注册表。用 WeakSet 而非对象属性：属性名会穿过宿主
  *  Proxy 的 get 陷阱（如 dom 代理直接抛「不支持的元素」），WeakSet 无泄漏。 */
 const oocObjects = new WeakSet<object>()
 
 // 定义值类型
-export type Value = number | string | boolean | null | ObjectValue
+export type Value = number | string | boolean | null | OocObject
 
 function getObjDefineName(n: MethodDefName) {
   const v = n.name
@@ -40,7 +99,7 @@ function getObjDefineName(n: MethodDefName) {
       return getStrValue(v)
   }
 }
-export type ObjectValue = object
+export type OocObject = object
 function getName(n: { name: string }) {
   return n.name
 }
@@ -89,7 +148,7 @@ export function runBody(
 export function objectValue(
   methods: Method[],
   scope: Scope,
-  parent: ObjectValue | undefined,
+  parent: OocObject | undefined,
 ) {
   // 空对象 {} 快速返回共享单例（无 parent 且无方法时）
   if (methods.length === 0 && !parent) {
@@ -100,29 +159,36 @@ export function objectValue(
   const currentObject = parent ? Object.create(parent) : {}
   oocObjects.add(currentObject)
   scope = addScope(scope, 'currentObject', currentObject)
+  const defs = methods.map((method) => {
+    switch (method.$type) {
+      case 'MethodBind':
+        return {
+          type: 'bind' as const,
+          name: getObjDefineName(method.name),
+          value: interpretExpression(method.expression, scope),
+        }
+      case 'MethodBindMutable':
+        return {
+          type: 'mutable' as const,
+          name: getObjDefineName(method.name),
+          value: interpretExpression(method.expression, scope) as unknown,
+        }
+      default:
+        return {
+          type: 'call' as const,
+          name: getObjDefineName(method.name),
+          value: method,
+        }
+    }
+  })
+  // 构造时烧录元信息：反射桥接（ObjectValue）由此识别语言定义值、读成员表；
+  // 同名（guard 重载等）折叠为一条 key，避免遍历时重复
+  attachMeta(
+    currentObject,
+    foldMemberMeta(defs.map(({ type, name }) => ({ type, name }))),
+  )
   groupToMap(
-    methods.map((method) => {
-      switch (method.$type) {
-        case 'MethodBind':
-          return {
-            type: 'bind',
-            name: getObjDefineName(method.name),
-            value: interpretExpression(method.expression, scope),
-          } as const
-        case 'MethodBindMutable':
-          return {
-            type: 'mutable' as const,
-            name: getObjDefineName(method.name),
-            value: interpretExpression(method.expression, scope) as unknown,
-          }
-        default:
-          return {
-            type: 'call',
-            name: getObjDefineName(method.name),
-            value: method,
-          } as const
-      }
-    }),
+    defs,
     getName,
   ).forEach(function (methods, name) {
     // 所有定义（含 bind）统一作为方法函数，bind 在函数体内直接返回绑定值

@@ -1,21 +1,28 @@
 /**
- * 预览的 DOM 侧桥接：把 mve-dom 的「dom 也是 FC」入口缩小到 playground 能用的范围。
+ * 预览的 DOM 侧桥接：把 OOC 成员对象翻译成 wy-dom-helper 的 fdom 属性，交给 renderFDomAttr。
  * - fc apply [closure]：closure 形如 [ctx, a, b => ...]，第一个参数固定是 Ctx；
  *   组件有两种调用形态：`Comp apply ctx a b`（立即渲染）与 `Comp apply a b`（返回惰性 FC，由父元素渲染时再执行）。
- * - dom.<tag> props children...：props 为 OOC 对象（`=>` 绑定），children 为 FC/文本。
- *   input/textarea/select 的 value（及 checkbox 的 checked）绑定「信号对象」时是受控组件：
- *   显示 signal.get、用户输入写回 signal.set（双向绑定），读值走信号，不再 querySelector 强读。
- * - text bind <值>/<λ> 渲染文本：λ 视为响应式派生（读到的信号一变就原地重写）。
- * 标签与文本都直接生成普通 JS 对象，不用 Proxy：方法名固定、可枚举、便于调试。
- * 本文件除元素生成外不碰 DOM：渲染发生在 FC.apply，Node 下安全。
+ * - dom.<tag> props children...：props 为 OOC 对象。成员是「方法派发函数」，
+ *   不能裸塞给 fdom（fdom 会把函数当 SyncFun 裸调）。桥接层靠 ObjectValue 元信息
+ *   判定每个成员：bind（`=` 构造时缓存）→ 求值一次直接赋值，不建立观察（同 mve-dom 静态路径）；
+ *   call/mutable（`=>` 方法等）→ transform 成 SyncFun，用 mve-core 的 hookTrackAttr 跟踪
+ *   绑定读到的信号，变化后在 addEffect 派发的 effects（level -1）里原地重写。
+ *   受控输入：value/checked 单向显示绑定 + 光标保护（只有值不相等才写属性）；
+ *   用户输入不回写，写回走 React 式 `onValueChange(v) => 信号 set v`（回调入参即输入框新值）。
+ *   事件：`onXxx` 是「事件即方法」——成员是方法，宿主把它当回调调用并把事件/新值作为第一个形参传入。
+ * - text bind <值>/<λ> 渲染文本：λ 视为响应式派生（collectSignal，信号一变就原地重写）。
+ * 本文件除元素生成外不碰 DOM：渲染发生在 FC.apply（构建期），Node 下安全。
  */
 
-import { invoke } from 'object-oriented-c-language'
+import { invoke, ObjectValue } from 'object-oriented-c-language'
+import { hookTrackAttr } from 'mve-core'
+import { renderFDomAttr } from 'wy-dom-helper'
+import type { MergeValue } from 'wy-dom-helper'
 import { collectSignal } from 'wy-helper'
-import { CtxI, isFc, type Ctx, type Fc } from './ctx.js'
+import { createContext, isFc, type Ctx, type Fc } from './ctx.js'
 
 export type { Ctx, Fc as FC }
-export { CtxI } from './ctx.js'
+export { createContext } from './ctx.js'
 
 /** 模块导出值是否带 preview(ctx) 方法（决定编辑器是否显示"预览"入口） */
 export function hasPreview(v: unknown): boolean {
@@ -31,13 +38,18 @@ export function hasPreview(v: unknown): boolean {
  * - 直接调 `fc.apply(ctx, ...)` → 立即执行；
  * - 其它（如 `Comp apply a b`）→ 记住参数，返回「渲染时再执行」的 FC。
  */
-function makeFc(run: (ctx: CtxI, args: unknown[]) => unknown): Fc {
+function makeFc(run: (ctx: Ctx, args: unknown[]) => unknown): Fc {
   return {
     apply(...args) {
-      if (args.length && args[0] instanceof CtxI) {
-        return run(args[0], args.slice(1))
+      // 第一个参数是预览上下文（旧 instanceof 判定放宽为结构判断）
+      if (
+        args.length &&
+        args[0] &&
+        typeof (args[0] as Ctx).addNode === 'function'
+      ) {
+        return run(args[0] as Ctx, args.slice(1))
       }
-      return { apply: (ctx: CtxI) => run(ctx, args) }
+      return { apply: (ctx: Ctx) => run(ctx, args) }
     },
   }
 }
@@ -70,10 +82,11 @@ function domTag(tag: string) {
     makeFc((ctx) => {
       const doc = requireDocument()
       const el = doc.createElement(tag)
-      applyProps(el, props, ctx, tag)
-      const sub = ctx.sub(el)
-      for (const c of children) sub.addNode(c)
-      ctx.addNode(el)
+      // 子渲染上下文：children 在 el holder 的构建窗口内 addNode（mve renderChildren 接管挂载）
+      ctx.sub(el as unknown as globalThis.Node, (sub) => {
+        applyProps(el, props, tag)
+        for (const c of children) sub.addNode(c)
+      })
     })
 }
 
@@ -82,8 +95,7 @@ export const dom = Object.fromEntries(
 ) as Record<string, (props?: unknown, ...children: unknown[]) => Fc>
 
 /** text bind <值> 渲染文本；值是函数/FC（OOC λ 或 { apply(ctx){...} }）时视为
- *  响应式派生文本：求值时读到的信号一变就重新求值改写节点内容。普通值即静态文本。
- *  单个方法对象命名清晰（bind），不需要 Proxy，也不需要叫 apply。 */
+ *  响应式派生文本：求值时读到的信号一变就重新求值改写节点内容。普通值即静态文本。 */
 function textFc(args: unknown[]): Fc {
   return makeFc((ctx) => {
     const node = requireDocument().createTextNode('')
@@ -110,12 +122,11 @@ export const text = {
 
 /** forEach apply <区域对象> → 组件。区域对象形如
  *   { forEach(block){...}, creater(itemCtx, et, key){...} }（即原 Ctx.renderForEach 的参数）。
- *  渲染时内部调用 Ctx.renderForEach 整段渲染区域，不必自己拿到 ctx 再调。
- *  信号感应：区域内读到的信号一变，整段区域自动重建。 */
+ *  渲染时委托 Ctx.renderForEach（mve keyed diff），不必自己拿到 ctx 再调。 */
 export const forEach = {
   apply(region?: unknown): Fc {
     return makeFc((ctx) => {
-      ;(ctx as unknown as { renderForEach(o: unknown): unknown }).renderForEach(region)
+      ctx.renderForEach(region as never)
     })
   },
 }
@@ -123,16 +134,13 @@ export const forEach = {
 /** 上下文工厂：context.create <默认值> → Context（配 Ctx.provide/consume 使用） */
 export const context = {
   create<T>(value: T) {
-    return { provide: () => value, consume: () => value } as {
-      provide(v: T): T
-      consume(): T
-    }
+    return createContext(value)
   },
 }
 
 /**
  * 受控组件判断：input/textarea/select 的 value、input 的 checked（checkbox/radio）
- * 绑定「信号对象」时升级为受控。仅这两个键/标签组合走属性直写 + 双向写回。
+ * 走属性直写（value 属性 ≠ value attribute，attribute 只设默认值）。
  */
 function isControllable(tag: string, key: string): boolean {
   if (key === 'checked') return tag === 'input'
@@ -140,106 +148,161 @@ function isControllable(tag: string, key: string): boolean {
   return false
 }
 
-/** 信号对象判定：{ get(), set() }（createSignal 的返回形态） */
-function isSignalLike(v: unknown): v is { get(): unknown; set(v: unknown): void } {
+/** 执行 OOC 事件成员：this=对象调用，若返回可调用值再塞同一个事件/新值执行 */
+function emitMember(src: Record<string, unknown>, raw: unknown, ev: unknown) {
+  let out: unknown
+  if (typeof raw === 'function') {
+    out = raw.call(src, ev)
+  } else if (isFc(raw)) {
+    out = invoke(raw, [ev])
+  }
+  if (isFc(out) || typeof out === 'function') invoke(out, [ev])
+}
+
+/** 读 OOC 成员绑定：成员是方法派发函数，必须 this=对象调用得到绑定值（每次重新求值） */
+function readMember(src: Record<string, unknown>, raw: unknown): unknown {
+  return typeof raw === 'function' ? raw.call(src) : raw
+}
+
+/** 受控 value/checked：成员绑定值写属性，值没变就不写（光标保护） */
+function makeWriteSyncFun(
+  src: Record<string, unknown>,
+  raw: unknown,
+  key: string,
+) {
+  if (key === 'checked') {
+    return (set: (v: unknown, n: unknown, k?: string) => void, node: { checked: boolean }) => {
+      const b = !!readMember(src, raw)
+      if (node.checked !== b) set(b, node, 'checked')
+    }
+  }
+  return (set: (v: unknown, n: unknown, k?: string) => void, node: { value: string }) => {
+    const s = String(readMember(src, raw) ?? '')
+    if (node.value !== s) set(s, node, 'value')
+  }
+}
+
+/** style：成员返回对象 → 逐键展开；静态字符串直接写 */
+function makeStyleSyncFun(
+  src: Record<string, unknown>,
+  raw: unknown,
+) {
   return (
-    !!v &&
-    typeof v === 'object' &&
-    typeof (v as { get?: unknown }).get === 'function' &&
-    typeof (v as { set?: unknown }).set === 'function'
-  )
+    set: (v: unknown, n: unknown, k: string) => void,
+    node: { style: Record<string, string> },
+  ) => {
+    const so = readMember(src, raw)
+    if (so && typeof so === 'object') {
+      const st = so as Record<string, unknown>
+      for (const k of Object.keys(st)) {
+        const v =
+          typeof st[k] === 'function'
+            ? (st[k] as () => unknown).call(st)
+            : st[k]
+        node.style[k] = String(v ?? '')
+      }
+    } else if (typeof so === 'string') {
+      set(so, node, 'style')
+    }
+  }
 }
 
 /**
- * 把 OOC 对象的 `=>` 绑定写进元素：className/style/事件/样式键(s_)/attr。
- * 响应式：非事件属性用 collectSignal 包裹每次取值——`attrs[key]` 取到的是成员
- * 派发函数，每次取都会重新求值绑定表达式，因此绑定期读到的信号一变就
- * 就地重写该属性（如 `textContent => (signal get)` 会自动跟随）。事件属性
- * 不走更新通道（点击时执行即可，订阅反而多余）。订阅随子 Ctx 销毁而清理。
- * 受控组件：value/checked 走 isControllable 分支——绑定值为信号对象时，
- * 显示 signal.get（变化跟随），输入/变更事件写回 signal.set（双向）。
+ * 把 OOC 对象的成员 transform 成 fdom 属性后交给 renderFDomAttr：
+ * - 成员类型来自 ObjectValue 元信息（构造时烧录，guard 重载已折叠）：
+ *   bind（`=`）是构造时缓存的一次性静态值 → readMember 一次直接赋值，不建立观察；
+ *   call/mutable（`=>` 方法/可写绑定）每次调用重新求值 → 转 SyncFun，由 oocMergeValue
+ *   用 hookTrackAttr 跟踪其读到的信号（变化后 effects 批次里重写，时机与 mve-dom 一致）；
+ * - 事件成员（on* 前缀）→ 手工 addEventListener（this=对象，返回可调用值再执行）；
+ *   onValueChange 转 input 事件并传新值；
+ * - 受控 value/checked → makeWriteSyncFun（单向显示 + 光标保护）；
+ * - style → makeStyleSyncFun（对象展开/字符串直写）；
+ * - 宿主侧已解析的值 → 原样传给 renderFDomAttr。
  */
-function applyProps(el: Element, props: unknown, ctx: CtxI, tag: string): void {
+function applyProps(el: Element, props: unknown, tag: string): void {
   if (!props || typeof props !== 'object') return
-  const attrs = props as Record<string, unknown>
-  for (const key of Object.keys(attrs)) {
-    const raw = attrs[key]
-    // 受控 value/checked：属性直写（value 属性 ≠ value attribute，attribute 只设默认值），
-    // 绑定信号对象时用户输入写回信号；静态值（如 value => 'abc'）只写一次不反写。
-    if (isControllable(tag, key)) {
-      const el2 = el as unknown as { value: string; checked: boolean }
-      let sink: ((v: unknown) => void) | null = null
-      const write = () => {
-        const bound = typeof raw === 'function' ? raw.call(attrs) : raw
-        const sig = isSignalLike(bound) ? bound : null
-        sink = sig ? sig.set : null
-        const next = sig ? sig.get() : bound
-        if (key === 'checked') {
-          const b = !!next
-          if (el2.checked !== b) el2.checked = b
-        } else {
-          const s = String(next ?? '')
-          // 值没变就不写属性：输入期间 signal.get 通常等于 el.value，
-          // 跳过赋值可保住光标位置
-          if (el2.value !== s) el2.value = s
+  const src = props as Record<string, unknown>
+  // 元信息判定每个 key 的静态/动态；宿主对象无元信息时退回全动态处理
+  const kinds = new Map(
+    ObjectValue.membersOf(props).map((m) => [m.name, m.type]),
+  )
+  const attrs: Record<string, unknown> = {}
+  for (const key of Object.keys(src)) {
+    const raw = src[key]
+    if (key === 'onValueChange') {
+      const el2 = el as unknown as { value: string }
+      el.addEventListener('input', () => {
+        try {
+          emitMember(src, raw, el2.value)
+        } catch (err) {
+          console.error('预览 onValueChange 出错', err)
         }
-      }
-      const collector = collectSignal(write)
-      collector.collect(write)
-      el.addEventListener(key === 'checked' ? 'change' : 'input', () => {
-        if (sink) sink(key === 'checked' ? el2.checked : el2.value)
       })
-      ctx.onDispose(() => collector.destroy())
       continue
     }
-    // 事件属性：OOC 成员本身是方法（MethodAll），`attrs[key]` 取出的是成员派发函数，
-    // 所以每次事件调用一次即可——OOC 里可直接写 `onClick => toggle apply (et index)`。
-    // 老写法（绑定值是一个 λ）也兼容：调用派发函数拿到 λ 后再次 invoke 执行。
     if (key.startsWith('on') && key.length > 2) {
-      el.addEventListener(key.slice(2).toLowerCase(), (e: Event) => {
+      const eventType = key.slice(2).toLowerCase()
+      el.addEventListener(eventType, (e: Event) => {
         try {
-          if (typeof raw === 'function') {
-            const out = raw.call(attrs, e)
-            // out 可能是 FC 对象或原生函数型 λ（isFc 只认 object，原生函数需单独判）
-            if (isFc(out) || typeof out === 'function') invoke(out, [e])
-          } else if (isFc(raw)) {
-            invoke(raw, [e])
-          }
+          emitMember(src, raw, e)
         } catch (err) {
           console.error('预览事件处理出错', err)
         }
       })
       continue
     }
-    const write = () => {
-      // OOC 对象成员是方法：非事件属性调用一次得到绑定值（每次重新求值）
-      let value = typeof raw === 'function' ? raw.call(attrs) : raw
-      if (key === 'style') {
-        if (typeof value === 'string') {
-          el.setAttribute('style', value)
-        } else {
-          const st = (el as HTMLElement).style as unknown as Record<string, string>
-          for (const k of Object.keys((value as Record<string, unknown>) ?? {})) {
-            st[k] = String((value as Record<string, unknown>)[k])
-          }
-        }
-      } else if (key.startsWith('s_')) {
-        // 前缀 s_ 的键直接写样式：s_cursor=>'pointer' → style.cursor
-        const st = (el as HTMLElement).style as unknown as Record<string, string>
-        st[key.slice(2)] = String(value)
-      } else if (key === 'className') {
-        el.setAttribute('class', String(value))
-      } else if (key === 'textContent') {
-        el.textContent = String(value)
-      } else {
-        el.setAttribute(key, String(value))
-      }
+    if (isControllable(tag, key)) {
+      attrs[key] = makeWriteSyncFun(src, raw, key)
+      continue
     }
-    // 立即写一次，并把绑定期读到的信号登记为依赖：变化后原地重写
-    const collector = collectSignal(write)
-    collector.collect(write)
-    ctx.onDispose(() => collector.destroy())
+    if (key === 'style') {
+      attrs[key] = makeStyleSyncFun(src, raw)
+      continue
+    }
+    if (typeof raw === 'function') {
+      if (kinds.get(key) === 'bind') {
+        // 静态绑定：构造时缓存，一次性赋值，不建立观察（贴近 mve-dom）
+        attrs[key] = readMember(src, raw)
+      } else {
+        // 动态成员（call/mutable）：转 SyncFun，由 oocMergeValue 跟踪信号
+        attrs[key] = (set: (v: unknown, n: unknown, k: string) => void, node: Element, k: string) =>
+          set(raw.call(src), node, k)
+      }
+    } else {
+      attrs[key] = raw
+    }
   }
+  // on* 事件键已在上面消费，留给 renderFDomAttr 的全是属性
+  renderFDomAttr(el as unknown as Node, attrs, oocMergeValue, noopRenderPortal, [])
+}
+
+const noopRenderPortal = () => {}
+
+/**
+ * 属性合并：与 mve-dom mergeValue 同构——非函数（bind 静态值/宿主静态值）一次性 setValue；
+ * 函数（动态成员的 SyncFun 包装）首次写一次后，用 hookTrackAttr 跟踪其读到的信号，
+ * 信号变化时在 effects 批次（level -1，构建期注册、构建后统一派发）里重写属性。
+ * 需要构建期（隐式 holder 在位）调用：applyProps 都发生在 FC.apply（构建期）。
+ */
+const oocMergeValue: MergeValue = (
+  node: Node,
+  value: any,
+  setValue: any,
+  ext?: string,
+) => {
+  if (typeof value !== 'function') {
+    setValue(value, node, ext)
+    return
+  }
+  // 首次写一次，再用 hookTrackAttr 订阅信号变化（变化后由 collector 再调 value 重写）
+  value(setValue, node, ext)
+  hookTrackAttr(
+    () => {
+      value(setValue, node, ext)
+      return undefined
+    },
+    () => {},
+  )
 }
 
 export { isFc }

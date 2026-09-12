@@ -1,5 +1,7 @@
 // 引擎集成测试：验证 playground 的 engine/run 管线（Node 下跑，编译后 JS）。
 // 浏览器差异只在 DOM/IndexedDB（ui.ui.dom / store），此处不触发。
+// mountPreview 的 mve 语义：createRoot 的 build 回调在 mve 的 buildChildren 窗口里执行，
+// provide/renderForEach/元素挂载都发生在其中（构建期），运行期 addNode 只收集不挂载。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { sendMessage } from 'object-oriented-c-language'
@@ -7,8 +9,20 @@ import { createSignal } from 'wy-helper'
 import { createEngine, formatValue } from '../src/lib/engine.js'
 import { PREVIEW_DEMO, TODO_DEMO } from '../src/hooks/useNotebook.js'
 import { runNote } from '../src/lib/run.js'
-import { CtxI, createContext, type Fc } from '../src/lib/preview/ctx.js'
+import { mountPreview, createContext, type Fc } from '../src/lib/preview/ctx.js'
 import { dom, fc, hasPreview, text } from '../src/lib/preview/dom.js'
+import {
+  FakeNode,
+  findDivByText,
+  findEl,
+  isRowDiv,
+  makeFakeEl,
+  mountDoc,
+  textOf,
+} from './fake-dom.js'
+
+/** 假 DOM 元素强转成浏览器 Node 类型（预览挂载的根容器入参） */
+const asDomNode = (n: unknown) => n as unknown as globalThis.Node
 
 /** 等一个宏任务，让 setTimeout(0) 的信号批次刷完 */
 const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -109,14 +123,25 @@ test('preview 导出可识别，preview(ctx) 能收集节点并注册销毁回�
   assert.equal(r.error, null, r.error ?? '')
   assert.ok(hasPreview(r.value), '导出对象应带 preview 方法')
 
-  const ctx = new CtxI(null) // 无挂载目标：addNode 收集到 nodes
-  sendMessage(r.value, 'preview', [ctx])
-  assert.deepEqual([...ctx.nodes.map(String)], ['hello'])
-  assert.equal(ctx.destroyed, false)
+  const unmount = mountDoc()
+  try {
+    // 构建窗口里 preview(ctx)：字符串 → 文本节点挂到根容器
+    const box = makeFakeEl('box')
+    let api: { destroyed: boolean; addNode(...v: unknown[]): void } | undefined
+    const mount = mountPreview(asDomNode(box), (c) => {
+      api = c
+      sendMessage(r.value, 'preview', [c])
+    })
+    await tick()
+    assert.equal(textOf(box), 'hello')
+    assert.equal(api!.destroyed, false)
 
-  ctx.destroy()
-  assert.equal(ctx.destroyed, true)
-  assert.throws(() => ctx.addNode('again'), /已销毁/)
+    mount.destroy()
+    assert.equal(api!.destroyed, true)
+    assert.throws(() => api!.addNode('again'), /无法再继续添加/)
+  } finally {
+    unmount()
+  }
 })
 
 test('fc apply 带/不带 ctx 的两种组件调用形态', async () => {
@@ -132,22 +157,37 @@ test('fc apply 带/不带 ctx 的两种组件调用形态', async () => {
   const fc1 = sendMessage(r.value, 'apply', ['x', 1])
   assert.equal(typeof (fc1 as any).apply, 'function')
 
-  // 带 Ctx：立即执行组件体（收集销毁回调）
-  const ctx = new CtxI(null)
-  sendMessage(fc1, 'apply', [ctx])
-  assert.equal(ctx.destroyed, false)
-  ctx.destroy()
-  assert.equal(ctx.destroyed, true)
+  // 带 Ctx：立即执行组件体（收集销毁回调），挂到假 DOM 无副作用
+  const unmount = mountDoc()
+  try {
+    const box = makeFakeEl('box')
+    const mount = mountPreview(asDomNode(box), (c) => {
+      sendMessage(fc1, 'apply', [c])
+    })
+    mount.destroy()
+  } finally {
+    unmount()
+  }
 })
 
 test('Ctx.provide/consume 沿子 Ctx 链可见', () => {
   const c = createContext('默认')
-  const root = new CtxI(null)
-  root.provide(c, '来自根')
-  const sub = root.sub(null)
-  assert.equal(sub.consume(c), '来自根')
-  const nested = sub.sub(null)
-  assert.equal(nested.consume(c), '来自根')
+  const unmount = mountDoc()
+  try {
+    const box = makeFakeEl('box')
+    const mount = mountPreview(asDomNode(box), (root) => {
+      root.provide(c, '来自根')
+      root.sub(null, (sub) => {
+        assert.equal(sub.consume(c), '来自根')
+        sub.sub(null, (nested) => {
+          assert.equal(nested.consume(c), '来自根')
+        })
+      })
+    })
+    mount.destroy()
+  } finally {
+    unmount()
+  }
 })
 
 test('dom/text 桥接返回可渲染的 FC（渲染需要 DOM，Node 下跳过挂载）', () => {
@@ -180,54 +220,23 @@ test('createSignal + JS 数组生态：不可变更新信号列表', async () =>
 
 test('响应式 text/textContent：props 读到的信号变化后文本原地更新', async () => {
   // dom/text 桥接层：给 props/text 传函数值即视为「派生」——包 collectSignal 求值，
-  // 信号一变就地重写文本/属性，事件属性不在其列。此处用 JS 直接喂函数等价模拟
-  // OOC 里 `textContent => (signal get)` 的绑定。
+  // 信号一变就地重写文本/属性。事件属性不在其列。此处用 JS 直接喂函数等价模拟
+  // OOC 里 `textContent => (signal get)` 的绑定。挂载发生在 mountPreview 的 build 窗口。
   const sig = createSignal('苹果')
-  class FakeNode {}
-  const makeFakeEl = (tag: string) =>
-    Object.assign(new FakeNode(), {
-      tagName: tag.toUpperCase(),
-      style: {} as Record<string, string>,
-      children: [] as unknown[],
-      parentNode: null,
-      textContent: '',
-      appendChild(n: unknown) {
-        this.children.push(n)
-        const node = n as { nodeType?: number; textContent?: string; parentNode?: unknown }
-        node.parentNode = this
-        if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
-        return n
-      },
-    })
-  const fakeDoc = {
-    createElement: makeFakeEl,
-    createTextNode(s: unknown) {
-      // 文本节点也 instanceof FakeNode：Ctx._toNode 的 `instanceof Node` 判定才会
-      // 直接挂载，否则会被 String() 二次包装成 '[object Object]'
-      return Object.assign(new FakeNode(), {
-        nodeType: 3,
-        textContent: String(s),
-      })
-    },
-  }
-  const prevDoc = (globalThis as { document?: unknown }).document
-  const prevNode = (globalThis as { Node?: unknown }).Node
-  ;(globalThis as { document: unknown }).document = fakeDoc
-  ;(globalThis as { Node: unknown }).Node = FakeNode
+  const unmount = mountDoc()
   try {
-    const box = makeFakeEl('box') as unknown as {
-      children: unknown[]
-    }
-    const ctx = new CtxI(box as never)
-    // textContent 绑定一个读信号的回调 + 一个同样读信号的派生文本
-    const fc = dom.div(
-      { textContent: () => sig.get() },
-      text.bind(() => '剩余 ' + sig.get() + ' 项'),
-    )
-    fc.apply(ctx)
+    const box = makeFakeEl('box')
+    const mount = mountPreview(asDomNode(box), (c) => {
+      const fc = dom.div(
+        { textContent: () => sig.get() },
+        text.bind(() => '剩余 ' + sig.get() + ' 项'),
+      )
+      fc.apply(c)
+    })
     await tick()
-    const div = box.children[0] as { children: unknown[]; textContent: string }
-    const derive = div.children[0] as { nodeType: number; textContent: string }
+    const div = box.children[0] as FakeNode
+    assert.equal(div.tagName, 'DIV')
+    const derive = div.children[0] as FakeNode
     assert.equal(div.textContent, '苹果')
     assert.equal(derive.textContent, '剩余 苹果 项')
 
@@ -236,340 +245,109 @@ test('响应式 text/textContent：props 读到的信号变化后文本原地更
     assert.equal(div.textContent, '香蕉', 'textContent 绑定应随信号变化')
     assert.equal(derive.textContent, '剩余 香蕉 项', '派生文本应随信号变化')
 
-    ctx.destroy()
+    mount.destroy()
     sig.set('梨')
     await tick()
     assert.equal(div.textContent, '香蕉', 'Ctx 销毁后订阅已清理，不再更新')
   } finally {
-    ;(globalThis as { document: unknown }).document = prevDoc
-    ;(globalThis as { Node?: unknown }).Node = prevNode
+    unmount()
   }
 })
 
 test('renderForEach 响应信号变化自动重建区域', async () => {
   const sig = createSignal(['甲', '乙'])
-  // 最小假 document：元素带 replaceChildren/appendChild，文本节点只记内容
-  const fakeDoc = {
-    createElement(tag: string) {
-      const el: {
-        tagName: string
-        style: Record<string, string>
-        children: unknown[]
-        parentNode: unknown
-        appendChild(n: unknown): unknown
-        replaceChildren(...cs: unknown[]): void
-      } = {
-        tagName: tag.toUpperCase(),
-        style: {},
-        children: [],
-        parentNode: null,
-        appendChild: function (n: unknown) {
-          this.children.push(n)
-          ;(n as { parentNode: unknown }).parentNode = this
-          return n
-        },
-        replaceChildren(...cs: unknown[]) {
-          this.children = cs
-        },
-      }
-      return el
-    },
-    createTextNode(s: unknown) {
-      return { nodeType: 3, textContent: String(s) }
-    },
-  }
-  const prevDoc = (globalThis as { document?: unknown }).document
-  ;(globalThis as { document: unknown }).document = fakeDoc
+  const unmount = mountDoc()
   try {
-    const box = fakeDoc.createElement('box') as unknown as {
-      children: unknown[]
-    }
-    const ctx = new CtxI(box as never)
-    ctx.renderForEach({
-      forEach(cb) {
-        ;(sig.get() as string[]).forEach((v) => cb.apply(v, v))
-      },
-      creater(ic, et) {
-        ic.addNode(et.value as string)
-      },
+    const box = makeFakeEl('box')
+    const mount = mountPreview(asDomNode(box), (c) => {
+      c.renderForEach({
+        forEach(cb) {
+          ;(sig.get() as string[]).forEach((v) => cb.apply(v, v))
+        },
+        creater(ic, et) {
+          ic.addNode(et.value as string)
+        },
+      })
     })
     await tick()
-    // 渲染区容器 + 2 个文本节点
-    assert.equal(box.children.length, 1, '应创建一个存放列表的容器')
-    const region = box.children[0] as { children: unknown[] }
-    assert.equal(region.children.length, 2)
+    // 列表项直接挂在 box 下（mve 不再有 display:contents 区域容器）
+    assert.equal(box.children.length, 2, '两个文本项直接挂载')
+    assert.ok((box.children[0] as FakeNode).nodeType === 3)
 
     sig.set(['甲', '乙', '丙'])
     await tick()
-    assert.equal(region.children.length, 3, '信号变化后列表区域应重建')
+    assert.equal(box.children.length, 3, '信号变化后列表应重建')
 
-    ctx.destroy()
+    mount.destroy()
     await tick()
-    assert.equal(region.children.length, 3, '销毁后内容不再变化')
+    assert.equal(box.children.length, 3, '销毁后内容不再变化')
   } finally {
-    ;(globalThis as { document: unknown }).document = prevDoc
+    unmount()
   }
 })
 
 test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响应式重建', async () => {
   // 跑真实演示源码：createSignal + toSpliced 管道 + forEach 区域组件 + 受控输入框全链路。
   // 假 document 要能承住 dom/FC 的创建与挂载，还要记下事件回调供模拟点击。
-  // Ctx._toNode 靠 `instanceof Node` 判断节点：假元素/文本都挂到 FakeNode 下，
-  // 否则会被 String() 成文本，元素树就散了。
-  class FakeNode {}
-  type FakeEl = {
-    tagName?: string
-    style: Record<string, string>
-    children: unknown[]
-    parentNode: unknown
-    textContent: string
-    attrs: Record<string, unknown>
-    handlers: Record<string, (e: unknown) => void>
-    value: string
-    checked: boolean
-    appendChild(n: unknown): unknown
-    replaceChildren(...cs: unknown[]): void
-    setAttribute(k: string, v: unknown): void
-    addEventListener(t: string, cb: (e: unknown) => void): void
-  }
-  const makeFakeEl = (tag: string): FakeEl => {
-    const el = Object.assign(new FakeNode(), {
-      tagName: tag.toUpperCase(),
-      style: {} as Record<string, string>,
-      children: [] as unknown[],
-      parentNode: null,
-      textContent: '',
-      value: '',
-      checked: false,
-      attrs: {} as Record<string, unknown>,
-      handlers: {} as Record<string, (e: unknown) => void>,
-      appendChild(n: unknown) {
-        this.children.push(n)
-        const node = n as { parentNode?: unknown; nodeType?: number; textContent?: string }
-        node.parentNode = this
-        if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
-        return n
-      },
-      replaceChildren(...cs: unknown[]) {
-        this.children = cs
-        this.textContent = ''
-        for (const c of cs as unknown[]) {
-          const node = c as { nodeType?: number; textContent?: unknown }
-          if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
-        }
-      },
-      setAttribute(k: string, v: unknown) {
-        this.attrs[k] = v
-      },
-      addEventListener(t: string, cb: (e: unknown) => void) {
-        this.handlers[t] = cb
-      },
-    })
-    return el
-  }
-  const fakeDoc = {
-    createElement: makeFakeEl,
-    createTextNode(s: unknown) {
-      return Object.assign(new FakeNode(), {
-        nodeType: 3,
-        textContent: String(s),
-      }) as unknown
-    },
-  }
-  const prevDoc = (globalThis as { document?: unknown }).document
-  const prevNode = (globalThis as { Node?: unknown }).Node
-  ;(globalThis as { document: unknown }).document = fakeDoc
-  ;(globalThis as { Node: unknown }).Node = FakeNode
+  const unmount = mountDoc()
   try {
-    // 树上找文案匹配的元素（文本节点在 children 里，递归拼 textContent 更直观）
-    const textOf = (n: unknown): string => {
-      const node = n as { nodeType?: number; textContent?: string; children?: unknown[] }
-      if (node.nodeType === 3) return node.textContent ?? ''
-      let s = node.textContent ?? ''
-      for (const c of node.children ?? []) s += textOf(c)
-      return s
-    }
-    const findButton = (n: unknown, needle: string): FakeEl | null => {
-      const node = n as { tagName?: string; children?: unknown[]; handlers?: Record<string, unknown> }
-      if (node.tagName === 'BUTTON' && textOf(n).includes(needle)) return n as FakeEl
-      for (const c of node.children ?? []) {
-        const hit = findButton(c, needle)
-        if (hit) return hit
-      }
-      return null
-    }
-    // 区域容器（display:contents）随组件的 [forEach apply] 挂在元素树相应位置，递归查找
-    const findRegion = (n: unknown): FakeEl | null => {
-      const node = n as { style?: Record<string, string>; children?: unknown[] }
-      if (node.style?.display === 'contents') return n as FakeEl
-      for (const c of node.children ?? []) {
-        const hit = findRegion(c)
-        if (hit) return hit
-      }
-      return null
-    }
-    const findInput = (n: unknown): FakeEl | null => {
-      const node = n as { tagName?: string; children?: unknown[] }
-      if (node.tagName === 'INPUT') return n as FakeEl
-      for (const c of node.children ?? []) {
-        const hit = findInput(c)
-        if (hit) return hit
-      }
-      return null
-    }
     const engine = createEngine(notes)
     const r = await runNote(engine, '预览.ooc', PREVIEW_DEMO)
     assert.equal(r.error, null, r.error ?? '')
     assert.ok(hasPreview(r.value), '演示导出应带 preview')
 
     const box = makeFakeEl('box')
-    const ctx = new CtxI(box as never)
-    sendMessage(r.value, 'preview', [ctx])
+    const mount = mountPreview(asDomNode(box), (c) => {
+      sendMessage(r.value, 'preview', [c])
+    })
     await tick()
 
-    // 初态：响应式列表区域为空，输入框是受控组件（value => newName 信号）
-    const region = findRegion(box)
-    assert.ok(region, '应创建 display:contents 的列表容器')
-    assert.equal(region.children.length, 0, '初始列表应为空')
-    const inputEl = findInput(box)
-    assert.ok(inputEl, '应找到输入框')
-    assert.equal(inputEl!.value, '', '受控输入框初始值来自信号')
+    const space = findDivByText(box, '组件示例')
+    assert.ok(space, '应找到结构容器 div')
 
-    // 模拟输入：敲字触发 input 事件 → 受控绑定写回 newName 信号
+    // 列表行：单文本子节点的 div（forEach 区域直接挂容器的普通行）
+    const itemRows = (): FakeNode[] =>
+      (space!.children as FakeNode[]).filter(
+        (c) => c.tagName === 'DIV' && c.children.length === 1 && c.children[0].nodeType === 3,
+      )
+
+    // 初态：列表为空，输入框受控（value => (newName get) + onValueChange）
+    assert.equal(itemRows().length, 0, '初始列表应为空')
+    const inputEl = findEl(box, 'input')
+    assert.ok(inputEl, '应找到输入框')
+    assert.equal(inputEl!.value, '', '受控输入框初始值来自 value => (newName get)')
+
+    // 模拟输入：敲字触发 input 事件 → onValueChange 回调收新值并写回 newName
     inputEl!.value = '新项目'
     inputEl!.handlers.input!({})
     await tick()
 
     // 点「添加一项」：读 newName 信号并清空信号，区域重建出 1 项
-    const addBtn = findButton(box, '添加一项')
+    const addBtn = findEl(box, 'button', '添加一项')
     assert.ok(addBtn, '应找到「添加一项」按钮')
     addBtn!.handlers.click!({})
     await tick()
-    assert.equal(region.children.length, 1, '添加后列表应变 1 项')
-    assert.ok(textOf(region).includes('新项目'), '应渲染出输入框里的名字')
+    assert.equal(itemRows().length, 1, '添加后列表应变 1 项')
+    assert.ok(textOf(box).includes('新项目'), '应渲染出输入框里的名字')
     assert.equal(inputEl!.value, '', '添加后信号清空，受控输入框同步清空')
 
     // 点「删第一项」：/ toSpliced 0 1 删掉首个，区域重建回空
-    const delBtn = findButton(box, '删第一项')
+    const delBtn = findEl(box, 'button', '删第一项')
     assert.ok(delBtn, '应找到「删第一项」按钮')
     delBtn!.handlers.click!({})
     await tick()
-    assert.equal(region.children.length, 0, '删除后列表应回到空')
+    assert.equal(itemRows().length, 0, '删除后列表应回到空')
 
-    ctx.destroy()
+    mount.destroy()
   } finally {
-    ;(globalThis as { document: unknown }).document = prevDoc
-    ;(globalThis as { Node?: unknown }).Node = prevNode
+    unmount()
   }
 })
 
 test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表重建 + text bind 派生剩余数', async () => {
-  // createSignal + forEach + toSpliced + 受控输入框（value => 信号）的组合拳：
+  // createSignal + forEach + toSpliced + 受控输入框的组合拳：
   // 剩余项数用 text bind 派生文本（原地重写），列表区域响应 list 变化自动重建。
-  class FakeNode {}
-  type FakeEl = {
-    tagName?: string
-    style: Record<string, string>
-    children: unknown[]
-    parentNode: unknown
-    textContent: string
-    attrs: Record<string, unknown>
-    handlers: Record<string, (e: unknown) => void>
-    value: string
-    checked: boolean
-    appendChild(n: unknown): unknown
-    replaceChildren(...cs: unknown[]): void
-    setAttribute(k: string, v: unknown): void
-    addEventListener(t: string, cb: (e: unknown) => void): void
-  }
-  const makeFakeEl = (tag: string): FakeEl => {
-    const el = Object.assign(new FakeNode(), {
-      tagName: tag.toUpperCase(),
-      style: {} as Record<string, string>,
-      children: [] as unknown[],
-      parentNode: null,
-      textContent: '',
-      value: '',
-      checked: false,
-      attrs: {} as Record<string, unknown>,
-      handlers: {} as Record<string, (e: unknown) => void>,
-      appendChild(n: unknown) {
-        this.children.push(n)
-        const node = n as { parentNode?: unknown; nodeType?: number; textContent?: string }
-        node.parentNode = this
-        if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
-        return n
-      },
-      replaceChildren(...cs: unknown[]) {
-        this.children = cs
-        this.textContent = ''
-        for (const c of cs as unknown[]) {
-          const node = c as { nodeType?: number; textContent?: unknown }
-          if (node.nodeType === 3) this.textContent += String(node.textContent ?? '')
-        }
-      },
-      setAttribute(k: string, v: unknown) {
-        this.attrs[k] = v
-      },
-      addEventListener(t: string, cb: (e: unknown) => void) {
-        this.handlers[t] = cb
-      },
-    })
-    return el
-  }
-  const textOf = (n: unknown): string => {
-    const node = n as { nodeType?: number; textContent?: string; children?: unknown[] }
-    if (node.nodeType === 3) return node.textContent ?? ''
-    let s = node.textContent ?? ''
-    for (const c of node.children ?? []) s += textOf(c)
-    return s
-  }
-  const findButton = (n: unknown, needle: string): FakeEl | null => {
-    const node = n as { tagName?: string; children?: unknown[]; handlers?: Record<string, unknown> }
-    if (node.tagName === 'BUTTON' && textOf(n).includes(needle)) return n as FakeEl
-    for (const c of node.children ?? []) {
-      const hit = findButton(c, needle)
-      if (hit) return hit
-    }
-    return null
-  }
-  const findRow = (n: unknown, needle: string): FakeEl | null => {
-    // 找「正文包含 needle、且自带删除按钮」的行容器（避开根 div/区域容器）
-    const node = n as { tagName?: string; children?: unknown[] }
-    if (node.tagName === 'DIV' && textOf(n).includes(needle)) {
-      const directButtons = (node.children ?? []).filter(
-        (c: unknown) => (c as FakeEl).tagName === 'BUTTON',
-      )
-      if (directButtons.some((b: unknown) => textOf(b).includes('删除'))) return n as FakeEl
-    }
-    for (const c of node.children ?? []) {
-      const hit = findRow(c, needle)
-      if (hit) return hit
-    }
-    return null
-  }
-  const findInput = (n: unknown): FakeEl | null => {
-      const node = n as { tagName?: string; children?: unknown[] }
-      if (node.tagName === 'INPUT') return n as FakeEl
-      for (const c of node.children ?? []) {
-        const hit = findInput(c)
-        if (hit) return hit
-      }
-      return null
-    }
-  const fakeDoc = {
-    createElement: makeFakeEl,
-    createTextNode(s: unknown) {
-      return Object.assign(new FakeNode(), {
-        nodeType: 3,
-        textContent: String(s),
-      }) as unknown
-    },
-  }
-  const prevDoc = (globalThis as { document?: unknown }).document
-  const prevNode = (globalThis as { Node?: unknown }).Node
-  ;(globalThis as { document: unknown }).document = fakeDoc
-  ;(globalThis as { Node: unknown }).Node = FakeNode
+  const unmount = mountDoc()
   try {
     const engine = createEngine(notes)
     const r = await runNote(engine, '待办清单.ooc', TODO_DEMO)
@@ -577,71 +355,127 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表�
     assert.ok(hasPreview(r.value), '演示导出应带 preview')
 
     const box = makeFakeEl('box')
-    const ctx = new CtxI(box as never)
-    sendMessage(r.value, 'preview', [ctx])
+    const mount = mountPreview(asDomNode(box), (c) => {
+      sendMessage(r.value, 'preview', [c])
+    })
     await tick()
 
-    const regions: FakeEl[] = []
-    const collectRegions = (n: unknown): void => {
-      const node = n as { style?: Record<string, string>; children?: unknown[] }
-      if (node.style?.display === 'contents') regions.push(n as FakeEl)
-      for (const c of node.children ?? []) collectRegions(c)
-    }
-    collectRegions(box)
-    // 「剩余 x 项」改成了 text bind 的派生文本（原地重写，不再占一个区域），
-    // 响应式区域只剩列表区一个（挂在 [forEach apply] 所在元素树位置）
-    assert.equal(regions.length, 1, '只剩列表一个响应式区域')
-    const listReg = regions[0]!
-    assert.ok(textOf(box).includes('剩余 1 项'), `初始剩余 1 项，实际: ${textOf(box)}`)
-    assert.equal(listReg.children.length, 2, '初始 2 项')
+    const space = findDivByText(box, '待办清单')
+    assert.ok(space, '应找到结构容器 div')
+    // 列表行：直接孩子里带「删除」按钮的 div（forEach 区域无额外容器）
+    const rows = (): FakeNode[] =>
+      (space!.children as FakeNode[]).filter((c) => isRowDiv(c))
 
-    // 添加：受控输入框模拟输入（触发 input 事件写回 inputText 信号），点「添加」
-    const inputEl = findInput(box)
+    assert.ok(textOf(box).includes('剩余 1 项'), `初始剩余 1 项，实际: ${textOf(box)}`)
+    assert.equal(rows().length, 2, '初始 2 项')
+
+    // 添加：受控输入框模拟输入（触发 onValueChange 回调写回 inputText），点「添加」
+    const inputEl = findEl(box, 'input')
     assert.ok(inputEl, '应找到受控输入框')
-    assert.equal(inputEl!.value, '', '初始值来自 inputText 信号')
+    assert.equal(inputEl!.value, '', '初始值来自 value => (inputText get)')
     inputEl!.value = '第三项'
     inputEl!.handlers.input!({})
     await tick()
-    const addBtn = findButton(box, '添加')
+    const addBtn = findEl(box, 'button', '添加')
     assert.ok(addBtn, '应找到「添加」按钮')
     addBtn!.handlers.click!({})
     await tick()
     assert.ok(textOf(box).includes('剩余 2 项'), `添加后剩 2 项，实际: ${textOf(box)}`)
-    assert.equal(listReg.children.length, 3, '添加后 3 行')
-    assert.ok(textOf(listReg).includes('第三项'), '应渲染出新项')
+    assert.equal(rows().length, 3, '添加后 3 行')
+    assert.ok(textOf(box).includes('第三项'), '应渲染出新项')
     assert.equal(inputEl!.value, '', '添加后信号清空，受控输入框同步清空')
 
     // 切换完成态：点某行的切换按钮（状态文字 [ ] → [x]），只改该行、剩余数 -1
-    const rowToggle = findRow(listReg, '让列表响应信号')
+    const rowToggle = rows().find((r2) => textOf(r2).includes('让列表响应信号'))
     assert.ok(rowToggle, '应找到「让列表响应信号」行')
-    const toggleBtn = (rowToggle!.children as FakeEl[]).find(
+    const toggleBtn = rowToggle!.children.find(
       (c) => c.tagName === 'BUTTON' && textOf(c).includes('[ ]'),
     )
     assert.ok(toggleBtn, '该行应有 [ ] 状态的切换按钮')
     toggleBtn!.handlers.click!({})
     await tick()
     assert.ok(textOf(box).includes('剩余 1 项'), `切换后剩 1 项，实际: ${textOf(box)}`)
-    const toggledRow = findRow(listReg, '让列表响应信号')
+    const toggledRow = rows().find((r2) => textOf(r2).includes('让列表响应信号'))
     assert.ok(toggledRow, '重建后仍能找到该行')
     assert.ok(textOf(toggledRow!).includes('[x]'), `该行应变 [x]，实际: ${textOf(toggledRow!)}`)
-    assert.equal(listReg.children.length, 3, '切换不改变行数')
+    assert.equal(rows().length, 3, '切换不改变行数')
 
     // 删除该行：行数 -1，剩余维持 1
-    const rowDelete = findRow(listReg, '让列表响应信号')
+    const rowDelete = rows().find((r2) => textOf(r2).includes('让列表响应信号'))
     assert.ok(rowDelete, '重建后仍能找到该行')
-    const delBtn = (rowDelete!.children as FakeEl[]).find(
+    const delBtn = rowDelete!.children.find(
       (c) => c.tagName === 'BUTTON' && textOf(c).includes('删除'),
     )
     assert.ok(delBtn, '该行应有删除按钮')
     delBtn!.handlers.click!({})
     await tick()
-    assert.equal(listReg.children.length, 2, '删除后剩 2 行')
+    assert.equal(rows().length, 2, '删除后剩 2 行')
     assert.ok(textOf(box).includes('剩余 1 项'), '删掉已完成项后剩余仍 1')
-    assert.ok(!textOf(listReg).includes('让列表响应信号'), '该行已移除')
+    assert.ok(!textOf(box).includes('让列表响应信号'), '该行已移除')
 
-    ctx.destroy()
+    mount.destroy()
   } finally {
-    ;(globalThis as { document: unknown }).document = prevDoc
-    ;(globalThis as { Node?: unknown }).Node = prevNode
+    unmount()
+  }
+})
+
+test('ObjectValue �Žӣ�OOC ����ж���ֵ�����Ա��', async () => {
+  const engine = createEngine(notes)
+  const r = await runNote(
+    engine,
+    '����',
+    'ObjectValue isDefined {a => 1}\n',
+  )
+  assert.equal(r.error, null, r.error ?? '')
+  assert.equal(r.output, 'true')
+  const r2 = await runNote(
+    engine,
+    '����',
+    'p = {a => 1};\nc = {...p, b => 2};\nObjectValue messagesOf c / length\n',
+  )
+  assert.equal(r2.error, null, r2.error ?? '')
+  assert.equal(r2.output, '2')
+})
+
+
+test('���Է�����bind ��̬һ���Ը�ֵ��call ��Ա���ź���д', async () => {
+  const engine = createEngine(notes)
+  const r = await runNote(
+    engine,
+    '����',
+"r = createSignal apply 'on';\n" +
+      "box = {\n" +
+      "  className = 'static-x',\n" +
+      "  title => r get,\n" +
+      "  onClick => r set 'off'\n" +
+      "};\nbox\n",
+  )
+  assert.equal(r.error, null, r.error ?? '')
+  const box = r.value as Record<string, unknown>
+  const unmount = mountDoc()
+  try {
+    const root = makeFakeEl('root')
+    const mount = mountPreview(asDomNode(root), (c) => {
+      dom.div(box).apply(c)
+    })
+    await tick()
+    const div = root.children[0] as FakeNode
+    // bind��`= ����ʱ���棩��ֱ̬д��call��`=>`�����źŹ��ɶ�̬��
+    assert.equal(
+      (div as unknown as { className: string }).className,
+      'static-x',
+    )
+    assert.equal((div as unknown as { title: string }).title, 'on')
+    // ������̬�¼����źű仯�󣬶�̬ title ��д��bind className ���ֹ���ʱֵ
+    div.handlers.click!({})
+    await tick()
+    assert.equal((div as unknown as { title: string }).title, 'off')
+    assert.equal(
+      (div as unknown as { className: string }).className,
+      'static-x',
+    )
+    mount.destroy()
+  } finally {
+    unmount()
   }
 })

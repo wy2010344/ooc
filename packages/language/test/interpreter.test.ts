@@ -12,6 +12,7 @@ import * as nodePath from 'node:path'
 import {
   createInterpretAction,
   createTypeCheckAction,
+  ObjectValue,
   OocCircularImportError,
   OocMethodNotFoundError,
 } from 'object-oriented-c-language'
@@ -736,5 +737,89 @@ describe('除法运算', () => {
         calc div 12 4 / div 3
     `)
     expect(result).toBe(1)
+  })
+})
+
+describe('ObjectValue 元信息反射', () => {
+  test('JS 侧：定义对象带元信息，可读成员表且不可伪造', async () => {
+    const result = await interpreter.interpret(`
+        p = {a => 1, b(x) => x};
+        c = {...p, d = 2, e(v) => v};
+        c
+    `)
+    expect(ObjectValue.isDefined(result)).toBe(true)
+    // 沿原型链聚合：自身 d(mutable)/e(call) 在前，父层 p a(bind)/b(call) 在后
+    const names = ObjectValue.messagesOf(result)
+    expect(names).toEqual(['d', 'e', 'a', 'b'])
+    const meta = ObjectValue.metaOf(result)
+    expect(meta?.members.map((m) => m.name)).toEqual(['d', 'e'])
+    // membersOf 带静态/动态判定：d=`=` bind、e=`=>` call、父层 a/b 均为 call
+    expect(ObjectValue.membersOf(result)).toEqual([
+      { name: 'd', type: 'bind' },
+      { name: 'e', type: 'call' },
+      { name: 'a', type: 'call' },
+      { name: 'b', type: 'call' },
+    ])
+  })
+
+  test('guard 重载同 key 折叠为一条，bind 与动态同名时升为动态', async () => {
+    const eq = await interpreter.interpret(`
+        eq = { equal(a, b) => 1, equal(a) => 2 };
+        eq
+    `)
+    const mix = await interpreter.interpret(`
+        mix = { x = 1, x(v) => v };
+        mix
+    `)
+    // guard 重载折叠成一条 equal（call）
+    expect(ObjectValue.messagesOf(eq)).toEqual(['equal'])
+    expect(ObjectValue.metaOf(eq)?.members).toEqual([
+      { name: 'equal', type: 'call' },
+    ])
+    // 同名 x：bind 在前 + call 在后 → 折叠为 call（动态优先，宿主须观察）
+    expect(ObjectValue.membersOf(mix)).toEqual([{ name: 'x', type: 'call' }])
+  })
+
+  test('空对象 {} 是语言定义值，成员为空', async () => {
+    const result = await interpreter.interpret(`{}`)
+    expect(ObjectValue.isDefined(result)).toBe(true)
+    expect(ObjectValue.messagesOf(result)).toEqual([])
+  })
+
+  test('lambda 仍是 JS 函数，不带元信息', async () => {
+    const result = await interpreter.interpret(`[x => x]`)
+    expect(typeof result).toBe('function')
+    expect(ObjectValue.isDefined(result)).toBe(false)
+  })
+
+  test('宿主 JS 值（数组/字符串/数字）不是语言定义值', async () => {
+    const arr = await interpreter.interpret(`(Array of)`)
+    expect(ObjectValue.isDefined(arr)).toBe(false)
+    const str = await interpreter.interpret(`'x'`)
+    expect(ObjectValue.isDefined(str)).toBe(false)
+    const num = await interpreter.interpret(`3`)
+    expect(ObjectValue.isDefined(num)).toBe(false)
+  })
+
+  test('OOC 侧：ObjectValue 桥接对象可直接发消息', async () => {
+    const withBridge = createInterpretAction(EmptyFileSystem, { ObjectValue })
+    const defined = await withBridge.interpret(
+      `ObjectValue isDefined {a => 1}`,
+    )
+    expect(defined).toBe(true)
+    const notDefined = await withBridge.interpret(
+      `ObjectValue isDefined [x => x]`,
+    )
+    expect(notDefined).toBe(false)
+    const names = await withBridge.interpret(`
+        p = {a => 1};
+        c = {...p, b => 2};
+        ObjectValue messagesOf c / length
+    `)
+    expect(names).toBe(2)
+    const selfMeta = await withBridge.interpret(
+      `ObjectValue metaOf {x => 1} / members / length`,
+    )
+    expect(selfMeta).toBe(1)
   })
 })
