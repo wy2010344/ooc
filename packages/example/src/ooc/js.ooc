@@ -4,8 +4,8 @@ d = js new Date 2026 0 1;
 year = d getFullYear;
 month = d getMonth;
 
-// js fn：把 OOC lambda 包装成真正的 JS 函数，可传给定时器/事件监听等
-cb = js fn [42];
+// lambda 本就是原生 JS 函数，可直接传给定时器/事件监听等宿主 API
+cb = [42];
 called = (cb) apply;
 
 {

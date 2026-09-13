@@ -28,12 +28,10 @@ interface Props {
   engine: Engine
   /** 当前笔记名（lint 用的文档名，供 #import 相对解析） */
   noteName: string
-  /** 只读：默认开，避免滚动/阅读时键盘乱弹；点按正文可解除（见 onReadOnlyChange） */
+  /** 只读：默认开，阅读/滚动时键盘不弹；编辑经菜单「解除只读」进入 */
   readOnly: boolean
   /** 代码区是否自动换行（false 时横向滚动） */
   wrap: boolean
-  /** 只读被点按解除时通知父级（配合菜单里的「锁定只读」切换） */
-  onReadOnlyChange?: (readOnly: boolean) => void
 }
 
 export interface CodeAreaHandle {
@@ -109,7 +107,6 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
     noteName,
     readOnly,
     wrap,
-    onReadOnlyChange,
   },
   ref,
 ) {
@@ -119,11 +116,9 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
   const onChangeRef = useRef(onChange)
   const onFocusChangeRef = useRef(onFocusChange)
   const readOnlyRef = useRef(readOnly)
-  const onReadOnlyChangeRef = useRef(onReadOnlyChange)
   onChangeRef.current = onChange
   onFocusChangeRef.current = onFocusChange
   readOnlyRef.current = readOnly
-  onReadOnlyChangeRef.current = onReadOnlyChange
 
   // 仅首个挂载创建编辑器；noteName 随 note 切换由 Editor 的 key 重建本组件
   useEffect(() => {
@@ -156,33 +151,11 @@ export const CodeArea = forwardRef<CodeAreaHandle, Props>(function CodeArea(
             )
             if (!isExternal) onChangeRef.current(u.state.doc.toString())
           }),
-          // 只读时不碰 focus（避免滚动/阅读弹键盘）；点按（指针没移动）才解除只读进入编辑
+          // 只读时点击正文仅浏览滚动，不聚焦、不弹软键盘；
+          // 编辑要经菜单「解除只读」（readOnly 变 false 后此处不再拦截，正常聚焦）
           EditorView.domEventHandlers({
-            pointerdown: (_e, v) => {
-              if (!readOnlyRef.current) return
-              // 记录起点，pointerup 时判断是否为「点按」而非滚动/拖选
-              const rect = v.dom.getBoundingClientRect()
-              v.dom.dataset.tapX = String(
-                (_e as PointerEvent).clientX - rect.left,
-              )
-              v.dom.dataset.tapY = String(
-                (_e as PointerEvent).clientY - rect.top,
-              )
-            },
-            pointerup: (e, v) => {
-              if (!readOnlyRef.current) return
-              const x = Number(v.dom.dataset.tapX ?? NaN)
-              const y = Number(v.dom.dataset.tapY ?? NaN)
-              delete v.dom.dataset.tapX
-              delete v.dom.dataset.tapY
-              const rect = v.dom.getBoundingClientRect()
-              const dx = (e as PointerEvent).clientX - rect.left - x
-              const dy = (e as PointerEvent).clientY - rect.top - y
-              if (Math.hypot(dx, dy) < 10) {
-                // 点按正文 → 解除只读并聚焦，键盘此时才弹出
-                onReadOnlyChangeRef.current?.(false)
-                requestAnimationFrame(() => v.focus())
-              }
+            pointerdown: (e) => {
+              if (readOnlyRef.current) e.preventDefault()
             },
             blur: () => onFocusChangeRef.current?.(false),
             focus: () => onFocusChangeRef.current?.(true),

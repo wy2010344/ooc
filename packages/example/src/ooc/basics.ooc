@@ -28,3 +28,4 @@ hello = { greet(name) => 'hello, ' + name };
 hello greet 'ooc'
 
 // ===== 注释：// 单行、/* 多行 */
+

@@ -2,7 +2,6 @@ import { dirnameOf } from '../module-path.js'
 import {
   Expression,
   LambdaDef,
-  MethodAll,
   Model,
   Primary,
   StID,
@@ -36,13 +35,20 @@ export function clearErrorPosition(): void {
 }
 
 /** 取走最近一次求值位置并清空（宿主边界消费一次）。无位置返回 null。 */
-export function consumeErrorPosition(): { line: number; character: number } | null {
+export function consumeErrorPosition(): {
+  line: number
+  character: number
+} | null {
   const p = errorPosition
   errorPosition = null
   return p
 }
 
-function track(node: { $cstNode?: { range: { start: { line: number; character: number } } } } | undefined): void {
+function track(
+  node:
+    | { $cstNode?: { range: { start: { line: number; character: number } } } }
+    | undefined,
+): void {
   const pos = node?.$cstNode?.range.start
   if (pos) {
     errorPosition = pos
@@ -182,20 +188,11 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
  */
 function createLambdaValue(e: LambdaDef, scope: Scope): Function {
   // 合成的匿名 apply 方法：只读 params/expressions，供 bindMethod/runBody 使用；
-  // 不需要真实 $container 等链接信息。
-  const applyMethod = {
-    $type: 'MethodAll',
-    name: {
-      $type: 'MethodDefName',
-      name: { $type: 'Ref', value: 'apply' },
-    },
-    params: e.params,
-    expressions: e.expressions,
-  } as unknown as MethodAll
+  // 不需要真实 $container 等链接信息。l
   // 箭头式：函数体始终在自己的作用域 + 参数作用域中求值，self 即函数本身
-  const fn = (...args: unknown[]) => {
-    const s = bindMethod(applyMethod, scope, fn, args)
-    return runBody(applyMethod.expressions, s)
+  const fn = function (...args: unknown[]) {
+    const s = bindMethod(e, scope, fn, args)
+    return runBody(e.expressions, s)
   }
   return fn
 }

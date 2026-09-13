@@ -1,4 +1,4 @@
-import { groupToMap } from 'wy-helper'
+import { emptyMap, groupToMap } from 'wy-helper'
 import {
   Expression,
   Method,
@@ -6,6 +6,7 @@ import {
   MethodDefName,
   Message,
   Statement,
+  MethodAll,
 } from '../generated/ast.js'
 import { numDef } from '../library/num.js'
 import { objectDefine } from '../library/object.js'
@@ -29,61 +30,48 @@ const EMPTY_OBJECT: Record<string, unknown> = {}
  */
 export const OOC_META = Symbol('ooc:meta')
 
-/** 单条成员元信息：本层字面量定义了什么消息、属哪一类 */
-export interface OocMemberMeta {
-  name: string
-  type: 'bind' | 'mutable' | 'call'
-}
-
-/** 对象元信息：只含本层定义，原型链父层的元信息沿链读取 */
-export interface OocMeta {
-  members: OocMemberMeta[]
-}
+/** 对象元信息：只含本层定义，原型链父层的元信息沿链读取。
+ *  Map 键是消息名，值是同名定义（bind/mutable/call，含 guard 重载）的完整列表——
+ *  不在烧录期折叠，宿主可据 value 字段直接消费（bind/mutable 挂着缓存值、call 挂方法）。 */
+export type OocMeta = Map<
+  string,
+  (
+    | {
+        type: 'bind'
+        name: string
+        value: any
+      }
+    | {
+        type: 'mutable'
+        name: string
+        value: unknown
+      }
+    | {
+        type: 'call'
+        name: string
+        value: MethodAll
+      }
+  )[]
+>
 
 /** 读值上的元信息；非 OOC 定义值（lambda/宿主值/原始值）返回 undefined */
 export function readOocMeta(v: unknown): OocMeta | undefined {
-  if (!v || (typeof v !== 'object' && typeof v !== 'function')) {
-    return undefined
+  if (v && typeof v == 'object') {
+    return (v as Record<symbol, unknown>)[OOC_META] as OocMeta | undefined
   }
-  return (v as Record<symbol, unknown>)[OOC_META] as OocMeta | undefined
+  return undefined
 }
 
 /** 创建元信息：非枚举挂到对象上，构造时烧录、事后不可伪造 */
-function attachMeta(target: object, members: OocMemberMeta[]): void {
+function attachMeta(target: object, members: OocMeta): void {
   Object.defineProperty(target, OOC_META, {
     enumerable: false,
-    value: { members },
+    value: members,
   })
 }
 
-/**
- * 折叠同名成员元信息：guard 重载（同名多条方法定义）与同名 bind 混排都会让
- * 同一 key 出现多次，烧录时折叠为一条。bind 是一次性缓存（静态），同名若还
- * 存在动态定义（call/mutable）则整个 key 升为动态；顺序取首现，便于遍历。
- */
-function foldMemberMeta(
-  pairs: Array<{ name: string; type: OocMemberMeta['type'] }>,
-): OocMemberMeta[] {
-  const folded = new Map<string, OocMemberMeta>()
-  for (const { name, type } of pairs) {
-    const exist = folded.get(name)
-    if (!exist) {
-      folded.set(name, { name, type })
-      continue
-    }
-    if (exist.type === 'bind' && type !== 'bind') {
-      exist.type = type
-    }
-  }
-  return [...folded.values()]
-}
-
 // 空对象也烧录元信息：`{}` 同样是语言定义值（members 为空）
-attachMeta(EMPTY_OBJECT, [])
-
-/** OOC 创建对象的注册表。用 WeakSet 而非对象属性：属性名会穿过宿主
- *  Proxy 的 get 陷阱（如 dom 代理直接抛「不支持的元素」），WeakSet 无泄漏。 */
-const oocObjects = new WeakSet<object>()
+attachMeta(EMPTY_OBJECT, emptyMap)
 
 // 定义值类型
 export type Value = number | string | boolean | null | OocObject
@@ -108,7 +96,10 @@ function getName(n: { name: string }) {
  *  OOC 对象方法与原生 JS 函数型 lambda（见 evaluate.ts createLambdaValue）共用，
  *  receiver 绑定到 `responser`。guard 需引用参数时，先 bindMethod 再在返回的作用域上求值。 */
 export function bindMethod(
-  method: { params: Array<{ name: string }>; restParam?: { name: string } | null },
+  method: {
+    params: Array<{ name: string }>
+    restParam?: { name: string } | null
+  },
   baseScope: Scope,
   receiver: unknown,
   args: unknown[],
@@ -157,40 +148,34 @@ export function objectValue(
   // 顶层对象（无 parent）直接新建普通对象 {}，而非 Object.create(null)，
   // 保留 Object.prototype，JS 侧 toString/拼接等原生能力可用。
   const currentObject = parent ? Object.create(parent) : {}
-  oocObjects.add(currentObject)
   scope = addScope(scope, 'currentObject', currentObject)
-  const defs = methods.map((method) => {
-    switch (method.$type) {
-      case 'MethodBind':
-        return {
-          type: 'bind' as const,
-          name: getObjDefineName(method.name),
-          value: interpretExpression(method.expression, scope),
-        }
-      case 'MethodBindMutable':
-        return {
-          type: 'mutable' as const,
-          name: getObjDefineName(method.name),
-          value: interpretExpression(method.expression, scope) as unknown,
-        }
-      default:
-        return {
-          type: 'call' as const,
-          name: getObjDefineName(method.name),
-          value: method,
-        }
-    }
-  })
-  // 构造时烧录元信息：反射桥接（ObjectValue）由此识别语言定义值、读成员表；
-  // 同名（guard 重载等）折叠为一条 key，避免遍历时重复
-  attachMeta(
-    currentObject,
-    foldMemberMeta(defs.map(({ type, name }) => ({ type, name }))),
-  )
-  groupToMap(
-    defs,
+  const meta = groupToMap(
+    methods.map((method) => {
+      switch (method.$type) {
+        case 'MethodBind':
+          return {
+            type: 'bind' as const,
+            name: getObjDefineName(method.name),
+            value: interpretExpression(method.expression, scope),
+          }
+        case 'MethodBindMutable':
+          return {
+            type: 'mutable' as const,
+            name: getObjDefineName(method.name),
+            value: interpretExpression(method.expression, scope) as unknown,
+          }
+        default:
+          return {
+            type: 'call' as const,
+            name: getObjDefineName(method.name),
+            value: method,
+          }
+      }
+    }),
     getName,
-  ).forEach(function (methods, name) {
+  )
+  attachMeta(currentObject, meta)
+  meta.forEach(function (methods, name) {
     // 所有定义（含 bind）统一作为方法函数，bind 在函数体内直接返回绑定值
     Object.defineProperty(currentObject, name, {
       enumerable: true,
@@ -209,7 +194,12 @@ export function objectValue(
             case 'call':
               const method = pair.value
               // 先绑参数再求值 guard：guard 可引用参数（`#guard a > 5`）
-              const s = bindMethod(method, scope, this, arguments as unknown as unknown[])
+              const s = bindMethod(
+                method,
+                scope,
+                this,
+                arguments as unknown as unknown[],
+              )
               if (
                 !method.guardExpression ||
                 (method.guardExpression &&
@@ -267,46 +257,15 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
   return sendMessage(o, getMethodCallName(name), args)
 }
 
-/**
- * 宿主原生方法收到 OOC lambda 时，把它包成真正的 JS 函数：
- * Array.forEach/map 等原生高阶方法要求回调可调用，而 OOC lambda 是
- * 带 apply 方法的 ObjectValue，直接传会报 "object is not a function"。
- * 包出来的是普通 JS 函数（typeof === 'function'），但保留 $$oocCall 引用，
- * 宿主若走 invoke() 也能正确回灌到解释器。
- */
-function toNativeCallback(
-  arg: unknown,
-): unknown {
-  if (
-    arg &&
-    typeof arg === 'object' &&
-    oocObjects.has(arg) &&
-    typeof (arg as { apply?: unknown }).apply === 'function'
-  ) {
-    const fn = (...rest: unknown[]) => sendMessage(arg, 'apply', rest)
-    ;(fn as { $$oocCall?: object }).$$oocCall = arg
-    return fn
-  }
-  return arg
-}
-
 export function sendMessage(o: any, value: string, args: any[]): any {
-  // if (o instanceof ObjectValue) {
-  //   return o.send(value, o, args)
-  // }
-  // 原生 JS 函数（lambda 型）之上的 apply：`fn apply x` 直接调用函数本体，
-  // 否则会命中 Function.prototype.apply（对非数组 args 抛 TypeError）。
-  if (typeof o === 'function' && value === 'apply') {
-    return o(...args)
+  if (typeof o == 'function' && value == 'apply') {
+    //lambda需要特殊处理
+    return o.apply(o, args)
   }
-  const fun = o == null ? undefined : o[value]
-  if (typeof fun === 'function') {
-    //找到对象方法。OOC 创建的对象（oocObjects）内部走原样派发；
-    //宿主原生对象则把 OOC lambda 实参包成 JS 可调用回调。
-    if (o && typeof o === 'object' && oocObjects.has(o)) {
-      return fun.apply(o, args)
-    }
-    return fun.apply(o, args.map(toNativeCallback))
+  const fun = o?.[value]
+  if (typeof fun == 'function') {
+    //方法
+    return fun.apply(o, args)
   }
   if (value === 'methodNotFound') {
     // 此处是未知消息的最终兜底：上一次派发已将原消息名放在第一个实参。
@@ -315,6 +274,7 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     if (typeof methodName === 'string') {
       throw new OocMethodNotFoundError(o, methodName, methodArgs)
     }
+    //应该绝对不会到达这里
     throw new OocMethodNotFoundError(o, value, args)
   }
   if (value in Object(o)) {
@@ -333,18 +293,4 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     return obj(o, args[0])
   }
   return sendMessage(o, 'methodNotFound', [value, ...args])
-}
-
-/**
- * 宿主侧调用 OOC lambda 的公开入口，等价于 OOC 里的 `fn apply …`。
- * lambda 不是裸 JS 函数而是「带 apply 方法的 ObjectValue」，宿主注入的
- * 全局对象（如 loop）要执行它必须走这里。
- */
-export function invoke(fn: unknown, args: unknown[] = []): any {
-  // 兼容 toNativeCallback 包出的 JS 函数：直接走原始 lambda，绕开 apply 劫持
-  const origin = (fn as { $$oocCall?: object } | null)?.$$oocCall
-  if (origin) {
-    return sendMessage(origin, 'apply', args)
-  }
-  return sendMessage(fn, 'apply', args)
 }

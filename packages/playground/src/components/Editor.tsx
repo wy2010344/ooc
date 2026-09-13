@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Menu,
-  MenuButton,
-  MenuItem,
-  MenuItems,
-} from '@headlessui/react'
+import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
 import {
   ArrowLeft,
   ArrowsLeftRight,
@@ -21,7 +16,6 @@ import { Notebook } from '../hooks/useNotebook.js'
 import { CodeArea, type CodeAreaHandle } from './CodeArea.js'
 import { HistorySheet } from './HistorySheet.js'
 import { PreviewSheet } from './PreviewSheet.js'
-import { hasPreview } from '../lib/preview/dom.js'
 import { QuickKeysBar, QUICK_KEYS_BAR_H } from './QuickKeysBar.js'
 import type { RunResult } from '../lib/run.js'
 
@@ -39,7 +33,7 @@ export function Editor({ nb, note }: Props) {
   const [renameErr, setRenameErr] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
-  // 编辑器默认只读：阅读时键盘不敏感；点按正文或菜单「解除只读」进入编辑
+  // 编辑器默认只读：阅读/滚动不弹键盘，点按正文也不解锁；编辑经菜单「解除只读」
   const [readOnly, setReadOnly] = useState(true)
   const [wrap, setWrap] = useState(false)
   const codeRef = useRef<CodeAreaHandle>(null)
@@ -77,7 +71,8 @@ export function Editor({ nb, note }: Props) {
   useEffect(() => {
     if (!codeFocused) return
     const id = window.setInterval(
-      () => setBarTop((t) => (Math.abs(t - calcBarTop()) > 1 ? calcBarTop() : t)),
+      () =>
+        setBarTop((t) => (Math.abs(t - calcBarTop()) > 1 ? calcBarTop() : t)),
       150,
     )
     return () => window.clearInterval(id)
@@ -104,9 +99,12 @@ export function Editor({ nb, note }: Props) {
     [nb, note.name],
   )
 
-  useEffect(() => () => {
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    },
+    [],
+  )
 
   const run = useCallback(async () => {
     setRunning(true)
@@ -205,17 +203,6 @@ export function Editor({ nb, note }: Props) {
           </button>
         )}
 
-        <button
-          onClick={() => void run()}
-          disabled={running}
-          className={`ml-1 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium text-white transition-transform active:scale-95 ${
-            running ? 'bg-stone-400 dark:bg-zinc-600' : 'bg-emerald-700 dark:bg-emerald-600'
-          }`}
-        >
-          <Play size={14} weight="fill" />
-          {running ? '运行中' : '运行'}
-        </button>
-
         <Menu>
           <MenuButton
             aria-label="更多"
@@ -275,6 +262,19 @@ export function Editor({ nb, note }: Props) {
             </MenuItem>
           </MenuItems>
         </Menu>
+
+        <button
+          onClick={() => void run()}
+          disabled={running}
+          className={`ml-1 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium text-white transition-transform active:scale-95 ${
+            running
+              ? 'bg-stone-400 dark:bg-zinc-600'
+              : 'bg-emerald-700 dark:bg-emerald-600'
+          }`}
+        >
+          <Play size={14} weight="fill" />
+          {running ? '运行中' : '运行'}
+        </button>
       </header>
 
       {/* 执行历史（菜单功能） */}
@@ -309,7 +309,6 @@ export function Editor({ nb, note }: Props) {
           placeholder="写点 OOC…"
           readOnly={readOnly}
           wrap={wrap}
-          onReadOnlyChange={setReadOnly}
         />
       </main>
 
@@ -319,7 +318,10 @@ export function Editor({ nb, note }: Props) {
           {/* 诊断条 */}
           {hasDiagnostics && (
             <div className="flex items-start gap-2 border-b border-stone-200/60 px-4 py-2 dark:border-zinc-800/60">
-              <Warning size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
+              <Warning
+                size={15}
+                className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-500"
+              />
               <ul className="min-w-0 flex-1">
                 {result.diagnostics.map((d, i) => (
                   <li
@@ -341,15 +343,13 @@ export function Editor({ nb, note }: Props) {
             <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.14em] text-stone-400 dark:text-zinc-500">
               <span>输出</span>
               <span className="flex items-center gap-2">
-                {hasPreview(result.value) && (
-                  <button
-                    onClick={() => setPreviewOpen(true)}
-                    className="flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 py-0.5 text-[11px] font-medium normal-case text-white dark:bg-emerald-600"
-                  >
-                    <Eye size={12} />
-                    预览
-                  </button>
-                )}
+                <button
+                  onClick={() => setPreviewOpen(true)}
+                  className="flex items-center gap-1 rounded-full bg-emerald-700 px-2.5 py-0.5 text-[11px] font-medium normal-case text-white dark:bg-emerald-600"
+                >
+                  <Eye size={12} />
+                  预览
+                </button>
                 <span>{result.durationMs.toFixed(1)}ms</span>
               </span>
             </div>

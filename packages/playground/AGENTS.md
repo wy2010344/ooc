@@ -17,7 +17,7 @@
 ## 结构
 
 - `src/lib/engine.ts` — 单例引擎：虚拟 FileSystemProvider（笔记内存视图）+ 群组桥接 `storage/loop/js/db/ui`。Node 下创建安全（DOM/IndexedDB 惰性）。
-- `src/lib/preview/` — 预览桥接：**信号层直接复用 `wy-helper`**（`createSignal`/`collectSignal`/`memo`），`CtxI`（显式 ctx 的 Fc 渲染）+ `dom.<tag>`/`text.bind` 为自定义薄层。mve-core/mve-dom 的 renderForEach/hook* 依赖**隐式 ctx**（`hookCurrentStateHolder`），与显式 Fc 结构不兼容，不直接复用（见 SKILL.md）。
+- `src/lib/preview/` — 预览桥接：**直接复用 mve-core/mve-dom**（`createRoot`/`renderChildren`/`StateHolder.renderForEach`），信号层复用 `wy-helper`（`createSignal`/`collectSignal`/`memo`）。`mountPreview(container, build)` 把 `createRoot` 的构建窗口包成「向 OOC 的 preview 发消息」，build 里经 `ctxFromHolder` 得到薄 `Ctx`；`dom.<tag>`/`text.bind`/`forEach` 为自定义薄层。运行时 addNode 只收集不挂载，改界面一律走信号。
 - `src/lib/run.ts` — `runNote(engine, name, source)`：先类型检查再解释。**每次运行用唯一会话路径 `__ooc-run-N/<name>`**，避免 Langium 文档注册表重复 URI 报错；basename 保持笔记名供 `#import` 查找。
 - `src/lib/store.ts` — IndexedDB（经 **idb** 封装）：笔记 CRUD + 执行历史（`history` store）。不要手写 `openDB`/事务样板。
 - `src/hooks/useNotebook.ts` — 状态管理 + 演示笔记播种（首次打开）。

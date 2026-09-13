@@ -1,7 +1,6 @@
 import {
   createInterpretAction,
   createTypeCheckAction,
-  invoke,
   js,
   loop,
   ObjectValue,
@@ -9,8 +8,10 @@ import {
 } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
-import { collectSignal, createSignal, memo } from 'wy-helper'
-import { context, dom, fc, forEach, text } from './preview/dom.js'
+import { addEffect, createSignal, memo } from 'wy-helper'
+import { createContext } from 'mve-core'
+import { dom, html, text } from './preview/dom.js'
+import { fc, forEach } from './preview/fc.js'
 
 export interface NotebookEntry {
   name: string
@@ -26,7 +27,9 @@ export function createVirtualFs(
   listNotes: () => NotebookEntry[],
 ): FileSystemProvider {
   const moduleNameOf = (uri: URI) =>
-    (decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? '').toLowerCase()
+    (
+      decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
+    ).toLowerCase()
 
   const byName: Record<string, string> = {}
   for (const n of listNotes()) {
@@ -79,108 +82,40 @@ export function createVirtualFs(
 
 /**
  * 宿主桥接。OOC 源码可以直接按名引用这些对象：
- *   storage / loop / js / ObjectValue  —— 语言包内置（ref / repeat / throw / new / fn / 反射）
- *   db / ui  —— playground 注入：
- *     db.notes() 列出所有笔记名
- *     db.read '名字' 读取笔记源码
- *     ui.dom '选择器' '属性' '值' 修改页面元素
- *     ui.add '标签' '文本' 追加一个元素
- *     ui.get '选择器' 读取 input 的值（旧模式，受控输入应改用 dom input value => 信号）
- *   fc / dom / text / context / forEach  —— 预览渲染（详见 src/lib/preview/）：
- *     组件：fc apply [ctx,...]；元素：dom.div props children；文本：text bind '...'；
- *     列表区域：forEach apply {...}（内部委托 mve renderForEach，无需自取 ctx）；
- *     受控输入：value => 只读 λ 显示 + onValueChange(v) => 信号 set v 写回（带参方法，
- *     宿主把输入框新值作为第一个参数传入成员，参数名 v 在成员体里直接用）。
- *   createSignal / createMemo / createEffect  —— 信号引擎直接复用 wy-helper
- *     （createSignal/collectSignal/memo），不再自研平行实现。批处理调度默认 MessageChannel，
- *     测试环境由 test/preload-batch.mjs 在导入前置空 globalThis.MessageChannel 切到 setTimeout：
- *     响应式状态。signal 是 { get() / set() }，渲染期被读取的信号变化后，
- *     renderForEach 所在区域自动重建（见 preview/ctx.ts 的 key 合成说明）。
+ *   storage / loop / js / ObjectValue  —— 语言包内置（ref / repeat / throw / new / 反射）
+ *   fc / dom / html / text / createContext / forEach  —— 预览渲染（详见 src/lib/preview/）：
+ *     组件包装：fc apply [ctx,...]；元素：dom.div 属性对象 子组件...；
+ *     动态文本：text apply <字符串或信号 getter>；HTML 片段：html apply ...；
+ *     forEach apply {列表提供者, 渲染}（内部委托 mve renderForEach，无需自取 ctx）。
+ *     属性分流按元信息：call 成员（`=>` 方法/事件/信号 getter）交给 mve 当函数属性，
+ *     其余（bind/mutable）构造时一次性读值作为常量属性。
+ *   createSignal / memo / addEffect  —— 响应式原语直接复用 wy-helper，不再自研平行实现。
+ *     signal 是 { get() / set() }；渲染期被读取的信号变化后，所在区域自动重建。
+ *     批处理调度默认 MessageChannel，测试环境由 test/preload-batch.mjs 置空
+ *     globalThis.MessageChannel 切到 setTimeout（见各包 AGENTS.md）。
  *   Array 等 globalThis 全局 JS 对象直接发消息即可（深度接 JS 生态），如 `(Array of)` 造空数组；
  *     数组不可变改法 `xs / toSpliced 1 0 {...}`（数组原生方法，返回新数组、旧数组不动），
  *     配合 list set，信号能察觉变化重渲染。
  */
 
-export function createGlobals(listNotes: () => NotebookEntry[]) {
-  const db = {
-    notes() {
-      return listNotes().map((n) => n.name)
-    },
-    read(name: string) {
-      const found = listNotes().find(
-        (n) => n.name.toLowerCase() === name.toLowerCase(),
-      )
-      return found ? found.source : 'nil'
-    },
-  }
-
-  const ui = {
-    // ui dom '选择器' '属性' '值' → 修改元素属性，返回是否命中
-    dom(selector: string, prop: string, value: unknown) {
-      const el = document.querySelector(selector)
-      if (!el) return false
-      ;(el as unknown as Record<string, unknown>)[prop] = value
-      return true
-    },
-    // ui add '标签' '文本' → body 末尾追加元素
-    add(tag: string, text: unknown) {
-      const el = document.createElement(tag)
-      el.textContent = String(text)
-      document.body.appendChild(el)
-      return true
-    },
-    // ui get '选择器' → 读取 input/textarea 当前值（找不到返回空串）
-    get(selector: string) {
-      const el = document.querySelector(selector) as
-        | HTMLInputElement
-        | HTMLTextAreaElement
-        | null
-      return el ? String(el.value ?? '') : ''
-    },
-  }
-
+export function createGlobals() {
   return {
     storage,
     loop,
     js,
-    // 反射桥接：ObjectValue isDefined x / messagesOf x / metaOf x —— 判断对象是否是
-    // OOC 定义值并读取其元信息（构造时烧录，语言内消息不可见、不可伪造）
+    // 反射桥接：ObjectValue metaOf x —— 读 OOC 定义值的元信息（构造时烧录，
+    // 语言内消息不可见、不可伪造）；非定义值返回 undefined
     ObjectValue,
     fc,
+    createContext,
     dom,
+    html,
     text,
-    context,
-    db,
-    ui,
     // 响应式信号：createSignal apply <初值> → { get(), set() }
-    // 宿主函数要用 { apply } 形态暴露，否则 `fn apply x` 会命中 JS 的
-    // Function.prototype.apply（把 x 当 args 数组而非实参）。
-    createSignal: { apply: (v: unknown) => createSignal(v) },
-    // createMemo apply <lambda> → 记忆化 signal（lambda 读取的信号变化后重算）
-    createMemo: {
-      apply(get: unknown) {
-        const m = memo<unknown>((last?: unknown, inited?: boolean) =>
-          invoke(get, [last, inited]),
-        )
-        return { get: () => m() }
-      },
-    },
-    // createEffect apply <lambda> → 立即执行一次 lambda，读到的信号变化后重跑。
-    // wy-helper 的 addEffect 只排程不追踪依赖，故用 collectSignal 压实：
-    // collect 收集 lambda 读到的信号，后续批次由回调重跑。
-    createEffect: {
-      apply(fn: unknown) {
-        let started = false
-        const collector = collectSignal(() => {
-          if (started) invoke(fn, [])
-        })
-        collector.collect(() => {
-          started = true
-          return invoke(fn, [])
-        })
-        return null
-      },
-    },
+    createSignal,
+    // memo apply <lambda> → 记忆化 signal（lambda 读取的信号变化后重算）
+    memo,
+    addEffect,
     // 区域组件：forEach apply <区域对象> → 组件（内部委托 mve renderForEach，无需自取 ctx）
     forEach,
   } as const
@@ -190,7 +125,7 @@ export function createEngine(listNotes: () => NotebookEntry[]) {
   const fs = createVirtualFs(listNotes)
   const interpret = createInterpretAction(
     { fileSystemProvider: () => fs },
-    createGlobals(listNotes),
+    createGlobals(),
   )
   const typeCheck = createTypeCheckAction({ fileSystemProvider: () => fs })
   return { interpret, typeCheck }
@@ -218,25 +153,21 @@ export function formatValue(value: Value): string {
   }
   const lines: string[] = []
   // OOC 定义对象：元信息驱动，调用安全的才求值，否则标 (方法)
-  if (ObjectValue.isDefined(value)) {
-    for (const m of ObjectValue.membersOf(value)) {
-      const item = (value as Record<string, unknown>)[m.name]
+  const meta = ObjectValue.metaOf(value)
+  if (meta) {
+    meta.forEach((entries) => {
+      const head = entries[0]
+      // 首位定义优先，与消息分发同语义；bind/mutable 的 meta 条目直接挂着
+      // 缓存值（bind 恒返构造值、mutable 为活引用），读它零副作用；
+      // call（`=>` 方法/事件/guard）绝不调用，否则会执行方法体副作用（如改信号）
       let rendered: string
-      if (m.type === 'call') {
-        // 动态方法/事件/guard —— 调用会执行副作用或需参数，绝不调用
+      if (head.type === 'call') {
         rendered = '(方法)'
-      } else if (typeof item === 'function') {
-        // bind / mutable 无参调用返回缓存值（bind 恒同、mutable 可读当前值），安全
-        try {
-          rendered = formatValue(item.call(value))
-        } catch {
-          rendered = '(方法)'
-        }
       } else {
-        rendered = '(方法)'
+        rendered = formatValue(head.value)
       }
-      lines.push(`  ${m.name}: ${rendered}`)
-    }
+      lines.push(`  ${head.name}: ${rendered}`)
+    })
     return `{\n${lines.join('\n')}\n}`
   }
   // 宿主对象（ref/fc/宿主数组等）：退化 for-in 展开，保留既有可读性

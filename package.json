@@ -27,6 +27,11 @@
         "packages/cli",
         "packages/extension",
         "packages/example",
-        "packages/playground"
+        "packages/playground",
+        "../es-pseudo-monorepo/packages/mve/core",
+        "../es-pseudo-monorepo/packages/mve/dom",
+        "../es-pseudo-monorepo/packages/mve/helper",
+        "../es-pseudo-monorepo/packages/wy-helper/wy-helper",
+        "../es-pseudo-monorepo/packages/wy-helper/wy-dom-helper"
     ]
 }

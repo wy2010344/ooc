@@ -1,4 +1,5 @@
-import { invoke, readOocMeta, type OocMemberMeta, type OocMeta } from './runtime.js'
+import { emptyArray } from 'wy-helper'
+import { readOocMeta, sendMessage, type OocMeta } from './runtime.js'
 
 /**
  * 宿主注入的 JS 全局对象（storage/loop/js/ObjectValue），供 OOC 源码直接按名引用。
@@ -26,7 +27,7 @@ export const storage = {
 export const loop = {
   // loop apply fn：只要 fn 返回真值就继续循环（至少调用一次）
   apply(fn: unknown) {
-    while (invoke(fn)) {}
+    while (sendMessage(fn, 'apply', emptyArray)) {}
     return null
   },
   // loop repeat n fn：恰好执行 fn n 次
@@ -36,7 +37,7 @@ export const loop = {
       throw new TypeError(`loop repeat 需要非负整数次数，收到 ${n}`)
     }
     for (let i = 0; i < times; i++) {
-      invoke(fn)
+      sendMessage(fn, 'apply', [i])
     }
     return null
   },
@@ -55,10 +56,6 @@ export const js = {
     }
     return new (ctor as new (...a: unknown[]) => unknown)(...args)
   },
-  // js fn lambda → 把 OOC lambda 包装成真 JS 函数（给定时器/事件回调用）
-  fn(lambda: unknown) {
-    return (...args: unknown[]) => invoke(lambda, args)
-  },
 }
 
 /**
@@ -68,44 +65,8 @@ export const js = {
  * 业务值无法伪造。lambda 仍是 JS 函数，不带这种元信息（isDefined 返回 false）。
  */
 export const ObjectValue = {
-  /** 值是否为 OOC 定义对象（字面量构造出的，含空对象 {}） */
-  isDefined(x: unknown) {
-    return !!readOocMeta(x)
-  },
-  /** 沿原型链聚合 x 能响应的消息名（含父层定义，去重保序） */
-  messagesOf(x: unknown): string[] {
-    return ObjectValue.membersOf(x).map((m) => m.name)
-  },
-  /**
-   * 沿原型链聚合成员表（含父层定义，key 去重保序）：每条附静态/动态标记——
-   * bind=` 构造时缓存一次（静态，赋值一次即可）；call（`=>` 方法/带 guard）与
-   * mutable 每次调用都会重新求值/可写（动态，宿主需建立观察）。
-   * 子层同名覆盖父层的动态/静态判定。DOM 属性桥接靠它决定「set 一次 vs 跟踪」。
-   */
-  membersOf(x: unknown): OocMemberMeta[] {
-    const out: OocMemberMeta[] = []
-    const seen = new Map<string, number>()
-    let cur: unknown = x
-    while (cur && (typeof cur === 'object' || typeof cur === 'function')) {
-      const meta = readOocMeta(cur)
-      if (meta) {
-        for (const m of meta.members) {
-          const idx = seen.get(m.name)
-          if (idx === undefined) {
-            seen.set(m.name, out.length)
-            out.push({ ...m })
-          } else {
-            // 子层覆盖父层判定
-            out[idx] = { ...m }
-          }
-        }
-      }
-      cur = Object.getPrototypeOf(cur)
-    }
-    return out
-  },
   /** x 的元信息：{ members: 本层定义的消息表 }，非语言对象为 nil */
-  metaOf(x: unknown): OocMeta | null {
-    return readOocMeta(x) ?? null
+  metaOf(x: unknown): OocMeta | undefined {
+    return readOocMeta(x)
   },
 }

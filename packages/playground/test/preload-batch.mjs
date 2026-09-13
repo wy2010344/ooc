@@ -5,6 +5,21 @@
 // 因此先置空 MessageChannel 兜底；≥1.1.4 支持 setBatchRunner，这里再显式注入
 // setTimeout 调度（一次宏任务合并多笔 set，批量语义不变），进程可正常退出。
 globalThis.MessageChannel = undefined
+if (typeof globalThis.matchMedia !== 'function') {
+  const stub = { matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }
+  globalThis.matchMedia = () => stub
+}
+// mve-dom/wy-dom-helper 是 web-first：dist 顶层会读 window?.innerWidth。Node 下补最小桩。
+if (typeof globalThis.window === 'undefined') {
+  globalThis.window = {
+    innerWidth: 1024,
+    innerHeight: 768,
+    devicePixelRatio: 1,
+    addEventListener() {},
+    removeEventListener() {},
+    matchMedia: globalThis.matchMedia,
+  }
+}
 const wy = await import('wy-helper')
 if (typeof wy.setBatchRunner === 'function') {
   wy.setBatchRunner((flush) => setTimeout(flush))

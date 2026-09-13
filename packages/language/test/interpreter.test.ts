@@ -15,6 +15,7 @@ import {
   ObjectValue,
   OocCircularImportError,
   OocMethodNotFoundError,
+  sendMessage,
 } from 'object-oriented-c-language'
 
 let interpreter: ReturnType<typeof createInterpretAction>
@@ -741,28 +742,26 @@ describe('除法运算', () => {
 })
 
 describe('ObjectValue 元信息反射', () => {
-  test('JS 侧：定义对象带元信息，可读成员表且不可伪造', async () => {
+  test('JS 侧：定义对象带元信息，可读本层成员表（带缓存值）且不可伪造', async () => {
     const result = await interpreter.interpret(`
         p = {a => 1, b(x) => x};
         c = {...p, d = 2, e(v) => v};
         c
     `)
-    expect(ObjectValue.isDefined(result)).toBe(true)
-    // 沿原型链聚合：自身 d(mutable)/e(call) 在前，父层 p a(bind)/b(call) 在后
-    const names = ObjectValue.messagesOf(result)
-    expect(names).toEqual(['d', 'e', 'a', 'b'])
     const meta = ObjectValue.metaOf(result)
-    expect(meta?.members.map((m) => m.name)).toEqual(['d', 'e'])
-    // membersOf 带静态/动态判定：d=`=` bind、e=`=>` call、父层 a/b 均为 call
-    expect(ObjectValue.membersOf(result)).toEqual([
-      { name: 'd', type: 'bind' },
-      { name: 'e', type: 'call' },
-      { name: 'a', type: 'call' },
-      { name: 'b', type: 'call' },
-    ])
+    expect(meta instanceof Map).toBe(true)
+    // 本层成员：d（bind）缓存值即定义时求值、e（call）
+    expect([...meta!.keys()]).toEqual(['d', 'e'])
+    const d = meta!.get('d')![0]
+    expect(d.type).toBe('bind')
+    expect((d as { value: number }).value).toBe(2)
+    expect(meta!.get('e')![0].type).toBe('call')
+    // 父层不在本层元信息里：沿原型链逐层读
+    const parentMeta = ObjectValue.metaOf(Object.getPrototypeOf(result))
+    expect([...parentMeta!.keys()]).toEqual(['a', 'b'])
   })
 
-  test('guard 重载同 key 折叠为一条，bind 与动态同名时升为动态', async () => {
+  test('guard 重载同 key 不折叠，bind 与动态同名条目并列（顺序即定义序）', async () => {
     const eq = await interpreter.interpret(`
         eq = { equal(a, b) => 1, equal(a) => 2 };
         eq
@@ -771,55 +770,52 @@ describe('ObjectValue 元信息反射', () => {
         mix = { x = 1, x(v) => v };
         mix
     `)
-    // guard 重载折叠成一条 equal（call）
-    expect(ObjectValue.messagesOf(eq)).toEqual(['equal'])
-    expect(ObjectValue.metaOf(eq)?.members).toEqual([
-      { name: 'equal', type: 'call' },
-    ])
-    // 同名 x：bind 在前 + call 在后 → 折叠为 call（动态优先，宿主须观察）
-    expect(ObjectValue.membersOf(mix)).toEqual([{ name: 'x', type: 'call' }])
+    // guard 重载同 key 两条都保留（宿主可自行取 value[0] 或遍历）
+    const equalEntries = ObjectValue.metaOf(eq)!.get('equal')!
+    expect(equalEntries.length).toBe(2)
+    expect(equalEntries.every((m) => m.type === 'call')).toBe(true)
+    // 同名 x：bind 在前 + call 在后，两条并列
+    const xEntries = ObjectValue.metaOf(mix)!.get('x')!
+    expect(xEntries.map((m) => m.type)).toEqual(['bind', 'call'])
+    // 行为取首位定义（宿主消费元信息同样取 value[0]）：bind 在最前，有参也恒返回缓存值
+    expect(sendMessage(mix, 'x', [])).toBe(1)
+    expect(sendMessage(mix, 'x', [5])).toBe(1)
   })
 
-  test('空对象 {} 是语言定义值，成员为空', async () => {
+  test('空对象 {} 是语言定义值，元信息为空 Map', async () => {
     const result = await interpreter.interpret(`{}`)
-    expect(ObjectValue.isDefined(result)).toBe(true)
-    expect(ObjectValue.messagesOf(result)).toEqual([])
+    const meta = ObjectValue.metaOf(result)
+    expect(meta instanceof Map).toBe(true)
+    expect(meta!.size).toBe(0)
   })
 
   test('lambda 仍是 JS 函数，不带元信息', async () => {
     const result = await interpreter.interpret(`[x => x]`)
     expect(typeof result).toBe('function')
-    expect(ObjectValue.isDefined(result)).toBe(false)
+    expect(ObjectValue.metaOf(result)).toBeUndefined()
   })
 
   test('宿主 JS 值（数组/字符串/数字）不是语言定义值', async () => {
     const arr = await interpreter.interpret(`(Array of)`)
-    expect(ObjectValue.isDefined(arr)).toBe(false)
+    expect(ObjectValue.metaOf(arr)).toBeUndefined()
     const str = await interpreter.interpret(`'x'`)
-    expect(ObjectValue.isDefined(str)).toBe(false)
+    expect(ObjectValue.metaOf(str)).toBeUndefined()
     const num = await interpreter.interpret(`3`)
-    expect(ObjectValue.isDefined(num)).toBe(false)
+    expect(ObjectValue.metaOf(num)).toBeUndefined()
   })
 
   test('OOC 侧：ObjectValue 桥接对象可直接发消息', async () => {
     const withBridge = createInterpretAction(EmptyFileSystem, { ObjectValue })
-    const defined = await withBridge.interpret(
-      `ObjectValue isDefined {a => 1}`,
-    )
-    expect(defined).toBe(true)
-    const notDefined = await withBridge.interpret(
-      `ObjectValue isDefined [x => x]`,
-    )
-    expect(notDefined).toBe(false)
-    const names = await withBridge.interpret(`
-        p = {a => 1};
-        c = {...p, b => 2};
-        ObjectValue messagesOf c / length
+    // metaOf 返回 Map：get 'a' 取同名定义列表（1 条）
+    const one = await withBridge.interpret(`
+        m = ObjectValue metaOf {a => 1, b => 2};
+        m get 'a' / length
     `)
-    expect(names).toBe(2)
-    const selfMeta = await withBridge.interpret(
-      `ObjectValue metaOf {x => 1} / members / length`,
-    )
-    expect(selfMeta).toBe(1)
+    expect(one).toBe(1)
+    // lambda / 宿主值不是语言定义值，metaOf 返回 nil（undefined）
+    const fn = await withBridge.interpret(`ObjectValue metaOf [x => x]`)
+    expect(fn).toBeUndefined()
+    const host = await withBridge.interpret(`ObjectValue metaOf (Array of)`)
+    expect(host).toBeUndefined()
   })
 })

@@ -45,13 +45,15 @@ Assignment:
 Method:
     MethodAll | MethodBind | MethodBindMutable;
 
+fragment ParamAll:
+    (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)?
+             | ('...' restParam=Param)
+;
 MethodAll:
     name=MethodDefName 
         ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')?
         ('(' 
-            ( (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)?
-             | ('...' restParam=Param)
-            ) 
+            ParamAll
           ')' 
         )? 
         (':' returnType=Type)?
@@ -138,7 +140,7 @@ ComplexPrimary:
 //  [42]                  无参 lambda，函数体为表达式
 LambdaDef:
     '['
-        (params+=Param (',' params+=Param)* '=>')?
+        (ParamAll '=>')?
         (expressions+=Statement (';' expressions+=Statement)* ';'?)?
     ']';
 
