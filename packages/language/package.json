@@ -15,6 +15,7 @@
     "module": "./out/index.js",
     "exports": {
         ".": {
+            "development": "./src/index.ts",
             "types": "./out/index.d.ts",
             "default": "./out/index.js"
         }

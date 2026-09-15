@@ -10,7 +10,25 @@ export function addScope(scope: Scope, key: string, value: any) {
   return new KVPair(key, value, scope)
 }
 
+const scopeSymbol = Symbol('scope')
+
 export function getScope(scope: Scope, key: string) {
+  if (key == 'currentScope') {
+    if (scope) {
+      const temp = scope as any
+      let old = temp[scopeSymbol]
+      if (old) {
+        return old
+      }
+      old = {
+        methodNotFound(name: string) {
+          return getScope(scope, name)
+        },
+      }
+      temp[scopeSymbol] = old
+      return old
+    }
+  }
   if (scope) {
     const kv = scope.get(key)
     if (kv) {

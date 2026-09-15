@@ -1,25 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useHashLocation } from 'wouter/use-hash-location'
-import type { Engine } from '../lib/engine.js'
 import { createEngine } from '../lib/engine.js'
 import { store } from '../lib/store.js'
 import type { RunResult } from '../lib/run.js'
 import { runNote } from '../lib/run.js'
-import { DEMO_NOTES } from './demos.js'
-
-/** 引擎读取笔记时总是拿最新清单（Notes 在 IndexedDB，运行时闭包引用这个 holder） */
-const notesHolder: { current: Array<{ name: string; source: string }> } = {
-  current: [],
-}
-
-let engineCache: Engine | null = null
-
-function getEngine(): Engine {
-  if (!engineCache) {
-    engineCache = createEngine(() => notesHolder.current)
-  }
-  return engineCache
-}
+import { DEMO_NOTES } from '../demos/index.js'
 
 export function useNotebook() {
   const [notes, setNotes] = useState<Array<{ name: string; source: string }>>(
@@ -27,6 +12,16 @@ export function useNotebook() {
   )
   const [active, setActive] = useState<string | null>(null)
   const loaded = useRef(false)
+
+  // 最新笔记列表始终跟着 React state 走（每帧同步 ref）。
+  // 不能放模块级变量：Vite HMR 会清空模块作用域，只保留组件 state，
+  // 热重载后路由/引擎会读到空列表导致「看不清笔记、点击不进入」。
+  const notesRef = useRef<Array<{ name: string; source: string }>>([])
+  notesRef.current = notes
+
+  // 引擎懒创建一次并随 state 保留（HMR 不重建）：虚拟 FS 每次实时读 notesRef，
+  // 无论何时创建都能看到最新笔记，引擎引用对 Editor/run 始终稳定。
+  const [engine] = useState(() => createEngine(() => notesRef.current))
 
   // wouter 的 hash 定位：location 是去 # 的路径（'/' 或 '/note/<编码名>'），navigate 写回 hash
   const [location, navigateTo] = useHashLocation()
@@ -49,7 +44,7 @@ export function useNotebook() {
     } catch {
       return null
     }
-    const hit = notesHolder.current.find(
+    const hit = notesRef.current.find(
       (n) => n.name.toLowerCase() === decoded.toLowerCase(),
     )
     return hit ? hit.name : null
@@ -63,7 +58,6 @@ export function useNotebook() {
 
   const refresh = useCallback(async () => {
     const list = await store.list()
-    notesHolder.current = list
     setNotes(list)
   }, [])
 
@@ -83,7 +77,6 @@ export function useNotebook() {
         }
       }
       const list2 = await store.list()
-      notesHolder.current = list2
       setNotes(list2)
       // 初始页不在此设：location effect 已在首帧按书签/默认路径同步 active
     })
@@ -128,7 +121,6 @@ export function useNotebook() {
     async (name: string) => {
       await store.remove(name)
       const list = await store.list()
-      notesHolder.current = list
       setNotes(list)
       // 删掉当前笔记后回列表，简单可预期
       navigate(null)
@@ -140,10 +132,10 @@ export function useNotebook() {
     async (name: string, source: string): Promise<RunResult> => {
       // 先落盘再跑，让 #import 其它笔记能看到本笔记最新内容
       await store.upsert(name, source)
-      notesHolder.current = notesHolder.current.map((n) =>
+      notesRef.current = notesRef.current.map((n) =>
         n.name === name.toLowerCase() ? { ...n, source } : n,
       )
-      const result = await runNote(getEngine(), name, source)
+      const result = await runNote(engine, name, source)
       // 记录执行历史（菜单里可回看）
       try {
         await store.logRun({
@@ -173,7 +165,6 @@ export function useNotebook() {
         await store.upsert(d.name, d.source)
       }
       const list = await store.list()
-      notesHolder.current = list
       setNotes(list)
       navigate(list.length > 0 ? list[0].name : null)
     },
@@ -193,7 +184,7 @@ export function useNotebook() {
     // 最新演示数据（开发面板展示 + 重置用）
     demos: DEMO_NOTES,
     // 共享引擎：Editor 里的实时重排/lint 也复用同一个 typeCheck（同一套 langium 校验）
-    engine: getEngine(),
+    engine,
   }
 }
 

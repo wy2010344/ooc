@@ -8,7 +8,8 @@ import { ObjectValue, sendMessage } from 'object-oriented-c-language'
 import { createRoot } from 'mve-dom'
 import type { StateHolderWithNode } from 'mve-core'
 import { createEngine, formatValue } from '../src/lib/engine.js'
-import { PREVIEW_DEMO, TODO_DEMO } from '../src/hooks/demos.js'
+import { PREVIEW_DEMO, TODO_DEMO } from '../src/demos/index.js'
+import { DEMO_NOTES } from '../src/demos/index.js'
 import { runNote } from '../src/lib/run.js'
 import { dom, text } from '../src/lib/preview/dom.js'
 import { fc } from '../src/lib/preview/fc.js'
@@ -375,4 +376,35 @@ test('ObjectValue 反射：OOC 定义值可读元信息', async () => {
   assert.equal(sendMessage(r.value, 'a', []), 1, 'call 成员仍可发消息调用')
   assert.equal(sendMessage(r.value, 'b', []), 2, 'bind 成员返回缓存值')
   assert.equal(ObjectValue.metaOf(42), undefined, '非定义值无元信息')
+})
+
+test('宿主.ooc demo：storage ref + loop repeat 桥接可跑', async () => {
+  const engine = createEngine(notes)
+  const r = await runNote(engine, '宿主.ooc', DEMO_NOTES.find((d) => d.name === '宿主.ooc')!.source)
+  assert.equal(r.error, null, r.error ?? '')
+  // loop repeat 10 [x => n set ((n get) + x)]：从 0 起按索引累加 0..9 = 45
+  assert.equal(r.output, '45')
+})
+
+test('跨笔记导入：工具库.ooc 导出对象被 #import 复用', async () => {
+  const engine = createEngine(() => DEMO_NOTES)
+  const lib = DEMO_NOTES.find((d) => d.name === '工具库.ooc')!
+  assert.ok(lib, '工具库.ooc 应存在于播种列表')
+  // 先跑工具库本身确认能导出对象
+  const libRun = await runNote(engine, '工具库.ooc', lib.source)
+  assert.equal(libRun.error, null, libRun.error ?? '')
+  // 跨笔记导入.ooc：#import '工具库.ooc' 后用它的方法
+  const imp = DEMO_NOTES.find((d) => d.name === '跨笔记导入.ooc')!
+  const r = await runNote(engine, '跨笔记导入.ooc', imp.source)
+  assert.equal(r.error, null, r.error ?? '')
+  // 模块输出 = 最后一条表达式：m sum 4 = 1+2+3+4 = 10
+  assert.equal(r.output, '10', `实际输出: ${r.output}`)
+  // parity 用内联脚本独立验证（first-class 方法的复用路径）
+  const p = await runNote(
+    engine,
+    'parity-check',
+    "m = #import '工具库.ooc';\nm parity 7\n",
+  )
+  assert.equal(p.error, null, p.error ?? '')
+  assert.equal(p.output, 'odd', `实际输出: ${p.output}`)
 })

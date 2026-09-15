@@ -818,4 +818,62 @@ describe('ObjectValue 元信息反射', () => {
     const host = await withBridge.interpret(`ObjectValue metaOf (Array of)`)
     expect(host).toBeUndefined()
   })
+
+  describe('currentScope 伪对象', () => {
+    test('方法体内读当前作用域变量', async () => {
+      const result = await interpreter.interpret(`
+          x = 10;
+          obj = {
+            getX => currentScope x
+          };
+          obj getX
+      `)
+      expect(result).toBe(10)
+    })
+
+    test('方法体内局部变量遮蔽外层变量', async () => {
+      const result = await interpreter.interpret(`
+          x = 10;
+          obj = {
+            getX { y = 7; currentScope x }
+          };
+          obj getX
+      `)
+      // 同作用域内后写的 y 不遮蔽 x；这里强调：方法体内创建的局部绑定在作用域链上，
+      // 而对象成员（this 属性）不在链上，currentScope 读的是执行作用域链
+      expect(result).toBe(10)
+    })
+
+    test('读方法体内创建的局部绑定', async () => {
+      const result = await interpreter.interpret(`
+          z = 30;
+          obj = {
+            getZ { y = 7; currentScope y }
+          };
+          obj getZ
+      `)
+      // y 是方法体内新建的局部绑定（无外层同名），currentScope 能读到它
+      expect(result).toBe(7)
+    })
+
+    test('外层作用域变量穿透', async () => {
+      const result = await interpreter.interpret(`
+          outer = 99;
+          obj = {
+            getOuter => currentScope outer
+          };
+          obj getOuter
+      `)
+      expect(result).toBe(99)
+    })
+
+    test('未定义变量回退 globalRoot 抛错', async () => {
+      await expect(
+        interpreter.interpret(`
+            obj = { getX => currentScope missingVar };
+            obj getX
+        `),
+      ).rejects.toThrow()
+    })
+  })
 })

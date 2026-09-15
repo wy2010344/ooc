@@ -31,11 +31,16 @@ export function createVirtualFs(
       decodeURIComponent(uri.path).split('/').filter(Boolean).pop() ?? ''
     ).toLowerCase()
 
-  const byName: Record<string, string> = {}
-  for (const n of listNotes()) {
-    byName[n.name.toLowerCase()] = n.source
+  // 每次现取最新笔记列表：notesHolder 随 React state 更新（HMR 后仍有效），
+  // #import 始终能看到当前全部笔记，不受引擎创建时机限制
+  const byName = () => {
+    const m: Record<string, string> = {}
+    for (const n of listNotes()) {
+      m[n.name.toLowerCase()] = n.source
+    }
+    return m
   }
-  const hasName = (name: string) => byName[name] !== undefined
+  const hasName = (name: string) => byName()[name] !== undefined
   return {
     stat(uri) {
       if (hasName(moduleNameOf(uri))) {
@@ -62,7 +67,7 @@ export function createVirtualFs(
       return new Uint8Array()
     },
     readFile(uri) {
-      const source = byName[moduleNameOf(uri)]
+      const source = byName()[moduleNameOf(uri)]
       if (source == null) {
         return Promise.reject(new Error(`模块不存在: ${uri.path}`))
       }

@@ -8,7 +8,9 @@ import { ObjectValue } from 'object-oriented-c-language'
 
 //元素组件：第一个参数是属性对象，其余是子组件（DComponent）。
 //调用时在 build 窗口内执行（this=StateHolder），经 renderFDom 挂到当前 holder。
-export type DComponent = (ctx: StateHolderWithNode<Node, readonly Node[]>) => unknown
+export type DComponent = (
+  ctx: StateHolderWithNode<Node, readonly Node[]>,
+) => unknown
 
 export const dom: {
   readonly [key in DomElementType]: (
@@ -36,14 +38,22 @@ export const dom: {
       return renderFDom(tag as any, {
         ...to,
         children() {
-          children.forEach((child) => {
-            child(this)
-          })
+          renderChildren(children, this)
         },
       }) as any
     }
   }
 })
+
+function renderChildren(children: any, ctx: any) {
+  children.forEach((child) => {
+    if (Array.isArray(child)) {
+      renderChildren(child, ctx)
+    } else {
+      child(ctx)
+    }
+  })
+}
 
 export const text = fc(function (_ctx, value: string | GetValue<string>) {
   renderTextContent(value)
