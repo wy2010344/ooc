@@ -10,6 +10,7 @@ export type TypeInfo =
   | { kind: 'union'; types: TypeInfo[] }
   | ObjectTypeInfo
   | { kind: 'function' }
+  | { kind: 'intersection'; types: TypeInfo[]; delegation?: boolean }
 
 export interface ObjectTypeInfo {
   kind: 'object'
@@ -93,6 +94,8 @@ const commonMethods: Map<string, MethodSig[]> = new Map([
   ['!!', [builtinMethod([], booleanType)]],
   ['~!', [builtinMethod([], booleanType)]],
   ['not', [builtinMethod([], booleanType)]],
+  // include：容器成员判定（类/数组/Set/Map 统一），返回布尔
+  ['include', [builtinMethod([anyType], booleanType)]],
 ])
 
 export function getBuiltinMethods(typeName: string): Map<string, MethodSig[]> {
@@ -139,6 +142,13 @@ export function isSubtype(a: TypeInfo, b: TypeInfo): boolean {
     return a.types.every((t) => isSubtype(t, b))
   }
   if (b.kind === 'union') {
+    return b.types.some((t) => isSubtype(a, t))
+  }
+  // 交集：a 的每个成员都能赋给 b（交集是两者的公共部分，天然是各成员的子类型）
+  if (a.kind === 'intersection') {
+    return a.types.every((t) => isSubtype(t, b))
+  }
+  if (b.kind === 'intersection') {
     return b.types.some((t) => isSubtype(a, t))
   }
   // 字面量：'circle' 是 string 的子类型；同值字面量相等
@@ -213,6 +223,15 @@ export function unionOf(types: TypeInfo[]): TypeInfo {
   return { kind: 'union', types: flat }
 }
 
+/** 交集：成员的公共部分。delegation=true 时为委托交集（withDefault），任一侧定义即可 */
+export function intersectionOf(types: TypeInfo[], delegation?: boolean): TypeInfo {
+  const flat = types.flatMap((t) => (t.kind === 'intersection' ? t.types : [t]))
+  if (flat.length === 1) {
+    return flat[0]
+  }
+  return { kind: 'intersection', types: flat, delegation }
+}
+
 export function describeType(t: TypeInfo): string {
   switch (t.kind) {
     case 'any':
@@ -223,6 +242,8 @@ export function describeType(t: TypeInfo): string {
       return typeof t.value === 'string' ? `'${t.value}'` : String(t.value)
     case 'union':
       return t.types.map(describeType).join(' | ')
+    case 'intersection':
+      return t.types.map(describeType).join(' & ')
     case 'object':
       return t.name ?? '对象'
     case 'function':
@@ -249,5 +270,12 @@ export function literalBaseName(
 }
 
 export function typeToString(type: Type): string {
-  return type.parts.map(typeNameToString).join(' | ')
+  const parts = [typeNameToString(type.first)]
+  if (type.seps && type.rest) {
+    for (let i = 0; i < type.seps.length; i++) {
+      parts.push(` ${type.seps[i]} `)
+      parts.push(typeNameToString(type.rest[i]))
+    }
+  }
+  return parts.join('')
 }

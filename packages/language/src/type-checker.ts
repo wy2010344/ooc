@@ -4,6 +4,7 @@ import { diagnosticData } from './diagnostics-config.js'
 import {
   isAssignment,
   isBool,
+  isCastExpression,
   isComplexPrimary,
   isImportList,
   isImportStatement,
@@ -56,6 +57,7 @@ import {
   nilType,
   numberType,
   stringType,
+  intersectionOf,
   unionOf,
   TypeEnv,
   type MethodSig,
@@ -558,7 +560,7 @@ export class ObjectOrientedCTypeChecker {
       accept(
         'warning',
         `类型不匹配：期望 ${describeType(exp)}，却得到了 ${describeType(inferred)}`,
-        { node: annotation, property: 'parts', data: diagnosticData('typeMismatch') },
+        { node: annotation, property: 'first', data: diagnosticData('typeMismatch') },
       )
     }
     // 注解类型获胜：后续按声明类型检查
@@ -573,6 +575,28 @@ export class ObjectOrientedCTypeChecker {
   ): ObjectTypeInfo {
     if (objDef.extends) {
       const parent = env.lookup(objDef.extends.value) ?? anyType
+      // 值类型（str/num/bool/nil）、字面量、函数不能作为原型父——继承必须挂在对象上
+      if (
+        parent.kind === 'name' &&
+        (parent.name === 'string' ||
+          parent.name === 'number' ||
+          parent.name === 'boolean' ||
+          parent.name === 'nil')
+      ) {
+        accept(
+          'error',
+          `对象不能继承值类型 '${parent.name}'：原型父必须是一个对象`,
+          {
+            node: objDef.extends,
+            data: diagnosticData('extendsValueType'),
+          },
+        )
+      } else if (parent.kind === 'literal' || parent.kind === 'function') {
+        accept('error', '对象不能继承字面量或函数：原型父必须是一个对象', {
+          node: objDef.extends,
+          data: diagnosticData('extendsValueType'),
+        })
+      }
       if (parent.kind === 'object') {
         // 单继承：父类型的方法合并进类型形状，运行时是方法路由的策略链
         objType.parent = objDef.extends.value
@@ -888,7 +912,7 @@ export class ObjectOrientedCTypeChecker {
 
   /** 提取 (x kind) 或 x kind 形式的无参方法调用 */
   private extractMethodCall(
-    e: Expression,
+    e: Expression | ComplexPrimary,
   ): { target: string; method: string } | undefined {
     if (!isMessageOrChain(e)) {
       return undefined
@@ -978,10 +1002,26 @@ export class ObjectOrientedCTypeChecker {
     typeParams?: string[],
     env?: TypeEnv,
   ): TypeInfo {
-    const resolved = type.parts.map((part) =>
-      this.resolveTypeName(part, accept, typeParams, env),
-    )
-    return unionOf(resolved)
+    // 解析第一个类型
+    const firstResolved = this.resolveTypeName(type.first, accept, typeParams, env)
+    
+    // 无分隔符：单类型
+    if (!type.seps || type.seps.length === 0) {
+      return firstResolved
+    }
+    
+    // 解析其余类型
+    const allTypes = [firstResolved]
+    for (let i = 0; i < type.rest.length; i++) {
+      allTypes.push(this.resolveTypeName(type.rest[i], accept, typeParams, env))
+    }
+    
+    // 检查是否包含交叉运算符（&）
+    const hasIntersection = type.seps.some(sep => sep === '&')
+    if (hasIntersection) {
+      return intersectionOf(allTypes)
+    }
+    return unionOf(allTypes)
   }
 
   private resolveTypeName(
@@ -1068,6 +1108,13 @@ export class ObjectOrientedCTypeChecker {
         return anyType
       }
       return template
+    }
+    // 环境回退：注解引用对象变量（匿名对象字面量）作为类型——soft typing，
+    // JSON 标签联合无需 #type 别名即可直接引用（pet: cat | dog）。
+    // 仅对象类型有效：值类型（number/string 等）不可当类型用。
+    const varType = env?.lookup(n)
+    if (varType && varType.kind === 'object') {
+      return varType
     }
     accept('warning', `未知类型 '${n}'`, {
       node: part,
@@ -1165,6 +1212,10 @@ export class ObjectOrientedCTypeChecker {
     env: TypeEnv,
     accept: ValidationAcceptor,
   ): TypeInfo {
+    if (isCastExpression(e)) {
+      // 类型断言：直接返回断言类型
+      return this.resolveAnnotation(e.type, accept, undefined, env)
+    }
     if (isPiplingExpression(e)) {
       let t = this.inferExpression(e.left, env, accept)
       t = this.inferRight(t, e.right, env, accept)
@@ -1320,6 +1371,21 @@ export class ObjectOrientedCTypeChecker {
         }
         return all.length > 0 ? all : undefined
       }
+      case 'intersection':
+        if (receiver.delegation) {
+          // 委托交集：任一侧有方法即可，取第一个有的
+          for (const sub of receiver.types) {
+            const sigs = this.resolveSigs(sub, name)
+            if (sigs) return sigs
+          }
+        } else {
+          // 严格交集：第一个有该方法的成员的签名
+          for (const sub of receiver.types) {
+            const sigs = this.resolveSigs(sub, name)
+            if (sigs) return sigs
+          }
+        }
+        return undefined
       default:
         return undefined
     }
@@ -1358,6 +1424,57 @@ export class ObjectOrientedCTypeChecker {
         }
         return unionOf(results)
       }
+      case 'intersection': {
+        if (receiver.delegation) {
+          // 委托交集：任一侧有方法即可，取第一个有的
+          for (const sub of receiver.types) {
+            if (this.hasMethod(sub, name)) {
+              return this.dispatch(sub, name, args, accept, node, explicitTypeArgs)
+            }
+          }
+          return anyType
+        }
+        // 严格交集：所有成员都必须能响应此消息，签名必须兼容
+        const withMethod = receiver.types.filter((t) =>
+          this.hasMethod(t, name),
+        )
+        if (withMethod.length === 0) {
+          return anyType
+        }
+        // 只有部分成员有该方法：需要判别后才能调用（类似联合语义）
+        if (withMethod.length < receiver.types.length) {
+          const without = receiver.types.filter(
+            (t) => !this.hasMethod(t, name),
+          )
+          accept(
+            'warning',
+            `消息 '${name}' 只定义在部分交集成员上（${withMethod.map(describeType).join(' & ')}），${without.map(describeType).join(' & ')} 上没有，需要先判别`,
+            { node, data: diagnosticData('partialIntersectionMessage') },
+          )
+          return anyType
+        }
+        // 所有成员都有：分别解析，检查签名兼容性
+        const results = withMethod.map((sub) =>
+          this.dispatch(sub, name, args, accept, node, explicitTypeArgs),
+        )
+        if (results.some((r) => r.kind === 'any')) {
+          return anyType
+        }
+        // 检查所有返回类型是否兼容
+        const [first, ...rest] = results
+        for (const other of rest) {
+          if (!isSubtype(first, other) && !isSubtype(other, first)) {
+            accept(
+              'error',
+              `交集成员方法 '${name}' 返回类型不兼容：${describeType(first)} 与 ${describeType(other)}`,
+              { node, data: diagnosticData('incompatibleIntersectionMethod') },
+            )
+            return anyType
+          }
+        }
+        // 兼容：取所有返回类型的交集
+        return intersectionOf(results)
+      }
       case 'name': {
         const sigs = getBuiltinMethods(receiver.name).get(name)
         if (!sigs) {
@@ -1387,6 +1504,10 @@ export class ObjectOrientedCTypeChecker {
         const sigs = receiver.methods.get(name)
         if (!sigs) {
           return anyType
+        }
+        // withDefault 库签名（base 包 delegate）：返回委托交集（任一侧定义即可）
+        if (name === 'withDefault' && args.length >= 2) {
+          return intersectionOf([args[0], args[1]], true)
         }
         return this.checkArgs(
           sigs,
@@ -1433,6 +1554,13 @@ export class ObjectOrientedCTypeChecker {
       case 'object':
         return (t.methods.get(name)?.length ?? 0) > 0
       case 'union':
+        return t.types.every((sub) => this.hasMethod(sub, name))
+      case 'intersection':
+        if (t.delegation) {
+          // 委托交集：任一侧有即可
+          return t.types.some((sub) => this.hasMethod(sub, name))
+        }
+        // 严格交集：所有成员都必须有
         return t.types.every((sub) => this.hasMethod(sub, name))
     }
   }

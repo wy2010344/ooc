@@ -65,12 +65,16 @@ export const DIAGNOSTIC_CODES = {
   missingTypeArg: 'missingTypeArg',
   unknownType: 'unknownType',
   partialUnionMessage: 'partialUnionMessage',
+  partialIntersectionMessage: 'partialIntersectionMessage',
+  incompatibleIntersectionMethod: 'incompatibleIntersectionMethod',
   callArgsMismatch: 'callArgsMismatch',
   duplicateMethod: 'duplicateMethod',
   duplicateParam: 'duplicateParam',
   noImplicitAny: 'noImplicitAny',
   typeNotFound: 'typeNotFound',
   circularImport: 'circularImport',
+  extendsValueType: 'extendsValueType',
+  invalidCast: 'invalidCast',
 } as const
 
 /**

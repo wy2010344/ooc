@@ -23,15 +23,27 @@ export function inferTypeString(checker: any, expr: Expression): string {
 export function formatType(type: any): string {
   if (!type) return 'any'
   if (typeof type === 'string') return type
-  if (type.parts) {
-    return type.parts.map((p: any) => {
-      let name = p.name
-      if (typeof name === 'string') return name
-      if (name && typeof name === 'object' && 'value' in name) return String(name.value)
-      return String(name)
-    }).join(' | ')
+  
+  // 新 AST 结构：first + seps + rest
+  if (type.first) {
+    const parts = [formatTypeName(type.first)]
+    if (type.seps && type.rest) {
+      for (let i = 0; i < type.seps.length; i++) {
+        parts.push(` ${type.seps[i]} `)
+        parts.push(formatTypeName(type.rest[i]))
+      }
+    }
+    return parts.join('')
   }
+  
   return 'any'
+}
+
+function formatTypeName(p: any): string {
+  let name = p.name
+  if (typeof name === 'string') return name
+  if (name && typeof name === 'object' && 'value' in name) return String(name.value)
+  return String(name)
 }
 
 export function formatTypeInfo(t: TypeInfo): string {

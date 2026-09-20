@@ -1,5 +1,10 @@
 grammar ObjectOrientedC
 
+interface CastExpression {
+    expression: Expression
+    type: Type
+}
+
 entry Model:
     (expressions+=TopStatement ( ';' expressions+=TopStatement )* ';'?)?;
 
@@ -81,7 +86,7 @@ Param:
     name=ID (':' typeAnnotation=Type)?;
 
 Expression:
-    PipeExpression;
+    PipeExpression ({CastExpression.expression=current} CAST type=Type)?;
 
 PipeExpression infers Expression:
     MessageOrChain ({infer PiplingExpression.left=current} (
@@ -113,9 +118,9 @@ Message:
 MethodCallName:
     value=(Ref|StID|Str);
 
-//类型表达式：目前仅支持具名类型与联合
+//类型表达式：支持联合（|）与交叉（&）
 Type:
-    parts+=TypeName ('|' parts+=TypeName)*;
+    first=TypeName (seps+=('&'|'|') rest+=TypeName)*;
 
 //类型名：具名类型 / 内置 / 字面量（用于可区分联合的判别，如 kind(): 'circle'）
 //泛型实例化：Box<number>、Pair<A, B>
@@ -161,6 +166,7 @@ Nil:
     value='nil';
 
 hidden terminal WS: /\s+/;
+terminal CAST: /#as/;
 terminal BOOL: /true|false/;
 //允许了转义
 terminal STRING: /'(\\.|[^'\\])*'/;

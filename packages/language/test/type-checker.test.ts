@@ -64,6 +64,66 @@ describe('类型注解语法解析', () => {
     `)
     expect(doc.parseResult.parserErrors).toHaveLength(0)
   })
+
+  test('类型断言 #as', async () => {
+    const doc = await parse(`
+        x = 33 #as number
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('类型断言 #as 嵌套', async () => {
+    const doc = await parse(`
+        x = ("hello" #as string)
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('交叉类型 &', async () => {
+    const doc = await parse(`
+        x: A & B = obj
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('混合联合与交叉', async () => {
+    const doc = await parse(`
+        x: A | B & C = obj
+    `)
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+})
+
+describe('严格交集类型检查', () => {
+  test('两侧都有同名方法且签名兼容', async () => {
+    const diags = await diagnostics(`
+        A #type { foo(): number };
+        B #type { foo(): number };
+        x: A & B = obj;
+        y: number = x foo
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('两侧都有同名方法但返回类型不兼容', async () => {
+    const diags = await diagnostics(`
+        A #type { foo(): number };
+        B #type { foo(): string };
+        x: A & B = obj;
+        y = x foo
+    `)
+    expect(messages(diags).join('\n')).toContain('不兼容')
+  })
+
+  test('只有一侧有方法：需要判别', async () => {
+    const diags = await diagnostics(`
+        A #type { foo(): number };
+        B #type { bar(): string };
+        x: A & B = obj;
+        y = x foo
+    `)
+    expect(messages(diags).join('\n')).toContain('只定义在部分交集成员上')
+  })
 })
 
 describe('类型检查（warning）', () => {
@@ -106,6 +166,22 @@ describe('类型检查（warning）', () => {
             add(a, b) { a + b }
         };
         calc add 1 'x'
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('类型断言 #as 返回断言类型', async () => {
+    const diags = await diagnostics(`
+        x = 33 #as number;
+        y = x + 1
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('类型断言 #as 允许类型转换', async () => {
+    const diags = await diagnostics(`
+        x = "hello" #as any;
+        y: number = x
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -435,6 +511,45 @@ describe('字面量类型与可区分联合', () => {
         Circle #type { kind(): 'circle', radius: number };
         Square #type { kind(): 'square', side: number };
         getKind = { calc(s: Circle | Square) { s kind } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('JSON 标签联合：联合引用对象变量，公共方法无告警', async () => {
+    const diags = await diagnostics(`
+        cat = { type() => 'cat', meow() => 'miao' };
+        dog = { type() => 'dog', bowwow() => 'bark' };
+        pet: cat | dog = dog;
+        pet type
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('JSON 标签联合：未判别调用分支专属方法告警', async () => {
+    const diags = await diagnostics(`
+        cat = { type() => 'cat', meow() => 'miao' };
+        dog = { type() => 'dog', bowwow() => 'bark' };
+        pet: cat | dog = dog;
+        pet meow
+    `)
+    expect(messages(diags).join('\n')).toContain("消息 'meow' 只定义在部分联合成员上")
+  })
+
+  test('JSON 标签联合：#guard 判别后可访问分支专属方法', async () => {
+    const diags = await diagnostics(`
+        cat = { type() => 'cat', meow() => 'miao' };
+        dog = { type() => 'dog', bowwow() => 'bark' };
+        say = { speak(p: cat | dog) { #guard (p type) == 'cat'; p meow } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('对象变量声明为联合后判别：未判别时公共类型方法可调', async () => {
+    const diags = await diagnostics(`
+        cat = { type() => 'cat', meow() => 'miao' };
+        dog = { type() => 'dog', bowwow() => 'bark' };
+        pet: cat | dog = dog;
+        getTag = { read(p: cat | dog) { p type } }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -1089,6 +1204,40 @@ describe('typedef 继承', () => {
     expect(messages(diags)).toEqual([])
   })
 
+  test('对象字面量：extends 值类型（string）告警', async () => {
+    const diags = await diagnostics(`
+        base: string = 'abc';
+        bad = { ...base, x() { 1 } }
+    `)
+    expect(messages(diags).join('\n')).toContain("对象不能继承值类型 'string'")
+  })
+
+  test('对象字面量：extends 字面量告警', async () => {
+    const diags = await diagnostics(`
+        n = 42;
+        bad = { ...n, x() { 1 } }
+    `)
+    expect(messages(diags).join('\n')).toContain('对象不能继承字面量或函数')
+  })
+
+  test('对象字面量：extends lambda 合法（同像性）', async () => {
+    const diags = await diagnostics(`
+        fn = [x => x];
+        bad = { ...fn, x() { 1 } }
+    `)
+    // lambda 与对象同像：fn 是带 apply 的对象，extends 它不告警
+    expect(messages(diags).join('\n')).not.toContain('继承字面量或函数')
+  })
+
+  test('对象字面量：extends 对象类型不告警', async () => {
+    const diags = await diagnostics(`
+        base = { a() { 1 } };
+        good = { ...base, b() { 2 } }
+    `)
+    expect(messages(diags).join('\n')).not.toContain('继承值类型')
+    expect(messages(diags).join('\n')).not.toContain('继承字面量或函数')
+  })
+
   test('联合父类型：对象字面量匹配任一分支（含自有方法）', async () => {
     const diags = await diagnostics(`
         Circle #type { kind(): 'circle', radius: number };
@@ -1261,5 +1410,105 @@ describe('typedef 方法级泛型', () => {
        b get`,
     )
     expect(messages(diags)).toEqual([])
+  })
+})
+
+describe('withDefault 交集类型（base 包 delegate）', () => {
+  // 与解释器同款 delegate 源码，验证声明签名 <D,S> ⇒ D∩S 的静态语义
+  async function loadImport(
+    name: string,
+    source: string,
+  ): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(
+    uri: string,
+    source: string,
+  ): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  const DELEGATE = `delegate = {
+    withDefault(defaults, spec) {
+        {
+            ...spec,
+            methodNotFound(name, ...args) {
+                js send defaults name args
+            }
+        }
+    }
+};
+delegate`
+
+  test('交集：defaults 专属与 spec 专属方法都可调用', async () => {
+    await loadImport('delegate', DELEGATE)
+    const diags = await checkModule(
+      'wd-demo1.ooc',
+      `d = #import 'delegate';
+       Cat #type { meow(): string };
+       Dog #type { greet(): string };
+       defaults: Dog = { greet() => 'hi' };
+       spec: Cat = { meow() => 'miao' };
+       w = d withDefault defaults spec;
+       g: string = w greet;
+       m: string = w meow;
+       g; m`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('交集：任一侧有方法即可（不完全交集不误报）', async () => {
+    await loadImport('delegate2', DELEGATE)
+    const diags = await checkModule(
+      'wd-demo2.ooc',
+      `d = #import 'delegate2';
+       Cat #type { meow(): string };
+       Dog #type { greet(): string };
+       defaults: Dog = { greet() => 'hi' };
+       spec: Cat = { meow() => 'miao' };
+       w = d withDefault defaults spec;
+       x: string = w greet;
+       x`,
+    )
+    // greet 只在 defaults 上：交集（方法并集）放行，不误报未判别
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('交集：两侧都没有的消息运行时兜底 methodNotFound，类型静默', async () => {
+    await loadImport('delegate3', DELEGATE)
+    const diags = await checkModule(
+      'wd-demo3.ooc',
+      `d = #import 'delegate3';
+       Cat #type { meow(): string };
+       Dog #type { greet(): string };
+       defaults: Dog = { greet() => 'hi' };
+       spec: Cat = { meow() => 'miao' };
+       w = d withDefault defaults spec;
+       w bark`,
+    )
+    // 检查器鸭子语义：resolveSigs 未命中返回 any 放行，不做未知消息告警
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('交集：返回类型参与赋值检查，类型不符仍告警', async () => {
+    await loadImport('delegate4', DELEGATE)
+    const diags = await checkModule(
+      'wd-demo4.ooc',
+      `d = #import 'delegate4';
+       Cat #type { meow(): string };
+       Dog #type { greet(): string };
+       defaults: Dog = { greet() => 'hi' };
+       spec: Cat = { meow() => 'miao' };
+       w = d withDefault defaults spec;
+       n: number = w greet;
+       n`,
+    )
+    // greet 返回 string，标 number 应报类型不匹配
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 })

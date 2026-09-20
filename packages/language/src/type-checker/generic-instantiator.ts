@@ -1,6 +1,7 @@
 import {
   anyType,
   describeType,
+  intersectionOf,
   isSubtype,
   unionOf,
   type MethodSig,
@@ -23,6 +24,8 @@ export function instantiate(
     }
     case 'union':
       return unionOf(t.types.map((x) => instantiate(x, params, args)))
+    case 'intersection':
+      return intersectionOf(t.types.map((x) => instantiate(x, params, args)), t.delegation)
     case 'object': {
       const methods = new Map<string, MethodSig[]>()
       for (const [name, sigs] of t.methods) {
