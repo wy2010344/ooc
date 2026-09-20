@@ -23,6 +23,7 @@
         "mve-dom": "*",
         "mve-helper": "*",
         "object-oriented-c-language": "0.0.1",
+        "ooc-mve-bridge": "*",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "wouter": "^3.6.0",

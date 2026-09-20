@@ -1,5 +1,5 @@
-import { EachTime, StateHolder, StateHolderWithNode } from 'mve-core'
-import { GetValue } from 'wy-helper'
+import type { EachTime, StateHolder, StateHolderWithNode } from 'mve-core'
+import type { GetValue } from 'wy-helper'
 
 /**
  * 组件包装：f 的第一个形参是 ctx（StateHolder，构建期可用 addNode/addDestroy），

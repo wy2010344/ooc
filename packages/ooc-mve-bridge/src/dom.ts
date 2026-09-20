@@ -1,8 +1,10 @@
 import type { StateHolderWithNode } from 'mve-core'
 import { renderFDom, renderHtmlContent, renderTextContent } from 'mve-dom'
-import { DomElementType, domTagNames } from 'wy-dom-helper'
+import type { DomElementType } from 'wy-dom-helper'
+import { domTagNames } from 'wy-dom-helper'
 
-import { createOrProxy, GetValue } from 'wy-helper'
+import { createOrProxy } from 'wy-helper'
+import type { GetValue } from 'wy-helper'
 import { fc } from './fc.js'
 import { ObjectValue } from 'object-oriented-c-language'
 
@@ -46,7 +48,7 @@ export const dom: {
 })
 
 function renderChildren(children: any, ctx: any) {
-  children.forEach((child) => {
+  children.forEach((child: any) => {
     if (Array.isArray(child)) {
       renderChildren(child, ctx)
     } else {

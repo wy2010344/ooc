@@ -2,7 +2,6 @@ import {
   createInterpretAction,
   createTypeCheckAction,
   js,
-  loop,
   ObjectValue,
   storage,
 } from 'object-oriented-c-language'
@@ -10,21 +9,27 @@ import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
 import { addEffect, createSignal, memo } from 'wy-helper'
 import { createContext } from 'mve-core'
-import { dom, html, text } from './preview/dom.js'
-import { fc, forEach } from './preview/fc.js'
+import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
 
 export interface NotebookEntry {
   name: string
   source: string
 }
 
+/** 外部库模块：name → source */
+export interface LibModules {
+  [name: string]: string
+}
+
 /**
  * 浏览器虚拟文件系统：
  * 笔记本身就是 .ooc 模块，`#import` 其它笔记时从这里按文件名解析。
  * 笔记源码存放在 IndexedDB，由 store.ts 加载后注册进来。
+ * 外部库模块（base/ooc-mve-bridge）在构建时预加载，作为只读基础层。
  */
 export function createVirtualFs(
   listNotes: () => NotebookEntry[],
+  libModules: LibModules = {},
 ): FileSystemProvider {
   const moduleNameOf = (uri: URI) =>
     (
@@ -33,8 +38,9 @@ export function createVirtualFs(
 
   // 每次现取最新笔记列表：notesHolder 随 React state 更新（HMR 后仍有效），
   // #import 始终能看到当前全部笔记，不受引擎创建时机限制
+  // 外部库模块作为基础层，用户笔记可覆盖同名模块
   const byName = () => {
-    const m: Record<string, string> = {}
+    const m: Record<string, string> = { ...libModules }
     for (const n of listNotes()) {
       m[n.name.toLowerCase()] = n.source
     }
@@ -87,7 +93,8 @@ export function createVirtualFs(
 
 /**
  * 宿主桥接。OOC 源码可以直接按名引用这些对象：
- *   storage / loop / js / ObjectValue  —— 语言包内置（ref / repeat / throw / new / 反射）
+ *   storage / js / ObjectValue  —— 语言包内置（ref / throw / new / 反射）。
+ *   循环（loop apply/repeat）是 base 包 OOC 实现（#import 'loop'），不再桥接。
  *   fc / dom / html / text / createContext / forEach  —— 预览渲染（详见 src/lib/preview/）：
  *     组件包装：fc apply [ctx,...]；元素：dom.div 属性对象 子组件...；
  *     动态文本：text apply <字符串或信号 getter>；HTML 片段：html apply ...；
@@ -106,7 +113,6 @@ export function createVirtualFs(
 export function createGlobals() {
   return {
     storage,
-    loop,
     js,
     // 反射桥接：ObjectValue metaOf x —— 读 OOC 定义值的元信息（构造时烧录，
     // 语言内消息不可见、不可伪造）；非定义值返回 undefined
@@ -126,8 +132,11 @@ export function createGlobals() {
   } as const
 }
 
-export function createEngine(listNotes: () => NotebookEntry[]) {
-  const fs = createVirtualFs(listNotes)
+export function createEngine(
+  listNotes: () => NotebookEntry[],
+  libModules: LibModules = {},
+) {
+  const fs = createVirtualFs(listNotes, libModules)
   const interpret = createInterpretAction(
     { fileSystemProvider: () => fs },
     createGlobals(),

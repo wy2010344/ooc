@@ -1,15 +1,22 @@
 import './style.css'
-import { createInterpretAction, js, loop, storage } from 'object-oriented-c-language'
+import { createInterpretAction, js, storage } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
+import { createContext } from 'mve-core'
+import { createSignal, memo, addEffect } from 'wy-helper'
+import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
 
 // #import 模块：vite 的 `?raw` eager 预加载所有 .ooc 源码进内存，
-// 供解释器在浏览器里按路径递归解析执行
-const rawModules = import.meta.glob('./ooc/*.ooc', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-})
+// 供解释器在浏览器里按路径递归解析执行。
+// 同时加载 base 包源码（delegate/loop 等语言标准库），#import 可直接引用。
+const rawModules = import.meta.glob(
+  ['./ooc/*.ooc', '../../base/src/*.ooc'],
+  {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  },
+)
 const moduleSources = new Map<string, string>()
 for (const [p, content] of Object.entries(rawModules)) {
   moduleSources.set((p.split('/').pop() ?? '').toLowerCase(), content as string)
@@ -59,15 +66,32 @@ const fileSystemProvider: FileSystemProvider = {
   },
 }
 
-// storage/loop/js：宿主桥接对象，由语言包导出（与单元测试共用一份），
+// storage/js：宿主桥接对象，由语言包导出（与单元测试共用一份）。
 // console、Math 等 JS 全局本来就挂在 globalThis 上，解释器会回退查找，无需注入。
+// loop（base 包 OOC 实现）经 #import 引用，见 ooc/loop.ooc。
+// 视图桥接：fc/dom/html/text（组件渲染）、createContext（上下文）、createSignal/memo/addEffect（响应式信号）
 const interpret = createInterpretAction(
   { fileSystemProvider: () => fileSystemProvider },
-  { storage, loop, js },
+  {
+    storage,
+    js,
+    // 视图组件
+    fc,
+    createContext,
+    dom,
+    html,
+    text,
+    // 响应式信号
+    createSignal,
+    memo,
+    addEffect,
+    // 区域组件
+    forEach,
+  },
 )
 
 const output = document.querySelector<HTMLPreElement>('#output')!
-// 切换入口即可测试不同案例：demo / loop / loop-edge / loop-repeat / js / throw / host-globals
+// 切换入口即可测试不同案例：demo / loop / js / throw / host-globals
 const entry = './demo.ooc'
 document
   .querySelector<HTMLButtonElement>('#run')!

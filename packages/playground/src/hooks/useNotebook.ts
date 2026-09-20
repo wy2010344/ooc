@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useHashLocation } from 'wouter/use-hash-location'
 import { createEngine } from '../lib/engine.js'
+import { getLibModules } from '../lib/lib-modules.js'
 import { store } from '../lib/store.js'
 import type { RunResult } from '../lib/run.js'
 import { runNote } from '../lib/run.js'
@@ -21,7 +22,10 @@ export function useNotebook() {
 
   // 引擎懒创建一次并随 state 保留（HMR 不重建）：虚拟 FS 每次实时读 notesRef，
   // 无论何时创建都能看到最新笔记，引擎引用对 Editor/run 始终稳定。
-  const [engine] = useState(() => createEngine(() => notesRef.current))
+  // 外部库模块（base/ooc-mve-bridge）在构建时预加载，作为只读基础层。
+  const [engine] = useState(() =>
+    createEngine(() => notesRef.current, getLibModules()),
+  )
 
   // wouter 的 hash 定位：location 是去 # 的路径（'/' 或 '/note/<编码名>'），navigate 写回 hash
   const [location, navigateTo] = useHashLocation()

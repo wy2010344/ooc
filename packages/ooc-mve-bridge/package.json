@@ -1,0 +1,29 @@
+{
+    "name": "ooc-mve-bridge",
+    "description": "MVE view bridge for OOC: dom elements, text, html, fc components, and forEach",
+    "version": "0.0.1",
+    "type": "module",
+    "files": [
+        "src"
+    ],
+    "exports": {
+        ".": "./src/index.js",
+        "./dom": "./src/dom.js",
+        "./fc": "./src/fc.js"
+    },
+    "scripts": {
+        "clean": "shx rm -fr *.tsbuildinfo out",
+        "build": "tsc"
+    },
+    "dependencies": {
+        "mve-core": "*",
+        "mve-dom": "*",
+        "wy-dom-helper": "*",
+        "wy-helper": "*",
+        "object-oriented-c-language": "0.0.1"
+    },
+    "devDependencies": {
+        "shx": "~0.4.0",
+        "typescript": "~6.0.2"
+    }
+}

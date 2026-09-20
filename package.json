@@ -27,6 +27,7 @@
         "packages/cli",
         "packages/extension",
         "packages/example",
+        "packages/ooc-mve-bridge",
         "packages/playground",
         "../es-pseudo-monorepo/packages/mve/core",
         "../es-pseudo-monorepo/packages/mve/dom",

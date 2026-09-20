@@ -11,7 +11,12 @@
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
-        "langium": "~4.2.1"
+        "langium": "~4.2.1",
+        "mve-core": "*",
+        "mve-dom": "*",
+        "ooc-mve-bridge": "*",
+        "wy-dom-helper": "*",
+        "wy-helper": "*"
     },
     "devDependencies": {
         "typescript": "~6.0.2",
