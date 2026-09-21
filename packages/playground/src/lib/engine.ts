@@ -9,7 +9,7 @@ import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
 import { addEffect, createSignal, memo } from 'wy-helper'
 import { createContext } from 'mve-core'
-import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
+import { dom, html, text, fc, forEach, createBridgeGlobalsTypes } from 'ooc-mve-bridge'
 
 export interface NotebookEntry {
   name: string
@@ -141,7 +141,8 @@ export function createEngine(
     { fileSystemProvider: () => fs },
     createGlobals(),
   )
-  const typeCheck = createTypeCheckAction({ fileSystemProvider: () => fs })
+  const globalsTypes = createBridgeGlobalsTypes()
+  const typeCheck = createTypeCheckAction({ fileSystemProvider: () => fs }, globalsTypes)
   return { interpret, typeCheck }
 }
 

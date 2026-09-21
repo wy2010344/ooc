@@ -23,6 +23,7 @@ import { ObjectOrientedCCompletionProvider } from './object-oriented-c-completio
 import { ObjectOrientedCSignatureHelpProvider } from './object-oriented-c-signature-help-provider.js'
 import { ObjectOrientedCDefinitionProvider } from './object-oriented-c-definition-provider.js'
 import { ObjectOrientedCReferencesProvider } from './object-oriented-c-references-provider.js'
+import type { TypeInfo } from './type-system.js'
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -92,6 +93,7 @@ export const ObjectOrientedCModule: Module<
 export function createObjectOrientedCServices(
   context: DefaultSharedModuleContext,
   config?: OocConfig,
+  globalsTypes?: Map<string, TypeInfo>,
 ): {
   shared: LangiumSharedServices
   ObjectOrientedC: ObjectOrientedCServices
@@ -107,6 +109,9 @@ export function createObjectOrientedCServices(
   )
   shared.ServiceRegistry.register(ObjectOrientedC)
   registerValidationChecks(ObjectOrientedC, config)
+  if (globalsTypes) {
+    ObjectOrientedC.validation.ObjectOrientedCValidator.setGlobalsTypes(globalsTypes)
+  }
   if (!context.connection) {
     // We don't run inside a language server
     // Therefore, initialize the configuration provider instantly

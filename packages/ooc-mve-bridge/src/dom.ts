@@ -51,6 +51,9 @@ function renderChildren(children: any, ctx: any) {
   children.forEach((child: any) => {
     if (Array.isArray(child)) {
       renderChildren(child, ctx)
+    } else if (typeof child === 'string' || typeof child === 'number') {
+      // 字面量字符串/数字直接渲染为文本节点，无需包 text apply
+      renderTextContent(String(child))
     } else {
       child(ctx)
     }

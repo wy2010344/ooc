@@ -9,14 +9,17 @@
     "exports": {
         ".": {
             "types": "./out/index.d.ts",
+            "development": "./src/index.ts",
             "default": "./out/index.js"
         },
         "./dom": {
             "types": "./out/dom.d.ts",
+            "development": "./src/dom.ts",
             "default": "./out/dom.js"
         },
         "./fc": {
             "types": "./out/fc.d.ts",
+            "development": "./src/fc.ts",
             "default": "./out/fc.js"
         }
     },

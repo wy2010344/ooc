@@ -112,7 +112,14 @@ export function getBuiltinMethods(typeName: string): Map<string, MethodSig[]> {
 export class TypeEnv {
   private readonly values = new Map<string, TypeInfo>()
 
-  constructor(private readonly parent: TypeEnv | undefined = undefined) {}
+  constructor(
+    private readonly parent: TypeEnv | undefined = undefined,
+    initialBindings?: Map<string, TypeInfo>,
+  ) {
+    if (initialBindings) {
+      initialBindings.forEach((v, k) => this.values.set(k, v))
+    }
+  }
 
   define(name: string, type: TypeInfo): void {
     this.values.set(name, type)

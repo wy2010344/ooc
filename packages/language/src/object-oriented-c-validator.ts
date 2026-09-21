@@ -12,6 +12,7 @@ import {
   createImportResolver,
   ObjectOrientedCTypeChecker,
 } from './type-checker.js'
+import type { TypeInfo } from './type-system.js'
 import { diagnosticData, filterDiagnostic, type OocConfig } from './diagnostics-config.js'
 import { resolveModuleName } from './module-path.js'
 
@@ -40,11 +41,16 @@ export function registerValidationChecks(
  */
 export class ObjectOrientedCValidator {
   private config: OocConfig | undefined
+  private globalsTypes: Map<string, TypeInfo> | undefined
 
   constructor(private readonly services?: ObjectOrientedCServices) {}
 
   setConfig(config: OocConfig | undefined): void {
     this.config = config
+  }
+
+  setGlobalsTypes(types: Map<string, TypeInfo> | undefined): void {
+    this.globalsTypes = types
   }
 
   private wrap(accept: ValidationAcceptor): ValidationAcceptor {
@@ -74,7 +80,7 @@ export class ObjectOrientedCValidator {
           this.services.LanguageMetaData.fileExtensions,
         )
       : undefined
-    new ObjectOrientedCTypeChecker(importResolver).checkModel(
+    new ObjectOrientedCTypeChecker(importResolver, this.globalsTypes).checkModel(
       model,
       this.wrap(accept),
     )

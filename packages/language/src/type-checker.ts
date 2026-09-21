@@ -134,12 +134,15 @@ export class ObjectOrientedCTypeChecker {
   private readonly typedefs = new Map<string, TypeInfo>()
   private readonly typedefParams = new Map<string, string[]>()
 
-  constructor(private readonly importResolver?: ImportResolver) {}
+  constructor(
+    private readonly importResolver?: ImportResolver,
+    private readonly globalsTypes?: Map<string, TypeInfo>,
+  ) {}
 
   checkModel(model: Model, accept: ValidationAcceptor): void {
     this.typedefs.clear()
     this.typedefParams.clear()
-    const env = new TypeEnv()
+    const env = new TypeEnv(undefined, this.globalsTypes)
     for (const stmt of model.expressions) {
       this.checkTopStatement(stmt, env, accept)
     }

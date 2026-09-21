@@ -6,6 +6,7 @@ import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import { run } from 'wy-helper'
 import { ImportStatement, isModel, Model } from '../generated/ast.js'
 import { createObjectOrientedCServices } from '../object-oriented-c-module.js'
+import type { TypeInfo } from '../type-system.js'
 import {
   extnameOf,
   isAbsolutePath,
@@ -208,8 +209,11 @@ const model = document.parseResult.value as Model
  * 全部诊断（error / warning），不执行代码。与 IDE 里的 LSP 校验走同一套
  * Langium 校验器（ConfigAwareDocumentValidator 按配置升降级）。
  */
-export function createTypeCheckAction(context: DefaultSharedModuleContext) {
-  const services = createObjectOrientedCServices(context).ObjectOrientedC
+export function createTypeCheckAction(
+  context: DefaultSharedModuleContext,
+  globalsTypes?: Map<string, TypeInfo>,
+) {
+  const services = createObjectOrientedCServices(context, undefined, globalsTypes).ObjectOrientedC
   const fs = context.fileSystemProvider(services.shared)
   const docs = services.shared.workspace.LangiumDocuments
 
