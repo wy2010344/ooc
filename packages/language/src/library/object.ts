@@ -1,3 +1,10 @@
+/**
+ * OOC #classDef 类归属标记：类对象指向自身、实例指向所属类，
+ * include 据此判定「v 是否是该类的实例」。定义在本模块避免与
+ * runtime.ts 循环依赖（本文件除类型外无任何导入）。
+ */
+export const OOC_CLASS = Symbol('ooc:class')
+
 export const objectDefine = {
   '=='(sender: any, v: any) {
     return sender == v
@@ -25,6 +32,11 @@ export const objectDefine = {
   // 对数组/Set/Map 回答「是否包含成员 v」。一条消息、鸭子派发，无需改语法。
   // 返回 boolean；原始值作为 sender 时恒为当前值自身（迷你表单例）。
   'include'(sender: any, v: any) {
+    // OOC #classDef 类对象：sender 是类（或实例）、v 归属同一类 → 类成员判定
+    const brand = sender ? (sender as any)[OOC_CLASS] : undefined
+    if (brand && (v as any)?.[OOC_CLASS] === brand) {
+      return true
+    }
     if (typeof sender == 'function') {
       // 函数型「类对象」：v 的类/祖先链上有没有 sender（含数组、Date 等内建类）
       return v instanceof sender

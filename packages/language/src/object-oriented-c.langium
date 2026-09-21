@@ -135,8 +135,16 @@ ObjectDef:
     '}';
 
 
+//类定义：#classDef { 类方法 } { 实例方法 }，类方法中的 new 是构造方法
+ClassDef:
+    '#classDef' '{' (
+        classMethods+=Method (',' classMethods+=Method)*
+    )? '}' '{' (
+        instanceMethods+=Method (',' instanceMethods+=Method)*
+    )? '}';
+
 ComplexPrimary:
-    ObjectDef | LambdaDef | '(' Expression ')';
+    ObjectDef | LambdaDef | ClassDef | '(' Expression ')';
 
 //lambda，等价于 { apply(...) { ... } }
 //  [x => x + 1]          带参 lambda，函数体为表达式

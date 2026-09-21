@@ -6,6 +6,7 @@ import type {
   ObjectDef,
   LambdaDef,
   MethodAll,
+  ClassDef,
 } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
@@ -31,6 +32,7 @@ export function registerValidationChecks(
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     ObjectDef: validator.checkObjectDef,
     LambdaDef: validator.checkLambdaDef,
+    ClassDef: validator.checkClassDef,
     Model: validator.checkModel,
   }
   registry.register(checks, validator)
@@ -142,6 +144,15 @@ export class ObjectOrientedCValidator {
 
   checkLambdaDef(lambda: LambdaDef, accept: ValidationAcceptor): void {
     checkParamDuplicates(lambda, this.wrap(accept))
+  }
+
+  checkClassDef(model: ClassDef, accept: ValidationAcceptor): void {
+    // 类方法与实例方法块都检查参数重名
+    ;[...model.classMethods, ...model.instanceMethods].forEach((method) => {
+      if (method.$type == 'MethodAll') {
+        checkParamDuplicates(method, this.wrap(accept))
+      }
+    })
   }
 }
 

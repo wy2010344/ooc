@@ -7,6 +7,7 @@ import {
   StID,
   Str,
 } from '../generated/ast.js'
+import { createClass } from './class.js'
 // 注意：与 runtime.ts 互为依赖（运行时求值），都是函数/类级别引用、
 // 模块初始化时不互相调用，ESM 循环依赖安全。
 import {
@@ -173,6 +174,8 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
     case 'LambdaDef':
       // lambda 等价于 { apply(...) { ... } }，合成一个 apply 方法
       return createLambdaValue(e, scope)
+    case 'ClassDef':
+      return createClass(e, scope)
     case 'StID':
       return getStId(e)
     case 'Str':

@@ -25,6 +25,11 @@ export interface ObjectTypeInfo {
    * 导入方用 math#Circle 访问；泛型 typedef 存模板，params 用于 math#Box<number> 实例化。
    */
   typeMembers?: Map<string, { type: TypeInfo; params: string[] }>
+  /**
+   * 类的实例类型（#classDef）：类对象自身的 methods 是类（静态）方法，
+   * instanceType 挂「实例方法块」生成的新实例类型（new 的返回类型）。
+   */
+  instanceType?: ObjectTypeInfo
 }
 
 export interface MethodSig {

@@ -76,7 +76,7 @@ attachMeta(EMPTY_OBJECT, emptyMap)
 // 定义值类型
 export type Value = number | string | boolean | null | OocObject
 
-function getObjDefineName(n: MethodDefName) {
+export function getObjDefineName(n: MethodDefName) {
   const v = n.name
   switch (v.$type) {
     case 'Ref':

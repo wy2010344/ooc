@@ -1191,4 +1191,106 @@ describe('ObjectValue 元信息反射', () => {
       expect(result).toBe(true)
     })
   })
+
+  describe('#classDef 类对象', () => {
+    test('new 构造实例并读实例状态', async () => {
+      const result = await interpreter.interpret(`
+          Animal = #classDef {
+              new(name) { self name name }
+          } {
+              name <= 'unknown',
+              speak => responser name
+          };
+          d = Animal new 'cat';
+          d speak
+      `)
+      expect(result).toBe('cat')
+    })
+
+    test('未传参走实例默认值', async () => {
+      const result = await interpreter.interpret(`
+          Animal = #classDef {
+              new() { self name 'default' }
+          } {
+              name <= 'unknown'
+          };
+          d = Animal new;
+          d name
+      `)
+      expect(result).toBe('default')
+    })
+
+    test('未声明 new 也有默认空构造', async () => {
+      const result = await interpreter.interpret(`
+          Empty = #classDef {} { value = 7 };
+          e = Empty new;
+          e value
+      `)
+      expect(result).toBe(7)
+    })
+
+    test('类方法（静态）可直接调用', async () => {
+      const result = await interpreter.interpret(`
+          Calc = #classDef {
+              twice(n) => n * 2
+          } {};
+          Calc twice 21
+      `)
+      expect(result).toBe(42)
+    })
+
+    test('实例状态按实例隔离，互不共享', async () => {
+      const result = await interpreter.interpret(`
+          Counter = #classDef {
+              new(n) { self count n }
+          } {
+              count <= 0,
+              bump => responser count + 1
+          };
+          a = Counter new 5;
+          b = Counter new 9;
+          Array of (a count) (a bump) (b count)
+      `)
+      expect(result).toEqual([5, 6, 9])
+    })
+
+    test('实例方法可写回自身状态', async () => {
+      const result = await interpreter.interpret(`
+          Account = #classDef {
+              new() { self balance 0 }
+          } {
+              balance <= 0,
+              deposit(v) {
+                  total = (responser balance) + v;
+                  responser balance total
+              }
+          };
+          a = Account new;
+          a deposit 30;
+          a balance
+      `)
+      expect(result).toBe(30)
+    })
+
+    test('include 判定 OOC 类实例归属', async () => {
+      const result = await interpreter.interpret(`
+          Animal = #classDef {
+              new(name) { self name name }
+          } {
+              name <= 'unknown'
+          };
+          d = Animal new 'dog';
+          Array of (Animal include d) (Animal include 42) (d include Animal)
+      `)
+      expect(result).toEqual([true, false, true])
+    })
+
+    test('类对象是普通 JS 对象，可发通用消息', async () => {
+      const result = await interpreter.interpret(`
+          Empty = #classDef {} {};
+          Empty == Empty
+      `)
+      expect(result).toBe(true)
+    })
+  })
 })

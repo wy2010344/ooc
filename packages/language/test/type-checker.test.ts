@@ -1520,4 +1520,77 @@ delegate`
     // greet 返回 string，标 number 应报类型不匹配
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
+
+  describe('#classDef 类对象类型', () => {
+    test('类定义与 new 返回实例无告警', async () => {
+      const diags = await checkModule(
+        'class1.ooc',
+        `Animal = #classDef {
+             new(name: string) { self name name }
+         } {
+             name <= 'unknown',
+             speak(): string { responser name }
+         };
+         d = Animal new 'cat';
+         s: string = d speak;
+         s`,
+      )
+      expect(messages(diags)).toEqual([])
+    })
+
+    test('new 返回实例类型，赋给 number 报不匹配', async () => {
+      const diags = await checkModule(
+        'class2.ooc',
+        `Animal = #classDef {
+             new(name) { self name name }
+         } {
+             name <= 'unknown'
+         };
+         n: number = Animal new 'cat';
+         n`,
+      )
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+
+    test('实例方法返回类型参与赋值检查', async () => {
+      const diags = await checkModule(
+        'class3.ooc',
+        `Animal = #classDef {} { speak(): string { 'a' } };
+         d = Animal new;
+         n: number = d speak;
+         n`,
+      )
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+
+    test('类方法（静态）返回类型参与赋值检查', async () => {
+      const diags = await checkModule(
+        'class4.ooc',
+        `Calc = #classDef {
+             twice(n: number): number { n * 2 }
+         } {};
+         s: string = Calc twice 3;
+         s`,
+      )
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+
+    test('构造方法参数重名报错', async () => {
+      const diags = await checkModule(
+        'class5.ooc',
+        `Bad = #classDef { new(a, a) {} } {};
+         Bad`,
+      )
+      expect(messages(diags).join('\n')).toContain('参数里已经定义了')
+    })
+
+    test('实例方法参数重名报错', async () => {
+      const diags = await checkModule(
+        'class6.ooc',
+        `Bad = #classDef {} { do(a, a) {} };
+         Bad`,
+      )
+      expect(messages(diags).join('\n')).toContain('参数里已经定义了')
+    })
+  })
 })
