@@ -4,12 +4,21 @@
     "version": "0.0.1",
     "type": "module",
     "files": [
-        "src"
+        "out"
     ],
     "exports": {
-        ".": "./out/index.js",
-        "./dom": "./out/dom.js",
-        "./fc": "./out/fc.js"
+        ".": {
+            "types": "./out/index.d.ts",
+            "default": "./out/index.js"
+        },
+        "./dom": {
+            "types": "./out/dom.d.ts",
+            "default": "./out/dom.js"
+        },
+        "./fc": {
+            "types": "./out/fc.d.ts",
+            "default": "./out/fc.js"
+        }
     },
     "scripts": {
         "clean": "shx rm -fr *.tsbuildinfo out",
