@@ -31,9 +31,9 @@ name = createSignal apply 'OOC';
 
 // ===== 组件 =====
 Card = fc apply [ctx, title, content =>
-    (dom div {className => 'card'}
+    (dom div {className = 'card'}
         (dom h3 {} (text apply title))
-        (dom p {className => 'card-value'} (text apply content))
+        (dom p {className = 'card-value'} (text apply content))
     ) / apply ctx
 ];
 
@@ -52,12 +52,12 @@ Card = fc apply [ctx, title, content =>
         (dom div {}
             (dom h1 {} (text apply 'OOC 浏览器示例'))
 
-            (dom p {className => 'sub'}
+            (dom p {className = 'sub'}
                 (text apply '语言特性展示：联合类型、guard、对象方法、模块导入、响应式信号')
             )
 
             // 语言能力卡片
-            (dom div {className => 'grid'}
+            (dom div {className = 'grid'}
                 (Card apply '联合类型 + guard' [circleArea + ' / ' + squareArea])
                 (Card apply '模块导入 (math)' [mathResult])
                 (Card apply '对象方法' greeting)
@@ -65,28 +65,28 @@ Card = fc apply [ctx, title, content =>
             )
 
             // 响应式计数器
-            (dom div {className => 'section section-blue'}
+            (dom div {className = 'section section-blue'}
                 (dom h3 {} (text apply '响应式计数器'))
-                (dom p {className => 'counter-value'}
+                (dom p {className = 'counter-value'}
                     (text apply [count get])
                 )
-                (dom div {className => 'flex gap-2'}
-                    (dom button {className => 'btn',
+                (dom div {className = 'flex gap-2'}
+                    (dom button {className = 'btn',
                         onClick(e){ count set ((count get) - 1) }
                     } (text apply '-'))
-                    (dom button {className => 'btn',
+                    (dom button {className = 'btn',
                         onClick(e){ count set ((count get) + 1) }
                     } (text apply '+'))
                 )
             )
 
             // 受控输入
-            (dom div {className => 'section section-green'}
+            (dom div {className = 'section section-green'}
                 (dom h3 {} (text apply '受控输入'))
-                (dom p {className => 'greeting'}
+                (dom p {className = 'greeting'}
                     (text apply ['Hello, ' + (name get) + '!'])
                 )
-                (dom input {className => 'input',
+                (dom input {className = 'input',
                     value => (name get),
                     onInput(e){ name set (e target / value) }
                 })
