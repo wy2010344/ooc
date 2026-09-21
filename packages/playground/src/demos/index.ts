@@ -6,6 +6,7 @@ import { preview } from './preview.js'
 import { todo } from './todo.js'
 import { utilLib } from './util-lib.js'
 import { crossImport } from './cross-import.js'
+import { loopLib } from './loop-lib.js'
 
 export type { DemoEntry } from './types.js'
 
@@ -13,6 +14,7 @@ export type { DemoEntry } from './types.js'
 // 其余 demo 只作播种/展示，不必导出源码常量。
 export { TODO_DEMO } from './todo.js'
 export { PREVIEW_DEMO } from './preview.js'
+export { LOOP_LIB_SOURCE, loopLib } from './loop-lib.js'
 
 /**
  * 首次打开时的演示笔记（播种）。新增 demo：在 src/demos/ 建模块，导出 DemoEntry，
@@ -24,6 +26,7 @@ export const DEMO_NOTES: Array<DemoEntry> = [
   utilLib,
   crossImport,
   host,
+  loopLib,
   preview,
   todo,
 ]

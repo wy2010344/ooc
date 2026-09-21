@@ -2,5 +2,5 @@
 export { type OocObject, type Value, sendMessage } from './runtime.js'
 export { createInterpretAction, createTypeCheckAction } from './host.js'
 export type { Globals } from './scope.js'
-export { ObjectValue, js, loop, storage } from './bridges.js'
+export { ObjectValue, js, storage } from './bridges.js'
 export { OocCircularImportError, OocMethodNotFoundError } from './errors.js'

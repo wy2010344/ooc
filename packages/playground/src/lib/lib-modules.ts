@@ -2,9 +2,12 @@
  * 外部库模块预加载：
  * 使用 vite 的 import.meta.glob 预加载 ooc-mve-bridge 包的 .ooc 文件，
  * 供虚拟文件系统使用，让 OOC 代码可以通过 #import 引用这些模块。
+ *
+ * 注意：vite 的 import.meta.glob 不支持直接 npm 包路径，
+ * 需要使用相对路径定位包内的 .ooc 文件。
  */
 
-// 预加载 ooc-mve-bridge 包的 .ooc 文件
+// 预加载 ooc-mve-bridge 包的 .ooc 文件（使用相对路径）
 const oocMveBridgeModules = import.meta.glob(
   '../../../../ooc-mve-bridge/src/*.ooc',
   {
@@ -14,7 +17,7 @@ const oocMveBridgeModules = import.meta.glob(
   },
 )
 
-// 预加载 base 包的 .ooc 文件（标准库）
+// 预加载 base 包的 .ooc 文件（标准库，使用相对路径）
 const baseModules = import.meta.glob(
   '../../../../base/src/*.ooc',
   {

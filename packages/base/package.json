@@ -1,0 +1,25 @@
+{
+    "name": "ooc-base",
+    "description": "OOC 标准库源码包：用语言本身实现的可复用工具（withDefault 等），各项目 #import 直接引用",
+    "version": "0.0.1",
+    "type": "module",
+    "private": true,
+    "files": [
+        "src"
+    ],
+    "exports": {
+        "./delegate": {
+            "default": "./src/delegate.ooc"
+        },
+        "./loop": {
+            "default": "./src/loop.ooc"
+        }
+    },
+    "scripts": {
+        "clean": "shx rm -fr *.tsbuildinfo out",
+        "build": "echo 'No build step'"
+    },
+    "devDependencies": {
+        "shx": "~0.4.0"
+    }
+}

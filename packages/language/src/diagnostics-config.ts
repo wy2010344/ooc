@@ -11,6 +11,7 @@ import type { LangiumDocument } from 'langium'
 import { isModel } from './generated/ast.js'
 import { interpret } from './interpreter/evaluate.js'
 import { withGlobals } from './interpreter/scope.js'
+import { sendMessage } from './interpreter/runtime.js'
 
 /** * OOC 项目配置（类似 tsconfig.json），控制类型检查诊断的显示级别。
  *
@@ -127,25 +128,32 @@ function extractOocValue(obj: Record<string, unknown>, key: string): unknown {
 }
 
 /**
- * 从 OOC 对象或普通对象中提取诊断级别键值对。
- * OOC 对象的属性是方法函数，需要调用求值。
+ * 从 OOC 对象中提取诊断级别键值对。
+ * 遍历所有可能的 diagnostic code，通过消息发送获取值，
+ * 支持 withDefault 模式（methodNotFound 转发到默认配置）。
  */
 function extractDiagLevels(
   obj: Record<string, unknown>,
 ): Record<string, DiagLevel> {
   const result: Record<string, DiagLevel> = {}
-  for (const [code, raw] of Object.entries(obj)) {
-    if (!isValidCode(code)) continue
-    const level = typeof raw === 'function' ? raw.call(obj) : raw
-    if (level === 'off' || level === 'warning' || level === 'error') {
-      result[code] = level as DiagLevel
+
+  // 遍历所有可能的 diagnostic code，通过消息发送获取值
+  // 这样可以触发 methodNotFound 转发，支持 withDefault 模式
+  for (const code of Object.values(DIAGNOSTIC_CODES)) {
+    try {
+      const raw = sendMessage(obj, code, [])
+      if (raw !== undefined) {
+        const level = typeof raw === 'function' ? raw.call(obj) : raw
+        if (level === 'off' || level === 'warning' || level === 'error') {
+          result[code] = level as DiagLevel
+        }
+      }
+    } catch {
+      // 消息发送失败（如 methodNotFound 抛出异常），跳过
     }
   }
-  return result
-}
 
-function isValidCode(code: string): boolean {
-  return code in DIAGNOSTIC_CODES
+  return result
 }
 
 /** 解析 ooc.json（JSON 格式，向后兼容） */

@@ -456,6 +456,12 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
         ? `${head}\n${lines.map((l) => `- ${l}`).join('\n')}`
         : head
     }
+    if (t.kind === 'intersection') {
+      const members = t.types
+        .map((x) => this.describeHoverType(x))
+        .join(' 与 ')
+      return `交集类型：${members}`
+    }
     return describeType(t)
   }
 

@@ -9,10 +9,10 @@ import { createRoot } from 'mve-dom'
 import type { StateHolderWithNode } from 'mve-core'
 import { createEngine, formatValue } from '../src/lib/engine.js'
 import { PREVIEW_DEMO, TODO_DEMO } from '../src/demos/index.js'
+import { LOOP_LIB_SOURCE } from '../src/demos/loop-lib.js'
 import { DEMO_NOTES } from '../src/demos/index.js'
 import { runNote } from '../src/lib/run.js'
-import { dom, text } from '../src/lib/preview/dom.js'
-import { fc } from '../src/lib/preview/fc.js'
+import { dom, text, fc } from 'ooc-mve-bridge'
 import {
   FakeNode,
   findDivByText,
@@ -378,8 +378,10 @@ test('ObjectValue 反射：OOC 定义值可读元信息', async () => {
   assert.equal(ObjectValue.metaOf(42), undefined, '非定义值无元信息')
 })
 
-test('宿主.ooc demo：storage ref + loop repeat 桥接可跑', async () => {
-  const engine = createEngine(notes)
+test('宿主.ooc demo：storage ref + loop repeat 可跑（loop 从 base 包 #import）', async () => {
+  // 宿主 demo 现在 #import 'loop'，引擎虚拟 FS 需播种标准库 loop.ooc（与 base 一致）
+  const hostNotes = () => [...notes(), { name: 'loop.ooc', source: LOOP_LIB_SOURCE }]
+  const engine = createEngine(hostNotes)
   const r = await runNote(engine, '宿主.ooc', DEMO_NOTES.find((d) => d.name === '宿主.ooc')!.source)
   assert.equal(r.error, null, r.error ?? '')
   // loop repeat 10 [x => n set ((n get) + x)]：从 0 起按索引累加 0..9 = 45

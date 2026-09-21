@@ -103,6 +103,9 @@ export async function interpret(
 export function interpretExpression(e: Expression, scope: Scope): any {
   track(e)
   switch (e.$type) {
+    case 'CastExpression':
+      // 类型断言是静态的，运行时直接返回表达式的值
+      return interpretExpression(e.expression, scope)
     case 'MessageOrChain':
       const o = interpretPrimary(e.primary, scope)
       if (e.message) {
@@ -174,6 +177,9 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
       return getStId(e)
     case 'Str':
       return getStrValue(e)
+    case 'CastExpression':
+      // 类型断言是静态的，运行时直接返回表达式的值
+      return interpretExpression(e.expression, scope)
     default:
       return interpretExpression(e, scope)
   }
