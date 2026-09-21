@@ -34,12 +34,12 @@ statusOf = [d => d && '[x] ' || '[ ] '];
                 [ic,et=>
                   dom div {className = 'flex items-center gap-2 rounded-lg bg-stone-100 px-3 py-2 dark:bg-zinc-800'}
                             // onClick 直接写方法调用；单参数可提前做管道：et index|remove apply ⇔ remove apply (et index)
-                        (dom button {onClick => et index|toggle apply}
+                        (dom button {onClick(e) { et index|toggle apply }}
                                 // 级联+管道一体：et value/ done|statusOf apply ⇔ statusOf apply ((et value)/ done)
                                 // 作为 text apply 实参时必须整段括起来，否则 value 会被空格拆成裸标识符
                                 (text apply [et value/ done|statusOf apply])
                                 (text apply [et value/ name]))
-                        (dom button {onClick => et index|remove apply} (text apply '删除')) / apply ic
+                        (dom button {onClick(e) { et index|remove apply }} (text apply '删除')) / apply ic
                 ]
             )
             (dom div {className = 'flex gap-2'}

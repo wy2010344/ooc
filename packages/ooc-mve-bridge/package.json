@@ -7,9 +7,9 @@
         "src"
     ],
     "exports": {
-        ".": "./src/index.js",
-        "./dom": "./src/dom.js",
-        "./fc": "./src/fc.js"
+        ".": "./out/index.js",
+        "./dom": "./out/dom.js",
+        "./fc": "./out/fc.js"
     },
     "scripts": {
         "clean": "shx rm -fr *.tsbuildinfo out",

@@ -44,8 +44,8 @@ delFirst = [list get / toSpliced 0 1 | list set];
                     ) / apply ic
                 }
             })
-            // onValueChange 回调参数就是输入框新值：onValueChange => [v => newName set v] ⇔ set((newName)值)
-            (dom input {id => 'new-item', value => (newName get), onValueChange(v) => newName set v, className => 'w-full rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900'})
+            // onValueChange 回调接收事件对象，取 e target / value 得输入框新值
+            (dom input {id => 'new-item', value => (newName get), onValueChange(e) => newName set (e target / value), className => 'w-full rounded-lg border border-stone-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900'})
             (dom button {
                 className => 'rounded-full bg-emerald-700 px-3 py-1.5 text-sm text-white dark:bg-emerald-600',
                 onClick(e){ addItem apply e }

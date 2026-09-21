@@ -250,8 +250,8 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
       '受控输入框初始值来自 value => (newName get)',
     )
 
-    // 模拟输入：onValueChange 回调把输入框新值作为第一个参数传入
-    inputEl!.handlers['valuechange']!('新项目')
+    // 模拟输入：mve-dom 把 onValueChange 包装成 input 事件，回调接收事件对象取 e target / value
+    inputEl!.handlers['input']!({ target: { value: '新项目' } })
     await tick()
 
     // 点「添加一项」：读 newName 信号并清空信号，区域重建出 1 项
