@@ -46,6 +46,7 @@
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
+        "ooc-mve-bridge": "0.0.1",
         "vscode-languageclient": "~9.0.1",
         "vscode-languageserver": "~9.0.1"
     },
