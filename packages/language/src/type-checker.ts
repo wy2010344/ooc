@@ -1507,7 +1507,7 @@ export class ObjectOrientedCTypeChecker {
         }
         // withDefault 库签名（base 包 delegate）：返回委托交集（任一侧定义即可）
         if (name === 'withDefault' && args.length >= 2) {
-          return intersectionOf([args[0], args[1]], true)
+          return intersectionOf(args, true)
         }
         return this.checkArgs(
           sigs,

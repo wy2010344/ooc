@@ -1434,11 +1434,20 @@ describe('withDefault 交集类型（base 包 delegate）', () => {
   }
 
   const DELEGATE = `delegate = {
-    withDefault(defaults, spec) {
+    withDefault(x, y) {
         {
-            ...spec,
+            ...x,
             methodNotFound(name, ...args) {
-                js send defaults name args
+                js send y name args
+            }
+        }
+    },
+    withDefault(x, ...rest) {
+        fallback = js send responser 'withDefault' rest;
+        {
+            ...x,
+            methodNotFound(name, ...args) {
+                js send fallback name args
             }
         }
     }
@@ -1454,7 +1463,7 @@ delegate`
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault defaults spec;
+       w = d withDefault spec defaults;
        g: string = w greet;
        m: string = w meow;
        g; m`,
@@ -1471,7 +1480,7 @@ delegate`
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault defaults spec;
+       w = d withDefault spec defaults;
        x: string = w greet;
        x`,
     )
@@ -1488,7 +1497,7 @@ delegate`
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault defaults spec;
+       w = d withDefault spec defaults;
        w bark`,
     )
     // 检查器鸭子语义：resolveSigs 未命中返回 any 放行，不做未知消息告警
@@ -1504,7 +1513,7 @@ delegate`
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault defaults spec;
+       w = d withDefault spec defaults;
        n: number = w greet;
        n`,
     )

@@ -103,6 +103,34 @@ describe('toOocConfig（从解释器返回值转换）', () => {
   test('空对象返回空配置', () => {
     expect(toOocConfig({})).toEqual({})
   })
+
+  test('withDefault 模式：methodNotFound 转发到默认配置', () => {
+    // 模拟 withDefault 包装对象：有 methodNotFound 方法
+    // 真实 OOC 配置：defaults = { typeMismatch = 'warning', noImplicitAny = 'off' }
+    //   w = delegate withDefault { typeMismatch = 'error' } defaults
+    //   { diagnostics = w }
+    const defaults = {
+      typeMismatch: 'warning',
+      noImplicitAny: 'off',
+    }
+    const spec = {
+      typeMismatch: 'error', // 覆盖默认值
+    }
+    // 模拟 withDefault 包装对象（diagnostics 层面）
+    const diagnosticsObj = {
+      ...spec,
+      methodNotFound(name: string) {
+        // 转发给 defaults
+        return (defaults as any)[name]
+      },
+    }
+    const config = toOocConfig({ diagnostics: diagnosticsObj })
+    // typeMismatch 应该是 error（spec 覆盖），noImplicitAny 应该是 off（来自 defaults）
+    expect(config.diagnostics).toEqual({
+      typeMismatch: 'error',
+      noImplicitAny: 'off',
+    })
+  })
 })
 
 describe('filterDiagnostic', () => {

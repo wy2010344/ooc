@@ -16,6 +16,8 @@ import {
   OocCircularImportError,
   OocMethodNotFoundError,
   sendMessage,
+  js,
+  storage,
 } from 'object-oriented-c-language'
 
 let interpreter: ReturnType<typeof createInterpretAction>
@@ -180,10 +182,9 @@ describe('OOC Interpreter', () => {
     expect(result).toBe('pet')
   })
 
-  test('bind 是方法函数：消息带参不覆盖绑定值', async () => {
+  test('bind 是方法函数：无参返回绑定值，有参数跳过', async () => {
     const result = await interpreter.interpret(`
             obj = { value = 42 };
-            obj value 99;
             obj value
         `)
     expect(result).toBe(42)
@@ -777,9 +778,34 @@ describe('ObjectValue 元信息反射', () => {
     // 同名 x：bind 在前 + call 在后，两条并列
     const xEntries = ObjectValue.metaOf(mix)!.get('x')!
     expect(xEntries.map((m) => m.type)).toEqual(['bind', 'call'])
-    // 行为取首位定义（宿主消费元信息同样取 value[0]）：bind 在最前，有参也恒返回缓存值
+    // 行为取首位定义（宿主消费元信息同样取 value[0]）：bind 在最前，无参返回缓存值
     expect(sendMessage(mix, 'x', [])).toBe(1)
-    expect(sendMessage(mix, 'x', [5])).toBe(1)
+    // 有参数时 bind 跳过，call 方法匹配：参数数量匹配的 call 方法被调用
+    expect(sendMessage(mix, 'x', [5])).toBe(5)
+  })
+
+  test('bind 有参数时跳过，call 方法匹配', async () => {
+    const result = await interpreter.interpret(`
+        obj = { name = 'hello', name(n) { n } };
+        obj
+    `)
+    // 0参数 → bind 返回 'hello'
+    expect(sendMessage(result, 'name', [])).toBe('hello')
+    // 1参数 → bind 跳过，call 方法匹配
+    expect(sendMessage(result, 'name', ['world'])).toBe('world')
+  })
+
+  test('mutable getter/setter 行为，2+参数跳过', async () => {
+    const result = await interpreter.interpret(`
+        obj = { count <= 10, count(v, w) { v + w } };
+        obj
+    `)
+    // 0参数 → mutable getter 返回当前值
+    expect(sendMessage(result, 'count', [])).toBe(10)
+    // 1参数 → mutable setter 设置新值
+    expect(sendMessage(result, 'count', [20])).toBe(20)
+    // 2参数 → mutable 跳过，call 方法匹配
+    expect(sendMessage(result, 'count', [5, 3])).toBe(8)
   })
 
   test('空对象 {} 是语言定义值，元信息为空 Map', async () => {
@@ -817,6 +843,244 @@ describe('ObjectValue 元信息反射', () => {
     expect(fn).toBeUndefined()
     const host = await withBridge.interpret(`ObjectValue metaOf (Array of)`)
     expect(host).toBeUndefined()
+  })
+
+  test('js send：薄原语动态派发', async () => {
+    const withBridge = createInterpretAction(EmptyFileSystem, { js })
+    // 消息名是运行期字符串：methodNotFound 拿到 name 后用 js send 转发
+    const result = await withBridge.interpret(`
+        defaults = { greet() => 'hi' };
+        spec = { meow() => 'miao', methodNotFound(name, ...args) { js send defaults name args } };
+        spec greet
+    `)
+    expect(result).toBe('hi')
+  })
+
+  test('js send 无参消息：参数列表为空', async () => {
+    const withBridge = createInterpretAction(EmptyFileSystem, { js })
+    const result = await withBridge.interpret(`
+        o = { hi() => 'hay' };
+        js send o 'hi'
+    `)
+    expect(result).toBe('hay')
+  })
+
+  describe('base 包 delegate：OOC 语言实现的 withDefault', () => {
+    function delegateInterpreter() {
+      const fs = memoryFs({
+        'delegate.ooc': `
+          delegate = {
+              withDefault(x, y) {
+                  {
+                      ...x,
+                      methodNotFound(name, ...args) {
+                          js send y name args
+                      }
+                  }
+              },
+              withDefault(x, ...rest) {
+                  fallback = js send responser 'withDefault' rest;
+                  {
+                      ...x,
+                      methodNotFound(name, ...args) {
+                          js send fallback name args
+                      }
+                  }
+              }
+          };
+          delegate
+        `,
+      })
+      return createInterpretAction(
+        { fileSystemProvider: () => fs.provider },
+        { js },
+      )
+    }
+
+    test('spec 自有消息优先，未知消息转发给 defaults', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          d = #import 'delegate';
+          defaults = { greet() => 'hi', gadget() => 'gadget' };
+          spec = { meow() => 'miao' };
+          w = d withDefault spec defaults;
+          (w meow) + ' ' + (w greet) + ' ' + (w gadget)
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe('miao hi gadget')
+    })
+
+    test('转发时 responser 断链：defaults 方法体内 responser 是 defaults', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          d = #import 'delegate';
+          defaults = { name() => 'D', who() { responser name } };
+          spec = { name() => 'S' };
+          w = d withDefault spec defaults;
+          w who
+        `,
+        'demo.ooc',
+      )
+      // spec 也有 name，但转发发生在 defaults 上：who 里 responser 是 defaults
+      expect(result).toBe('D')
+    })
+
+    test('spec 方法抢占同名消息，不经过转发', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          d = #import 'delegate';
+          defaults = { greet() => 'hi' };
+          spec = { greet() => 'miaoo' };
+          w = d withDefault spec defaults;
+          w greet
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe('miaoo')
+    })
+
+    test('defaults 也未知的消息最终抛错', async () => {
+      await expect(
+        delegateInterpreter().interpret(
+          `
+            d = #import 'delegate';
+            defaults = { greet() => 'hi' };
+            spec = { meow() => 'miao' };
+            w = d withDefault spec defaults;
+            w missing
+          `,
+          'demo.ooc',
+        ),
+      ).rejects.toThrow()
+    })
+
+    test('多参数 withDefault：三个参数递归构建转发链', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          d = #import 'delegate';
+          defaults1 = { a() => 'a1', b() => 'b1' };
+          defaults2 = { a() => 'a2', c() => 'c2' };
+          spec = { d() => 'd_spec' };
+          w = d withDefault spec defaults1 defaults2;
+          (w a) + ' ' + (w b) + ' ' + (w c) + ' ' + (w d)
+        `,
+        'demo.ooc',
+      )
+      // spec.d 优先，defaults1.b 存在，defaults2.a 存在（defaults1 也有 a，但 spec 没有，所以转发到 defaults1）
+      // 等等，让我重新理解：withDefault(spec, defaults1, defaults2) = { ...spec, methodNotFound → { ...defaults1, methodNotFound → defaults2 } }
+      // w.a → spec 没有 a → 转发到 defaults1 → defaults1 有 a，返回 'a1'
+      // w.b → spec 没有 b → 转发到 defaults1 → defaults1 有 b，返回 'b1'
+      // w.c → spec 没有 c → 转发到 defaults1 → defaults1 没有 c → 转发到 defaults2 → defaults2 有 c，返回 'c2'
+      // w.d → spec 有 d，返回 'd_spec'
+      expect(result).toBe('a1 b1 c2 d_spec')
+    })
+
+    test('多参数 withDefault：找不到最终抛错', async () => {
+      await expect(
+        delegateInterpreter().interpret(
+          `
+            d = #import 'delegate';
+            defaults1 = { a() => 'a1' };
+            defaults2 = { b() => 'b2' };
+            spec = { c() => 'c_spec' };
+            w = d withDefault spec defaults1 defaults2;
+            w missing
+          `,
+          'demo.ooc',
+        ),
+      ).rejects.toThrow()
+    })
+  })
+
+  describe('base 包 loop：OOC 语言实现的循环（无需宿主 loop）', () => {
+    function loopInterpreter() {
+      const fs = memoryFs({
+        'loop.ooc': `
+          stop = {
+              apply(fn) => nil
+          };
+          loop = {
+              ...stop,
+              apply(fn) {
+                  #guard fn apply;
+                  currentObject apply fn
+              },
+              repeat(n, fn) {
+                  (('x' repeat n) split '') forEach [v, i => fn apply i];
+                  nil
+              }
+          };
+          loop
+        `,
+      })
+      return createInterpretAction(
+        { fileSystemProvider: () => fs.provider },
+        { storage },
+      )
+    }
+
+    test('apply：lambda 返回真继续、假/NIL/0 停止，至少执行一次', async () => {
+      const result = await loopInterpreter().interpret(
+        `
+          loop = #import 'loop';
+          n = storage ref 0;
+          loop apply [n set ((n get) + 1); (n get) < 5];
+          called = storage ref 0;
+          loop apply [called set 1; nil];
+          first = (called get);
+          called0 = storage ref 0;
+          loop apply [called0 set 1; 0];
+          zero = (called0 get);
+          { count = (n get), first = first, zero = zero }
+        `,
+        'demo.ooc',
+      )
+      expect(sendMessage(result, 'count', [])).toBe(5)
+      expect(sendMessage(result, 'first', [])).toBe(1)
+      expect(sendMessage(result, 'zero', [])).toBe(1)
+    })
+
+    test('apply：递减计数到 0 停，跑了 n 次', async () => {
+      const result = await loopInterpreter().interpret(
+        `
+          loop = #import 'loop';
+          count = storage ref 3;
+          runs = storage ref 0;
+          decStep = [runs set ((runs get) + 1); count set ((count get) - 1); (count get) > 0];
+          loop apply decStep;
+          (runs get)
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe(3)
+    })
+
+    test('repeat：恰好执行 n 次，从索引 0 起', async () => {
+      const result = await loopInterpreter().interpret(
+        `
+          loop = #import 'loop';
+          sum = storage ref 0;
+          loop repeat 5 [x => sum set ((sum get) + x)];
+          (sum get)
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe(10)
+    })
+
+    test('repeat 0 次：lambda 一次都不执行', async () => {
+      const result = await loopInterpreter().interpret(
+        `
+          loop = #import 'loop';
+          touched = storage ref 0;
+          loop repeat 0 [touched set 1];
+          (touched get)
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe(0)
+    })
   })
 
   describe('currentScope 伪对象', () => {
@@ -874,6 +1138,57 @@ describe('ObjectValue 元信息反射', () => {
             obj getX
         `),
       ).rejects.toThrow()
+    })
+  })
+
+  describe('include：统一容器成员判定', () => {
+    test('类对象判定实例归属（Array 含 []）', async () => {
+      const result = await interpreter.interpret(`
+          xs = (Array of);
+          Array include xs
+      `)
+      expect(result).toBe(true)
+    })
+
+    test('类对象判定实例归属（非本类 false）', async () => {
+      const result = await interpreter.interpret(`
+          n = 42;
+          Array include n
+      `)
+      expect(result).toBe(false)
+    })
+
+    test('数组容器成员判定', async () => {
+      const result = await interpreter.interpret(`
+          xs = Array of 1 2 3;
+          (xs include 2) == true
+      `)
+      expect(result).toBe(true)
+    })
+
+    test('数组容器不包含时 false', async () => {
+      const result = await interpreter.interpret(`
+          xs = Array of 1 2 3;
+          (xs include 9) == false
+      `)
+      expect(result).toBe(true)
+    })
+
+    test('Set 容器成员判定', async () => {
+      const withJs = createInterpretAction(EmptyFileSystem, { js })
+      const result = await withJs.interpret(`
+          s = js new Set (Array of 'a' 'b');
+          (s include 'b') == true
+      `)
+      expect(result).toBe(true)
+    })
+
+    test('原始值只包含自身', async () => {
+      const result = await interpreter.interpret(`
+          x = 42;
+          (x include 42) == true
+      `)
+      expect(result).toBe(true)
     })
   })
 })

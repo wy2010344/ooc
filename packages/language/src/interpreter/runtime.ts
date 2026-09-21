@@ -185,14 +185,39 @@ export function objectValue(
           const pair = methods[i]
           switch (pair.type) {
             case 'bind':
-              return pair.value
-            case 'mutable':
-              if (args.length > 0) {
-                ;(pair as { value: unknown }).value = args[0]
+              // bind 只匹配无参调用，有参数时跳过，让后面的 call 方法处理
+              if (arguments.length === 0) {
+                return pair.value
               }
-              return pair.value
+              continue
+            case 'mutable':
+              // mutable 匹配0或1个参数（getter/setter），2+参数时跳过
+              if (arguments.length <= 1) {
+                if (arguments.length > 0) {
+                  ;(pair as { value: unknown }).value = arguments[0]
+                }
+                return pair.value
+              }
+              continue
             case 'call':
               const method = pair.value
+              // 计算方法期望的参数数量
+              const minArgs = method.params.length
+              const hasRest = !!method.restParam
+              
+              // 如果没有 guard，自动检查参数数量是否匹配
+              if (!method.guardExpression) {
+                // 固定参数方法：调用参数数量必须恰好匹配
+                // 可变参数方法：调用参数数量必须 >= minArgs
+                const argsMatch = hasRest 
+                  ? arguments.length >= minArgs 
+                  : arguments.length === minArgs
+                
+                if (!argsMatch) {
+                  continue  // 参数数量不匹配，跳过这个方法
+                }
+              }
+              
               // 先绑参数再求值 guard：guard 可引用参数（`#guard a > 5`）
               const s = bindMethod(
                 method,
