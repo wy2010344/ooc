@@ -76,16 +76,19 @@ function genExpression(e: Expression): string {
   }
 }
 
-function genMethod(m: Method): string {
+function genMethod(m: Method): string | null {
   if (m.$type === 'MethodBind') {
     const mb = m as MethodBind
     const val = genExpression((mb as any).expression)
     return `{ type: 'bind', name: ${JSON.stringify(m.name)}, value: ${val} }`
   }
   const ma = m as MethodAll
+  const body = ma.body
+  // 签名方法（无函数体）不生成：与解释器「签名不烧录」一致，避免遮蔽同名实现方法
+  if (!body) return null
   const params = (ma.params || []).map((p: any) => p.name).join(', ')
   const bodyStmts: string[] = []
-  const exps = ma.expressions || []
+  const exps = body.expressions || []
   exps.forEach((e: any) => {
     switch (e.$type) {
       case 'Assignment':
@@ -108,6 +111,7 @@ function genMethod(m: Method): string {
 function genObjectDef(obj: ObjectDef): string {
   const methods = (obj.methods || [])
     .map((m: Method) => genMethod(m))
+    .filter((s: string | null): s is string => s !== null)
     .join(',\n')
   return `__createObject([\n${methods}\n])`
 }
