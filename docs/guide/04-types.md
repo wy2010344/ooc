@@ -51,6 +51,41 @@ area calc { kind() { 'circle' }, radius() { 3 } }   // 28.26
 - 联合的公共方法（如 `kind`）可直接调用，无需判别
 - 字面量是基础类型的子类型：`'circle'` 可赋给 `string`，`42` 可赋给 `number`
 
+### 全覆盖与分支感知返回
+
+一组同名实现方法用**同一个参数**做 `#guard` 判别时，检查器会枚举联合成员，**缺一个成员的分支报「可区分联合覆盖不全」**（`unionUncovered`）：
+
+```ooc
+// 联合是 Circle | Square，却只有 circle 一个判别分支 →
+// 警告：方法 'area' 的可区分联合覆盖不全：联合成员 Square 没有对应的 #guard 判别分支
+area = {
+    area(s: Circle | Square) {
+        #guard (s kind) == 'circle';
+        s radius
+    }
+}
+```
+
+- `!=` 判别同样计入覆盖（`#guard (s kind) != 'circle'` 覆盖其余成员）。
+- 判别分支之间返回不同类型**不告警**（和签名豁免一致）；判别基准对不上、或某方法没有判别式时不做覆盖检查（避免误报）。
+- **分支感知返回**：联合实参调用时返回类型按分支聚合。下面 `area area shape`（`shape: Circle | Square`）的返回类型是 `number | string`——两个分支的返回类型各走各的，而不是只取第一条：
+
+```ooc
+area = {
+    area(s: Circle | Square): number {
+        #guard (s kind) == 'circle';
+        s radius
+    },
+    area(s: Circle | Square): string {
+        #guard (s kind) == 'square';
+        s side
+    }
+};
+shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
+r: number | string = area area shape   // number | string，正确
+bad: string = area area shape          // 警告：可能命中 number 分支
+```
+
 ## 泛型
 
 `#type` 别名可以声明类型参数，实例化时替换：

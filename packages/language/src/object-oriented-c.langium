@@ -62,14 +62,17 @@ MethodAll:
           ')' 
         )? 
         (':' returnType=Type)?
-        (
-            ('{' 
-                ('#guard' guardExpression=Expression ';')?
-                (expressions+=Statement (';' expressions+=Statement)* ';'?)?
-             '}'
-            ) 
-          | ('=>' expressions+=Expression) 
-        );
+        body=MethodBody?;
+
+MethodBody:
+    (
+        ('{' 
+            ('#guard' guardExpression=Expression ';')?
+            (expressions+=Statement (';' expressions+=Statement)* ';'?)?
+         '}'
+        ) 
+      | ('=>' expressions+=Expression) 
+    );
 
 
 MethodBind:
@@ -130,7 +133,6 @@ TypeName:
 
 ObjectDef:
     '{' 
-        ('...' extends=Ref ',' )?
         (methods+=Method (',' methods+=Method)*)?  
     '}';
 

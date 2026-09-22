@@ -21,14 +21,14 @@ calc counter 42  // 42（有参 → 修改并返回新值）
 calc counter     // 42（已修改）
 ```
 
-## responser
+## this
 
-方法体内**没有 `this`**。需要访问触发消息的对象时用 `responser`：它始终指向最终收到消息的对象（继承时是子对象，不是定义方法的那一层）：
+方法体内 `this` 指向触发消息的对象（receiver）：
 
 ```ooc
 calc = {
     cached = 5,
-    inc(n) { responser cached + n }
+    inc(n) { this cached + n }
 };
 calc inc 3       // 8
 ```
@@ -42,7 +42,7 @@ obj apply 1 2 3 4    // [2, 3, 4]
 
 ## 守卫 #guard
 
-方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找下一个同名方法（同一对象内，或继承链上的父对象）：
+方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找下一条同名方法（同一对象内；全部不满足则 `methodNotFound`）：
 
 ```ooc
 f = {
@@ -53,29 +53,45 @@ f r 9    // 'big'
 f r 2    // 'small'
 ```
 
-## 继承
+## 签名方法（TS 式重载类型标注）
+
+方法可以不写 body：**签名方法**只在类型层声明「参数类型 → 返回类型」，运行时是纯契约（不烧录任何行为，配合实现方法做参数化重载）：
 
 ```ooc
-animal = { speak() => 'voice' };
-dog = { ...animal, bark() => 'wang' };
-
-dog speak    // 'voice'（继承父方法）
-dog bark     // 'wang'（自己的方法）
+calc = {
+    area(radius: number): number;   // 签名
+    area(radius: string): string;   // 签名
+    area(r) {                       // 实现（无签名，运行时靠它 + #guard）
+        #guard (r length) != nil;
+        1
+    }
+};
 ```
 
-同名方法会覆盖父方法：
+- 调用点按签名推断返回类型：`calc area 3` → `number`，`calc area 'x'` → `string`。
+- 签名方法之间返回类型不同**不告警**（TS 式豁免）；实现方法体与声明不符才告警。
+- **签名方法必须有返回类型**（`f()` 这种既无 body 又无返回类型的写法会报错）。
+
+## 委托组合 withDefault
+
+OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `withDefault` 委托（base 包 `delegate`）：spec 的方法优先，未知消息按 defaults 顺序查找。
 
 ```ooc
-dog = { ...animal, speak() => 'wang' };
-dog speak    // 'wang'
+delegate = #import 'delegate';
+defaults = { speak() => 'voice', bark() => 'wang' };
+spec = { fly() => 'fly' };
+w = delegate withDefault spec defaults;
+
+w fly      // 'fly'（spec 自有）
+w speak    // 'voice'（转给 defaults）
 ```
 
-子方法 guard 不通过时，会继续向上找父对象的同名方法：
+spec 与 defaults 同名时 spec 优先：
 
 ```ooc
-base = { r(a) { #guard a > 10; 'big' } };
-child = { ...base, r(a) { #guard a < 5; 'small' } };
-child r 12    // 'big'（子 guard 不过，父 guard 过）
+spec2 = { speak() => 'wang' };
+w2 = delegate withDefault spec2 defaults;
+w2 speak   // 'wang'
 ```
 
 ## 嵌套对象

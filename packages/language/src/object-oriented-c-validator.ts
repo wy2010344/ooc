@@ -9,6 +9,7 @@ import type {
   ClassDef,
 } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
+import { getMethodName } from './completion-type-utils.js'
 import {
   createImportResolver,
   ObjectOrientedCTypeChecker,
@@ -138,6 +139,14 @@ export class ObjectOrientedCValidator {
     model.methods.forEach((method) => {
       if (method.$type == 'MethodAll') {
         checkParamDuplicates(method, this.wrap(accept))
+        // 签名方法（无 body）必须声明返回类型，否则是悬空的垃圾写法
+        if (!method.body && !method.returnType) {
+          this.wrap(accept)(
+            'error',
+            `签名方法 '${getMethodName(method)}' 必须声明返回类型：name(...): Type`,
+            { node: method, property: 'name' },
+          )
+        }
       }
     })
   }

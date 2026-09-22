@@ -30,7 +30,7 @@ const EMPTY_OBJECT: Record<string, unknown> = {}
  */
 export const OOC_META = Symbol('ooc:meta')
 
-/** 对象元信息：只含本层定义，原型链父层的元信息沿链读取。
+/** 对象元信息：只含本层定义，无继承。
  *  Map 键是消息名，值是同名定义（bind/mutable/call，含 guard 重载）的完整列表——
  *  不在烧录期折叠，宿主可据 value 字段直接消费（bind/mutable 挂着缓存值、call 挂方法）。 */
 export type OocMeta = Map<
@@ -94,7 +94,8 @@ function getName(n: { name: string }) {
 
 /** 执行一个方法体：把参数（含 rest）绑进作用域后逐条求值表达式，返回最后一条的值。
  *  OOC 对象方法与原生 JS 函数型 lambda（见 evaluate.ts createLambdaValue）共用，
- *  receiver 绑定到 `responser`。guard 需引用参数时，先 bindMethod 再在返回的作用域上求值。 */
+ *  receiver 绑定到 `this`（方法体内引用接收者）。guard 需引用参数时，先 bindMethod
+ *  再在返回的作用域上求值。 */
 export function bindMethod(
   method: {
     params: Array<{ name: string }>
@@ -104,7 +105,7 @@ export function bindMethod(
   receiver: unknown,
   args: unknown[],
 ): Scope {
-  let s = addScope(baseScope, 'responser', receiver)
+  let s = addScope(baseScope, 'this', receiver)
   method.params.forEach((param, index) => {
     s = addScope(s, param.name, args[index])
   })
@@ -136,19 +137,13 @@ export function runBody(
   })
   return last
 }
-export function objectValue(
-  methods: Method[],
-  scope: Scope,
-  parent: OocObject | undefined,
-) {
-  // 空对象 {} 快速返回共享单例（无 parent 且无方法时）
-  if (methods.length === 0 && !parent) {
+export function objectValue(methods: Method[], scope: Scope) {
+  // 空对象 {} 快速返回共享单例（无方法时）
+  if (methods.length === 0) {
     return EMPTY_OBJECT
   }
-  // 顶层对象（无 parent）直接新建普通对象 {}，而非 Object.create(null)，
-  // 保留 Object.prototype，JS 侧 toString/拼接等原生能力可用。
-  const currentObject = parent ? Object.create(parent) : {}
-  scope = addScope(scope, 'currentObject', currentObject)
+  // 直接新建普通对象 {}，保留 Object.prototype，JS 侧 toString/拼接等原生能力可用。
+  const obj = {}
   const meta = groupToMap(
     methods.map((method) => {
       switch (method.$type) {
@@ -165,19 +160,23 @@ export function objectValue(
             value: interpretExpression(method.expression, scope) as unknown,
           }
         default:
+          // 签名方法（无 body）是纯书写期类型契约，运行时无行为，不烧录
+          if (method.$type == 'MethodAll' && !method.body) {
+            return undefined
+          }
           return {
             type: 'call' as const,
             name: getObjDefineName(method.name),
             value: method,
           }
       }
-    }),
+    }).filter((item) => item !== undefined),
     getName,
   )
-  attachMeta(currentObject, meta)
+  attachMeta(obj, meta)
   meta.forEach(function (methods, name) {
     // 所有定义（含 bind）统一作为方法函数，bind 在函数体内直接返回绑定值
-    Object.defineProperty(currentObject, name, {
+    Object.defineProperty(obj, name, {
       enumerable: true,
       value() {
         const args = arguments
@@ -206,7 +205,7 @@ export function objectValue(
               const hasRest = !!method.restParam
               
               // 如果没有 guard，自动检查参数数量是否匹配
-              if (!method.guardExpression) {
+              if (!method.body?.guardExpression) {
                 // 固定参数方法：调用参数数量必须恰好匹配
                 // 可变参数方法：调用参数数量必须 >= minArgs
                 const argsMatch = hasRest 
@@ -226,26 +225,16 @@ export function objectValue(
                 arguments as unknown as unknown[],
               )
               if (
-                !method.guardExpression ||
-                (method.guardExpression &&
-                  interpretExpression(method.guardExpression, s))
+                !method.body?.guardExpression ||
+                (method.body?.guardExpression &&
+                  interpretExpression(method.body.guardExpression, s))
               ) {
-                return runBody(method.expressions, s)
+                return runBody(method.body?.expressions ?? [], s)
               }
           }
         }
-        // 本层同名方法 guard 全不通过：沿原型链向上查找。必须用闭包捕获的
-        // "本层对象"currentObject 定位父层，this 始终是最外层接收者，用它
-        // 定位会递归回自身方法导致栈溢出；顶层对象（parent 为 null）无原型，
-        // 跳过继续走通用方法与 methodNotFound。
-        const proto = Object.getPrototypeOf(currentObject)
-        if (proto) {
-          const superFun = proto[name]
-          if (typeof superFun === 'function') {
-            return superFun.apply(this, args)
-          }
-        }
-
+        // 本层同名方法 guard 全不通过：走通用对象方法 / methodNotFound 兜底。
+        // 无继承，不会沿原型链查找上层同名方法。
         //通用对象方法
         const fun = objectDefine[name as '&&']
         if (fun) {
@@ -262,7 +251,7 @@ export function objectValue(
       },
     })
   })
-  return currentObject
+  return obj
 }
 
 export function getMethodCallName({ value }: MethodCallName) {

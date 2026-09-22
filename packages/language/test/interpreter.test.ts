@@ -119,43 +119,6 @@ describe('OOC Interpreter', () => {
     expect(result).toEqual([2, 3, 4])
   })
 
-  test('继承调用父方法', async () => {
-    const result = await interpreter.interpret(`
-            animal = { speak() { "voice } };
-            dog = { ...animal, bark() { "wang } };
-            dog speak
-        `)
-    expect(result).toBe('voice')
-  })
-
-  test('继承覆盖父方法', async () => {
-    const result = await interpreter.interpret(`
-            animal = { speak() { "voice } };
-            dog = { ...animal, speak() { "wang } };
-            dog speak
-        `)
-    expect(result).toBe('wang')
-  })
-
-  test('继承 guard 不通过时向上查找父方法', async () => {
-    const result = await interpreter.interpret(`
-            base = { foo(x) { #guard x > 10; 'big' } };
-            child = { ...base, foo(x) { #guard x < 5; 'small' } };
-            child foo 12
-        `)
-    expect(result).toBe('big')
-  })
-
-  test('继承双方 guard 都不通过时方法未定义', async () => {
-    await expect(
-      interpreter.interpret(`
-                base = { foo(x) { #guard x > 10; 'big' } };
-                child = { ...base, foo(x) { #guard x < 5; 'small' } };
-                child foo 7
-            `),
-    ).rejects.toThrow('没有定义该方法')
-  })
-
   test('顶层对象 guard 不通过时方法未定义', async () => {
     await expect(
       interpreter.interpret(`
@@ -171,15 +134,6 @@ describe('OOC Interpreter', () => {
             obj value
         `)
     expect(result).toBe(42)
-  })
-
-  test('bind 属性继承', async () => {
-    const result = await interpreter.interpret(`
-            base = { value = 'pet' };
-            child = { ...base, extra() { 'ok' } };
-            child value
-        `)
-    expect(result).toBe('pet')
   })
 
   test('bind 是方法函数：无参返回绑定值，有参数跳过', async () => {
@@ -245,26 +199,15 @@ describe('OOC Interpreter', () => {
     expect(Object.keys(result)).toEqual(['value', 'f'])
   })
 
-  test('继承通过 JS 原型链实现', async () => {
-    const child = await interpreter.interpret(`
-            base = { value = 'pet', speak() { 'voice' } };
-            child = { ...base, extra() { 'ok' } };
-            child
-        `)
-    expect(Object.getPrototypeOf(child).speak).toBeTypeOf('function')
-    expect(child.speak()).toBe('voice')
-  })
-
   test('顶层对象为普通 JS 对象（保留 Object.prototype）', async () => {
     const result = await interpreter.interpret(`{ value = 42 }`)
     expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
   })
 
-  test('父方法 this 访问父字段', async () => {
+  test('方法体内 this 引用自身字段', async () => {
     const result = await interpreter.interpret(`
-            base = { name = 'pet' };
-            child = { ...base, greet() { responser name } };
-            child greet
+            obj = { name = 'pet', greet() { this name } };
+            obj greet
         `)
     expect(result).toBe('pet')
   })
@@ -746,7 +689,7 @@ describe('ObjectValue 元信息反射', () => {
   test('JS 侧：定义对象带元信息，可读本层成员表（带缓存值）且不可伪造', async () => {
     const result = await interpreter.interpret(`
         p = {a => 1, b(x) => x};
-        c = {...p, d = 2, e(v) => v};
+        c = { d = 2, e(v) => v };
         c
     `)
     const meta = ObjectValue.metaOf(result)
@@ -757,9 +700,6 @@ describe('ObjectValue 元信息反射', () => {
     expect(d.type).toBe('bind')
     expect((d as { value: number }).value).toBe(2)
     expect(meta!.get('e')![0].type).toBe('call')
-    // 父层不在本层元信息里：沿原型链逐层读
-    const parentMeta = ObjectValue.metaOf(Object.getPrototypeOf(result))
-    expect([...parentMeta!.keys()]).toEqual(['a', 'b'])
   })
 
   test('guard 重载同 key 不折叠，bind 与动态同名条目并列（顺序即定义序）', async () => {
@@ -782,6 +722,31 @@ describe('ObjectValue 元信息反射', () => {
     expect(sendMessage(mix, 'x', [])).toBe(1)
     // 有参数时 bind 跳过，call 方法匹配：参数数量匹配的 call 方法被调用
     expect(sendMessage(mix, 'x', [5])).toBe(5)
+  })
+
+  test('签名方法（无 body）不烧录运行时行为，实现方法正常履职', async () => {
+    const result = await interpreter.interpret(`
+        calc = {
+            area(): number,
+            area() { 42 }
+        };
+        calc
+    `)
+    // 签名方法只在类型层有用：元信息里只有实现方法一条
+    const meta = ObjectValue.metaOf(result)!
+    expect([...meta.keys()]).toEqual(['area'])
+    expect(meta.get('area')!.length).toBe(1)
+    expect(meta.get('area')![0].type).toBe('call')
+    expect(sendMessage(result, 'area', [])).toBe(42)
+  })
+
+  test('纯签名方法（连实现都没有）运行时走 methodNotFound，无成员烧录', async () => {
+    const result = await interpreter.interpret(`
+        calc = { area(): number };
+        calc
+    `)
+    expect([...ObjectValue.metaOf(result)!.keys()]).toEqual([])
+    expect(() => sendMessage(result, 'area', [])).toThrow()
   })
 
   test('bind 有参数时跳过，call 方法匹配', async () => {
@@ -871,21 +836,17 @@ describe('ObjectValue 元信息反射', () => {
         'delegate.ooc': `
           delegate = {
               withDefault(x, y) {
-                  {
-                      ...x,
-                      methodNotFound(name, ...args) {
-                          js send y name args
-                      }
-                  }
+                  wrapper = js new Object;
+                  js send Object 'assign' wrapper x;
+                  js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send y name args } };
+                  wrapper
               },
               withDefault(x, ...rest) {
-                  fallback = js send responser 'withDefault' rest;
-                  {
-                      ...x,
-                      methodNotFound(name, ...args) {
-                          js send fallback name args
-                      }
-                  }
+                  fallback = js send this 'withDefault' rest;
+                  wrapper = js new Object;
+                  js send Object 'assign' wrapper x;
+                  js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send fallback name args } };
+                  wrapper
               }
           };
           delegate
@@ -911,18 +872,18 @@ describe('ObjectValue 元信息反射', () => {
       expect(result).toBe('miao hi gadget')
     })
 
-    test('转发时 responser 断链：defaults 方法体内 responser 是 defaults', async () => {
+    test('转发时 this 断链：defaults 方法体内 this 是 defaults', async () => {
       const result = await delegateInterpreter().interpret(
         `
           d = #import 'delegate';
-          defaults = { name() => 'D', who() { responser name } };
+          defaults = { name() => 'D', who() { this name } };
           spec = { name() => 'S' };
           w = d withDefault spec defaults;
           w who
         `,
         'demo.ooc',
       )
-      // spec 也有 name，但转发发生在 defaults 上：who 里 responser 是 defaults
+      // spec 也有 name，但转发发生在 defaults 上：who 里 this 是 defaults
       expect(result).toBe('D')
     })
 
@@ -968,7 +929,7 @@ describe('ObjectValue 元信息反射', () => {
         'demo.ooc',
       )
       // spec.d 优先，defaults1.b 存在，defaults2.a 存在（defaults1 也有 a，但 spec 没有，所以转发到 defaults1）
-      // 等等，让我重新理解：withDefault(spec, defaults1, defaults2) = { ...spec, methodNotFound → { ...defaults1, methodNotFound → defaults2 } }
+      // withDefault(spec, defaults1, defaults2) = 拷贝 spec 方法到包装, methodNotFound → withDefault(defaults1, defaults2)
       // w.a → spec 没有 a → 转发到 defaults1 → defaults1 有 a，返回 'a1'
       // w.b → spec 没有 b → 转发到 defaults1 → defaults1 有 b，返回 'b1'
       // w.c → spec 没有 c → 转发到 defaults1 → defaults1 没有 c → 转发到 defaults2 → defaults2 有 c，返回 'c2'
@@ -997,15 +958,12 @@ describe('ObjectValue 元信息反射', () => {
     function loopInterpreter() {
       const fs = memoryFs({
         'loop.ooc': `
-          stop = {
-              apply(fn) => nil
-          };
           loop = {
-              ...stop,
               apply(fn) {
                   #guard fn apply;
-                  currentObject apply fn
+                  this apply fn
               },
+              apply(fn) => nil,
               repeat(n, fn) {
                   (('x' repeat n) split '') forEach [v, i => fn apply i];
                   nil
@@ -1199,7 +1157,7 @@ describe('ObjectValue 元信息反射', () => {
               new(name) { self name name }
           } {
               name <= 'unknown',
-              speak => responser name
+              speak => this name
           };
           d = Animal new 'cat';
           d speak
@@ -1245,7 +1203,7 @@ describe('ObjectValue 元信息反射', () => {
               new(n) { self count n }
           } {
               count <= 0,
-              bump => responser count + 1
+              bump => this count + 1
           };
           a = Counter new 5;
           b = Counter new 9;
@@ -1261,8 +1219,8 @@ describe('ObjectValue 元信息反射', () => {
           } {
               balance <= 0,
               deposit(v) {
-                  total = (responser balance) + v;
-                  responser balance total
+                  total = (this balance) + v;
+                  this balance total
               }
           };
           a = Account new;

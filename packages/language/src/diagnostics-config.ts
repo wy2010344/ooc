@@ -76,6 +76,7 @@ export const DIAGNOSTIC_CODES = {
   circularImport: 'circularImport',
   extendsValueType: 'extendsValueType',
   invalidCast: 'invalidCast',
+  unionUncovered: 'unionUncovered',
 } as const
 
 /**

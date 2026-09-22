@@ -584,38 +584,6 @@ export class ObjectOrientedCTypeChecker {
     accept: ValidationAcceptor,
     objType: ObjectTypeInfo = { kind: 'object', methods: new Map() },
   ): ObjectTypeInfo {
-    if (objDef.extends) {
-      const parent = env.lookup(objDef.extends.value) ?? anyType
-      // 值类型（str/num/bool/nil）、字面量、函数不能作为原型父——继承必须挂在对象上
-      if (
-        parent.kind === 'name' &&
-        (parent.name === 'string' ||
-          parent.name === 'number' ||
-          parent.name === 'boolean' ||
-          parent.name === 'nil')
-      ) {
-        accept(
-          'error',
-          `对象不能继承值类型 '${parent.name}'：原型父必须是一个对象`,
-          {
-            node: objDef.extends,
-            data: diagnosticData('extendsValueType'),
-          },
-        )
-      } else if (parent.kind === 'literal' || parent.kind === 'function') {
-        accept('error', '对象不能继承字面量或函数：原型父必须是一个对象', {
-          node: objDef.extends,
-          data: diagnosticData('extendsValueType'),
-        })
-      }
-      if (parent.kind === 'object') {
-        // 单继承：父类型的方法合并进类型形状，运行时是方法路由的策略链
-        objType.parent = objDef.extends.value
-        for (const [k, v] of parent.methods) {
-          objType.methods.set(k, v)
-        }
-      }
-    }
     for (const method of objDef.methods) {
       this.collectMethod(method, objType, accept, env)
     }
@@ -691,8 +659,6 @@ export class ObjectOrientedCTypeChecker {
   ): void {
     const bodyEnv = env.child()
     bodyEnv.define('this', objType)
-    bodyEnv.define('currentObject', objType)
-    bodyEnv.define('responser', anyType)
     const overloads: { method: MethodAll; returns: TypeInfo }[] = []
     for (const method of objDef.methods) {
       const name = this.getMethodName(method.name)
@@ -738,6 +704,11 @@ export class ObjectOrientedCTypeChecker {
         }
         continue
       }
+      // 签名方法（无 body）：纯类型契约。只把声明放入 sig（dispatch 推断用），
+      // 不检查 body、不参与重载返回一致性对比（TS 式：签名之间不强制返回一致）
+      if (isMethodAll(method) && !method.body) {
+        continue
+      }
       const sig = this.checkMethod(method, bodyEnv, accept, contextSig)
       overloads.push({ method, returns: sig.returns })
       const stored = objType.methods.get(name)
@@ -762,6 +733,21 @@ export class ObjectOrientedCTypeChecker {
         if (this.getMethodName(a.method.name) !== this.getMethodName(b.method.name)) {
           continue
         }
+        // 可区分联合的判别分支（同一判别目标/方法）各自返回字面量可不同：与 TS 签名豁免同理
+        const aTest =
+          a.method.body?.guardExpression &&
+          this.extractTagTest(a.method.body.guardExpression)
+        const bTest =
+          b.method.body?.guardExpression &&
+          this.extractTagTest(b.method.body.guardExpression)
+        if (
+          aTest &&
+          bTest &&
+          aTest.target === bTest.target &&
+          aTest.method === bTest.method
+        ) {
+          continue
+        }
         if (
           !isSubtype(a.returns, b.returns) ||
           !isSubtype(b.returns, a.returns)
@@ -773,6 +759,27 @@ export class ObjectOrientedCTypeChecker {
           )
         }
       }
+    }
+    // 可区分联合全覆盖：按方法名分组实现方法，第一个参数注解是联合时枚举覆盖
+    const implGroups = new Map<string, MethodAll[]>()
+    for (const method of objDef.methods) {
+      if (
+        isMethodAll(method) &&
+        method.body &&
+        method.params &&
+        method.params.length > 0
+      ) {
+        const n = this.getMethodName(method.name)
+        const g = implGroups.get(n)
+        if (g) {
+          g.push(method)
+        } else {
+          implGroups.set(n, [method])
+        }
+      }
+    }
+    for (const [n, group] of implGroups) {
+      this.checkUnionCoverage(n, group, bodyEnv, accept)
     }
   }
 
@@ -842,7 +849,7 @@ export class ObjectOrientedCTypeChecker {
     if (newDef) {
       const newEnv = env.child()
       newEnv.define('self', instanceType)
-      newEnv.define('responser', instanceType)
+      newEnv.define('this', instanceType)
       this.checkMethod(newDef, newEnv, accept)
     }
     // 实例方法
@@ -878,13 +885,13 @@ export class ObjectOrientedCTypeChecker {
     const declaredReturn = method.returnType
       ? this.resolveAnnotation(method.returnType, accept, undefined, methodEnv)
       : anyType
-    if (method.guardExpression) {
+    if (method.body?.guardExpression) {
       // 可区分联合的判别收窄：
       //   #guard (x kind) == 'circle'  → x 收窄为 kind 返回 'circle' 的成员
       //   #guard (x kind) != 'circle'  → x 收窄为其余成员
-      this.narrowByTag(method.guardExpression, methodEnv)
+      this.narrowByTag(method.body.guardExpression, methodEnv)
       const guardType = this.inferExpression(
-        method.guardExpression,
+        method.body.guardExpression,
         methodEnv,
         accept,
       )
@@ -896,12 +903,12 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `#guard 条件应该是布尔值，却得到了 ${describeType(guardType)}`,
-          { node: method.guardExpression, data: diagnosticData('guardNotBoolean') },
+          { node: method.body.guardExpression, data: diagnosticData('guardNotBoolean') },
         )
       }
     }
     let returnType: TypeInfo = nilType
-    for (const stmt of method.expressions) {
+    for (const stmt of method.body?.expressions ?? []) {
       if (isAssignment(stmt)) {
         this.checkAssignment(stmt, methodEnv, accept)
       } else {
@@ -949,14 +956,14 @@ export class ObjectOrientedCTypeChecker {
 
   /**
    * 从 guard 表达式中提取判别测试：
-   *   #guard (x kind) == 'circle' / #guard x kind != 'square'
-   * 返回 { target: 被判别变量, method: 判别方法, value: 字面量, negate: 是否 != }
+   *   #guard (x kind) == 'circle' / #guard x kind != 'square' / #guard x == 'circle'（字面量联合）
+   * 返回 { target: 被判别变量, method: 判别方法（对象联合有、字面量联合为 undefined）, value: 字面量, negate: 是否 != }
    */
   private extractTagTest(
     e: Expression,
   ): {
     target: string
-    method: string
+    method: string | undefined
     value: TypeInfo
     negate: boolean
   } | undefined {
@@ -974,16 +981,30 @@ export class ObjectOrientedCTypeChecker {
     if (!value) {
       return undefined
     }
+    // 情形 1：(x kind) == 'circle'｜x kind == 'circle'（对象联合判别）
     const call = this.extractMethodCall(e.left)
-    if (!call) {
-      return undefined
+    if (call) {
+      return {
+        target: call.target,
+        method: call.method,
+        value,
+        negate: right.infix === '!='
+      }
     }
-    return {
-      target: call.target,
-      method: call.method,
-      value,
-      negate: right.infix === '!='
+    // 情形 2：x == 'circle'（字面量联合直接判别，左端是裸标识符）
+    if (
+      isMessageOrChain(e.left) &&
+      !e.left.message &&
+      isRef(e.left.primary)
+    ) {
+      return {
+        target: e.left.primary.value,
+        method: undefined,
+        value,
+        negate: right.infix === '!='
+      }
     }
+    return undefined
   }
 
   private literalOfPrimary(p: Primary): TypeInfo | undefined {
@@ -1029,15 +1050,17 @@ export class ObjectOrientedCTypeChecker {
   /** 按判别测试收窄联合变量 */
   private narrowByTag(guardExpr: Expression, env: TypeEnv): void {
     const test = this.extractTagTest(guardExpr)
-    if (!test) {
+    // 字面量联合（method 为空）收窄无意义：字面量不再拆成成员类型
+    if (!test || !test.method) {
       return
     }
+    const testMethod = test.method
     const current = env.lookup(test.target)
     if (!current || current.kind !== 'union') {
       return
     }
     const narrowed = current.types.filter((member) => {
-      const match = this.memberTagMatches(member, test.method, test.value)
+      const match = this.memberTagMatches(member, testMethod, test.value)
       return test.negate ? !match : match
     })
     if (narrowed.length === 0) {
@@ -1068,6 +1091,75 @@ export class ObjectOrientedCTypeChecker {
         value.kind === 'literal' &&
         s.returns.value === value.value,
     )
+  }
+
+  /**
+   * 可区分联合全覆盖检查：同名实现方法组的第一个参数注解是联合时，
+   * 枚举每个联合成员是否被某个 #guard 判别覆盖（对象联合按判别方法返回的
+   * 字面量匹配，字面量联合按判别值直接相等）。缺分支报 unionUncovered。
+   * 组内判别基准不一致（target/判别方法对不上）时跳过，避免误报。
+   */
+  private checkUnionCoverage(
+    name: string,
+    group: MethodAll[],
+    env: TypeEnv,
+    accept: ValidationAcceptor,
+  ): void {
+    const firstParam = group[0]?.params?.[0]
+    if (!firstParam?.typeAnnotation) {
+      return
+    }
+    const paramType = this.resolveAnnotation(
+      firstParam.typeAnnotation,
+      () => {},
+      undefined,
+      env,
+    )
+    if (paramType?.kind !== 'union') {
+      return
+    }
+    const members = paramType.types
+    // 收集每个实现的 #guard 判别；target 与判别方法必须组内一致，
+    // 任一实现缺判别或不是判别测试都跳过（保守，避免误报）
+    const tests: {
+      target: string
+      method: string | undefined
+      value: TypeInfo
+      negate: boolean
+    }[] = []
+    for (const m of group) {
+      const guardExpr = m.body?.guardExpression
+      const t = guardExpr ? this.extractTagTest(guardExpr) : undefined
+      if (!t || t.target !== firstParam.name) {
+        return
+      }
+      tests.push(t)
+    }
+    const disc = tests[0]!.method
+    if (tests.some((t) => t.method !== disc)) {
+      return
+    }
+    const missing = members.filter((member) => {
+      return !tests.some((t) => {
+        const match = disc
+          ? this.memberTagMatches(member, disc, t.value)
+          : member.kind === 'literal' &&
+            t.value.kind === 'literal' &&
+            member.value === t.value.value
+        return t.negate ? !match : match
+      })
+    })
+    if (missing.length > 0) {
+      accept(
+        'warning',
+        `方法 '${name}' 的可区分联合覆盖不全：联合成员 ${missing.map(describeType).join('、')} 没有对应的 #guard 判别分支`,
+        {
+          node: group[0],
+          property: 'name',
+          data: diagnosticData('unionUncovered'),
+        },
+      )
+    }
   }
 
   private resolveParamAnnotation(
@@ -1709,6 +1801,32 @@ export class ObjectOrientedCTypeChecker {
     }
 
     // 无显式类型参数：原有推断逻辑
+    // 可区分联合实参：分支感知推断——对 union 的每个成员分别找第一个匹配
+    // 签名，返回各分支返回类型的联合（成员命中不同重载时比「取第一条」精确）。
+    // 只在签名参数是对象/成员类型时启用；参数本身是 union 的签名保持原「整体匹配」。
+    if (
+      args.length > 0 &&
+      args[0].kind === 'union' &&
+      sigs.some(
+        (s) => !s.typeParams && s.params[0] && s.params[0].kind === 'object',
+      )
+    ) {
+      const branchReturns: TypeInfo[] = []
+      for (const member of args[0].types) {
+        let found: TypeInfo = anyType
+        for (const sig of sigs) {
+          if (sig.typeParams) {
+            continue
+          }
+          if (argsCompatible(sig, [member, ...args.slice(1)])) {
+            found = sig.returns
+            break
+          }
+        }
+        branchReturns.push(found)
+      }
+      return unionOf(branchReturns)
+    }
     // 非泛型签名优先精确匹配
     for (const sig of sigs) {
       if (!sig.typeParams && argsCompatible(sig, args)) {

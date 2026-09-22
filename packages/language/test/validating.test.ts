@@ -31,6 +31,29 @@ describe('Validating', () => {
     ).toHaveLength(0)
   })
 
+  test('签名方法（无 body）必须声明返回类型', async () => {
+    document = await parse(`
+            obj = { f() };
+        `)
+
+    const output =
+      (checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
+      ''
+    expect(output).toContain('必须声明返回类型')
+  })
+
+  test('签名方法（有返回类型）合法', async () => {
+    document = await parse(`
+            obj = { f(): number };
+        `)
+
+    expect(
+      checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
+    ).not.toContain('必须声明返回类型')
+  })
+
   test('同名方法重载不报重复错误', async () => {
     document = await parse(`
             obj = {

@@ -197,8 +197,8 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
           result.set(p.name, inferParamType(p))
         }
       }
-      if (method.expressions) {
-        for (const expr of method.expressions) {
+      if (method.body) {
+        for (const expr of method.body.expressions) {
           if (isAssignment(expr)) {
             result.set(expr.name, inferTypeString(this.checker, expr.expression))
           }

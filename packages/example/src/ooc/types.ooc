@@ -7,7 +7,7 @@ Animal #type { speak(): string };
 animal = { speak() => 'voice' };
 
 // 对象赋值到带类型注解的变量，检查方法签名是否吻合
-dog: Animal = { ...animal, bark() => 'wang' };
+dog: Animal = { speak() => 'voice', bark() => 'wang' };
 
 // 联合类型
 result: number | string = 1;

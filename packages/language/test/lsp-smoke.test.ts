@@ -141,6 +141,21 @@ test('LSP: Hover Lambda 应有内容', async () => {
   })
 })
 
+test('LSP: Hover 签名方法（无 body）显示签名', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  await expect({
+    text:
+      'obj = {\n        ' +
+      IDX +
+      'area(): number,\n        area() { 42 }\n      };',
+    indexMarker: IDX,
+    index: 0,
+    hover: /方法|area/,
+  })
+})
+
 // ========== Completion Provider 测试 ==========
 
 test('LSP: Completion 应在变量位置提供补全', async () => {

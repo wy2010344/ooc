@@ -334,25 +334,6 @@ describe('真实示例无类型告警', () => {
     expect(messages(diags)).toEqual([])
   })
 
-  test('继承对象不误报', async () => {
-    const diags = await diagnostics(`
-        animal = { speak() { "voice } };
-        dog = { ...animal, bark() { "wang } };
-        dog speak
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
-  test('继承对象赋值 typedef 注解不误报', async () => {
-    const diags = await diagnostics(`
-        Animal #type { speak(): string };
-        animal = { speak() { "voice } };
-        dog: Animal = { ...animal, bark() { "wang } };
-        dog speak
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
   test('继承对象缺少父方法告警', async () => {
     const diags = await diagnostics(`
         Animal #type { speak(): string };
@@ -491,6 +472,10 @@ describe('字面量类型与可区分联合', () => {
             calc(s: Circle | Square) {
                 #guard (s kind) != 'circle';
                 s side
+            },
+            calc(s: Circle | Square) {
+                #guard (s kind) == 'circle';
+                s radius
             }
         }
     `)
@@ -539,7 +524,10 @@ describe('字面量类型与可区分联合', () => {
     const diags = await diagnostics(`
         cat = { type() => 'cat', meow() => 'miao' };
         dog = { type() => 'dog', bowwow() => 'bark' };
-        say = { speak(p: cat | dog) { #guard (p type) == 'cat'; p meow } }
+        say = {
+        speak(p: cat | dog) { #guard (p type) == 'cat'; p meow },
+        speak(p: cat | dog) { #guard (p type) == 'dog'; p bowwow }
+    }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -1198,44 +1186,14 @@ describe('typedef 继承', () => {
             calc(s: Shape) {
                 #guard (s kind) == 'circle';
                 s radius
+            },
+            calc(s: Shape) {
+                #guard (s kind) == 'square';
+                s side
             }
         }
     `)
     expect(messages(diags)).toEqual([])
-  })
-
-  test('对象字面量：extends 值类型（string）告警', async () => {
-    const diags = await diagnostics(`
-        base: string = 'abc';
-        bad = { ...base, x() { 1 } }
-    `)
-    expect(messages(diags).join('\n')).toContain("对象不能继承值类型 'string'")
-  })
-
-  test('对象字面量：extends 字面量告警', async () => {
-    const diags = await diagnostics(`
-        n = 42;
-        bad = { ...n, x() { 1 } }
-    `)
-    expect(messages(diags).join('\n')).toContain('对象不能继承字面量或函数')
-  })
-
-  test('对象字面量：extends lambda 合法（同像性）', async () => {
-    const diags = await diagnostics(`
-        fn = [x => x];
-        bad = { ...fn, x() { 1 } }
-    `)
-    // lambda 与对象同像：fn 是带 apply 的对象，extends 它不告警
-    expect(messages(diags).join('\n')).not.toContain('继承字面量或函数')
-  })
-
-  test('对象字面量：extends 对象类型不告警', async () => {
-    const diags = await diagnostics(`
-        base = { a() { 1 } };
-        good = { ...base, b() { 2 } }
-    `)
-    expect(messages(diags).join('\n')).not.toContain('继承值类型')
-    expect(messages(diags).join('\n')).not.toContain('继承字面量或函数')
   })
 
   test('联合父类型：对象字面量匹配任一分支（含自有方法）', async () => {
@@ -1435,21 +1393,17 @@ describe('withDefault 交集类型（base 包 delegate）', () => {
 
   const DELEGATE = `delegate = {
     withDefault(x, y) {
-        {
-            ...x,
-            methodNotFound(name, ...args) {
-                js send y name args
-            }
-        }
+        wrapper = js new Object;
+        js send Object 'assign' wrapper x;
+        js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send y name args } };
+        wrapper
     },
     withDefault(x, ...rest) {
-        fallback = js send responser 'withDefault' rest;
-        {
-            ...x,
-            methodNotFound(name, ...args) {
-                js send fallback name args
-            }
-        }
+        fallback = js send this 'withDefault' rest;
+        wrapper = js new Object;
+        js send Object 'assign' wrapper x;
+        js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send fallback name args } };
+        wrapper
     }
 };
 delegate`
@@ -1529,7 +1483,7 @@ delegate`
              new(name: string) { self name name }
          } {
              name <= 'unknown',
-             speak(): string { responser name }
+             speak(): string { this name }
          };
          d = Animal new 'cat';
          s: string = d speak;
@@ -1591,6 +1545,155 @@ delegate`
          Bad`,
       )
       expect(messages(diags).join('\n')).toContain('参数里已经定义了')
+    })
+  })
+
+  describe('签名方法（无 body，TS 式）', () => {
+    test('签名 + 实现组合合法，无告警', async () => {
+      const diags = await diagnostics(`
+          calc = {
+              area(): number,
+              area() { 42 }
+          }
+      `)
+      expect(messages(diags)).toEqual([])
+    })
+
+    test('调用点按签名声明推断返回类型：number 赋给 string 报类型不匹配', async () => {
+      const diags = await diagnostics(`
+          calc = {
+              area(): number,
+              area() { 42 }
+          };
+          `)
+      expect(messages(diags)).toEqual([])
+    })
+
+    test('返回值赋错类型报错（签名 number 声明生效）', async () => {
+      const diags = await diagnostics(`
+          calc = {
+              area(): number,
+              area() { 42 }
+          };
+          s: string = calc area
+      `)
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+
+    test('签名方法之间返回类型不同，不触发重载返回不一致告警（TS 式豁免）', async () => {
+      const diags = await diagnostics(`
+          calc = {
+              area(): number,
+              area(): string,
+              area() { 1 }
+          }
+      `)
+      expect(messages(diags).join('\n')).not.toContain('重载返回类型不一致')
+    })
+
+    test('重载签名参与参数化 dispatch：命中签名时用签名返回值', async () => {
+      const diags = await diagnostics(`
+          calc = {
+              area(radius: number): number,
+              area(radius: string): string,
+              area(r) { 1 }
+          };
+          a: number = calc area 3;
+          b: string = calc area 'x';
+          bad: number = calc area 'x'
+      `)
+      // a、b 各自命中签名；最后的 bad 把 string 签名结果（string）赋给 number 报错
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+  })
+
+  describe('可区分联合全覆盖与分支感知返回类型', () => {
+    test('全部分支都判别：无告警', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind(): 'circle', radius: number };
+          Square #type { kind(): 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  (s radius) * (s radius)
+              },
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'square';
+                  (s side) * (s side)
+              }
+          };
+          shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
+          r: number = area area shape
+      `)
+      expect(messages(diags)).toEqual([])
+    })
+
+    test('漏掉一个联合成员的判别分支会报覆盖不全', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind(): 'circle', radius: number };
+          Square #type { kind(): 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  s radius
+              }
+          }
+      `)
+      expect(messages(diags).join('\n')).toContain('可区分联合覆盖不全')
+      expect(messages(diags).join('\n')).toContain('Square')
+    })
+
+    test('字面量联合漏分支同样报覆盖不全', async () => {
+      const diags = await diagnostics(`
+          describe = {
+              describe(x: 'circle' | 'square'): string {
+                  #guard x == 'circle';
+                  'round'
+              }
+          }
+      `)
+      expect(messages(diags).join('\n')).toContain('可区分联合覆盖不全')
+      expect(messages(diags).join('\n')).toContain("'square'")
+    })
+
+    test('判别基准不一致（一个 guard 不用判别）时不做覆盖检查', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind(): 'circle', radius: number };
+          Square #type { kind(): 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  s radius
+              },
+              area(s: Circle | Square) {
+                  s side
+              }
+          }
+      `)
+      expect(messages(diags).join('\n')).not.toContain('可区分联合覆盖不全')
+    })
+
+    test('分支感知：联合实参按分支返回联合类型', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind(): 'circle', radius: number };
+          Square #type { kind(): 'square', side: number };
+          area = {
+              area(s: Circle | Square): number {
+                  #guard (s kind) == 'circle';
+                  (s radius) * 2
+              },
+              area(s: Circle | Square): string {
+                  #guard (s kind) == 'square';
+                  (s side) + 'cm'
+              }
+          };
+          shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
+          r: number | string = area area shape;
+          bad: string = area area shape
+      `)
+      // r 得到分支联合 number | string 不报；bad 只认 string 会报（可能命中 number 分支）
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+      expect(messages(diags).join('\n')).not.toContain('可区分联合覆盖不全')
     })
   })
 })

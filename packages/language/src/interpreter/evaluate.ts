@@ -166,11 +166,7 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
     case 'Ref':
       return getScope(scope, e.value)
     case 'ObjectDef':
-      return objectValue(
-        e.methods,
-        scope,
-        e.extends ? interpretPrimary(e.extends, scope) : undefined,
-      )
+      return objectValue(e.methods, scope)
     case 'LambdaDef':
       // lambda 等价于 { apply(...) { ... } }，合成一个 apply 方法
       return createLambdaValue(e, scope)

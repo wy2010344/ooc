@@ -3,6 +3,7 @@ import { DefaultDefinitionProvider } from 'langium/lsp'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
   isAssignment,
+  isMethodAll,
   isRef,
 } from './generated/ast.js'
 import { LocationLink } from 'vscode-languageserver'
@@ -63,6 +64,14 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
    * 在节点的子树中搜索变量定义
    */
   private searchInScope(node: AstNode, name: string): AstNode | undefined {
+    // 方法体（含实现方法）里的赋值定义；body 抽到 MethodBody 后字段在 body 上
+    if (isMethodAll(node) && node.body) {
+      for (const expr of node.body.expressions) {
+        if (isAssignment(expr) && expr.name === name) {
+          return expr
+        }
+      }
+    }
     if ('expressions' in node && Array.isArray((node as any).expressions)) {
       for (const expr of (node as any).expressions) {
         if (isAssignment(expr) && expr.name === name) {

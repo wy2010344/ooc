@@ -14,7 +14,7 @@ import {
  * 类对象 = 类方法块（除 new 外的静态方法）烧录成的普通 OOC 对象；
  * `new` 是实例化入口：每次调用都用「实例方法块」独立求值生成一个全新层对象，
  * bind/mutable 缓存按实例隔离、互不共享。构造方法体里 `self` 指向新实例
- * （responser 也是实例，符合消息接收者语义）。
+ * （this 也是实例，符合消息接收者语义）。
  *
  * 实例归属：实例与类对象都打上 OOC_CLASS 标记，`include` 据此判定 instance-of。
  */
@@ -32,7 +32,7 @@ export function createClass(classDef: ClassDef, scope: Scope) {
   // 空类方法块不能走 objectValue 的共享空对象单例，否则会把类标记写进全局 {} 字面量
   const classObj =
     classMethods.length > 0
-      ? objectValue(classMethods, scope, undefined)
+      ? objectValue(classMethods, scope)
       : {}
   // 类归属标记：类对象指向自身，实例指向类
   Object.defineProperty(classObj, OOC_CLASS, {
@@ -47,19 +47,19 @@ export function createClass(classDef: ClassDef, scope: Scope) {
       // 空实例方法块同样绕开共享空对象
       const instance =
         classDef.instanceMethods.length > 0
-          ? objectValue(classDef.instanceMethods, scope, undefined)
+          ? objectValue(classDef.instanceMethods, scope)
           : {}
       Object.defineProperty(instance, OOC_CLASS, {
         enumerable: false,
         value: classObj,
       })
-      if (newDef) {
+      if (newDef?.body) {
         const s = addScope(
           bindMethod(newDef, scope, instance, args),
           'self',
           instance,
         )
-        runBody(newDef.expressions, s)
+        runBody(newDef.body.expressions, s)
       }
       return instance
     },
