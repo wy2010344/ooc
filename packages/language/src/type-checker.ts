@@ -142,6 +142,11 @@ export class ObjectOrientedCTypeChecker {
   ) {}
 
   checkModel(model: Model, accept: ValidationAcceptor): void {
+    // 语法错误时 AST 处于恢复状态（缺节点/半截表达式），类型检查会二次崩溃。
+    // 语法问题交给 parser 诊断，这里直接跳过（IDE 边打字边校验是常态）。
+    if (model.$document && model.$document.parseResult.parserErrors.length > 0) {
+      return
+    }
     this.typedefs.clear()
     this.typedefParams.clear()
     const env = new TypeEnv(undefined, this.globalsTypes)

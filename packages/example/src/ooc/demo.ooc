@@ -1,5 +1,5 @@
 // OOC 综合示例：覆盖所有语言特性
-// 类型、对象、泛型、lambda、guard、继承、导入、JS 桥接等
+// 类型、对象、泛型、lambda、guard、typedef 继承、导入、JS 桥接等
 
 // ===== 1. 可区分联合 + guard 收窄 =====
 Circle #type { kind(): 'circle', radius: number };
@@ -57,7 +57,7 @@ d = js new Date 2026 0 1;
 year = d getFullYear;
 
 // ===== 8. 管道操作 =====
-result = 'hello' slice 0 4 | s => s + ' world';
+result = 'hello' slice 0 4 | s -> s + ' world';
 
 // ===== 返回汇总对象 =====
 {

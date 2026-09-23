@@ -41,6 +41,12 @@
 // c: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
 // bad = { calc(s: Circle | Square) { s radius } };
 
+// 11b. unionUncovered：可区分联合判别分支覆盖不全（漏掉成员）
+// missing = { calc(s: Circle | Square) { #guard (s kind) == 'circle'; s radius } };
+
+// 11c. 签名方法必须声明返回类型（否则是悬空的垃圾写法）
+// obj = { area(r) };
+
 // === 重复定义类 ===
 
 // 12. duplicateType：重复的 typedef
@@ -49,7 +55,7 @@
 
 // 13. duplicateMethod / duplicateParam：重复定义
 // obj = { fun() { 1 }, fun() { 2 } };
-// bad = [a, a -> a];
+// bad = [a, a => a];
 
 // === 变量与赋值类 ===
 

@@ -30,13 +30,10 @@ green: Color = { r = 0, g = 255, b = 0 };
 // ===== 5. 浏览器 API 调用 =====
 // 通过 JS 桥接访问浏览器全局对象
 
-// 5.1 window.alert 弹窗
-// 注意：仅在浏览器环境可用，Node.js 会报错
-showAlert = js fn [msg -> window alert msg];
-
 // 5.2 document 操作
-// 获取文档标题
-docTitle = js fn [] -> document title;
+// lambda 捕获宿主调用，返回函数本身（浏览器环境可用）
+showAlert = [msg => window alert msg];
+docTitle = [document title];
 
 // 5.3 计算并返回结果
 calcInfo = {
