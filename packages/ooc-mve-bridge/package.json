@@ -21,6 +21,11 @@
             "types": "./out/fc.d.ts",
             "development": "./src/fc.ts",
             "default": "./out/fc.js"
+        },
+        "./types": {
+            "types": "./out/types.d.ts",
+            "development": "./src/types.ts",
+            "default": "./out/types.js"
         }
     },
     "scripts": {

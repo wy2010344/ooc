@@ -2,7 +2,7 @@ import { startLanguageServer } from 'langium/lsp';
 import { NodeFileSystem } from 'langium/node';
 import { createConnection, ProposedFeatures } from 'vscode-languageserver/node.js';
 import { createObjectOrientedCServices } from 'object-oriented-c-language';
-import { createBridgeGlobalsTypes } from 'ooc-mve-bridge';
+import { createBridgeGlobalsTypes } from 'ooc-mve-bridge/types';
 
 // Create a connection to the client
 const connection = createConnection(ProposedFeatures.all);
