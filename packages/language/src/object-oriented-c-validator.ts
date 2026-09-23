@@ -56,6 +56,11 @@ export class ObjectOrientedCValidator {
     this.globalsTypes = types
   }
 
+  /** 注入的全局桥接类型（供 shared checker 的 hover/补全等只读场景复用） */
+  getGlobalTypes(): Map<string, TypeInfo> | undefined {
+    return this.globalsTypes
+  }
+
   private wrap(accept: ValidationAcceptor): ValidationAcceptor {
     return (severity, message, info) => {
       const code =

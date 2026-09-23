@@ -24,6 +24,7 @@ import {
   isBeforeCursor,
 } from './completion-type-utils.js'
 import { getContextualMethodCompletions } from './completion-methods.js'
+import { describeType } from './type-system.js'
 
 /**
  * OOC 代码自动补全提供者
@@ -143,6 +144,19 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
         kind: CompletionItemKind.Variable,
         detail: typeInfo,
       })
+    }
+    // 全局桥接类型（dom/fc/text/console 等）：文档内已有同名变量则不重复建议
+    const globals = this.checker.globals
+    if (globals) {
+      const seen = new Set(variables.keys())
+      for (const [name, type] of globals) {
+        if (seen.has(name)) continue
+        items.push({
+          label: name,
+          kind: CompletionItemKind.Function,
+          detail: describeType(type),
+        })
+      }
     }
     return items
   }

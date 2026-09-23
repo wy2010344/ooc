@@ -141,6 +141,11 @@ export class ObjectOrientedCTypeChecker {
     private readonly globalsTypes?: Map<string, TypeInfo>,
   ) {}
 
+  /** 注入的全局桥接类型（供补全/hover 等只读场景展示全局对象名） */
+  get globals(): Map<string, TypeInfo> | undefined {
+    return this.globalsTypes
+  }
+
   checkModel(model: Model, accept: ValidationAcceptor): void {
     // 语法错误时 AST 处于恢复状态（缺节点/半截表达式），类型检查会二次崩溃。
     // 语法问题交给 parser 诊断，这里直接跳过（IDE 边打字边校验是常态）。

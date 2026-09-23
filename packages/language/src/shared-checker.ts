@@ -4,6 +4,7 @@
  */
 
 import type { LangiumServices } from 'langium/lsp'
+import type { TypeInfo } from './type-system.js'
 import {
   createImportResolver,
   ObjectOrientedCTypeChecker,
@@ -22,14 +23,19 @@ const checkerMap = new WeakMap<object, ObjectOrientedCTypeChecker>()
 export function getSharedChecker(services: LangiumServices): ObjectOrientedCTypeChecker {
   // 使用服务对象作为 key（WeakMap 不会阻止 GC）
   const key = services as unknown as object
-  
+
   let checker = checkerMap.get(key)
   if (!checker) {
+    // 复用 validator 注入的全局桥接类型，让 hover/补全也能看到 dom/fc 等
+    const validator = (services as unknown as {
+      validation?: { ObjectOrientedCValidator: { getGlobalTypes(): Map<string, TypeInfo> | undefined } }
+    }).validation?.ObjectOrientedCValidator
     checker = new ObjectOrientedCTypeChecker(
       createImportResolver(
         services.shared.workspace.LangiumDocuments,
         services.LanguageMetaData.fileExtensions,
       ),
+      validator?.getGlobalTypes(),
     )
     checkerMap.set(key, checker)
   }

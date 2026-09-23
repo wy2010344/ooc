@@ -108,12 +108,30 @@ const createContextType: TypeInfo = {
   kind: 'function',
 }
 
-// dom 类型：每个标签名都是一个方法
-const domMethods = new Map<string, MethodSig[]>()
-// 简化：dom 对象的所有属性都返回 (props?, ...children) => DComponent
-// 使用 dom.div, dom.span 等时，类型检查器会查找 dom 对象的 div/span 方法
+// dom 类型：每个标签名都是一个方法，签名即 (props?, ...children: DComponent[]) => DComponent
+// 标签名来自 wy-dom-helper 的 domTagNames（此处静态内联，避免拖入带 window 副作用的运行时包）
+const domTagNames = [
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big',
+  'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist',
+  'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption',
+  'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup',
+  'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'keygen', 'label', 'legend', 'li',
+  'link', 'main', 'map', 'mark', 'menu', 'menuitem', 'meta', 'meter', 'nav', 'noindex', 'noscript', 'object',
+  'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'pre', 'progress', 'q', 'rp', 'rt',
+  'ruby', 's', 'samp', 'slot', 'script', 'section', 'select', 'small', 'source', 'span', 'strong', 'style',
+  'sub', 'summary', 'sup', 'table', 'template', 'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'time',
+  'tr', 'track', 'u', 'ul', 'var', 'video', 'wbr', 'webview',
+] as const
 
-// 创建 dom 类型的代理方法
+// dom.<tag> 的共享签名：(props?, ...children[]) => DComponent
+const domMethods = new Map<string, MethodSig[]>()
+for (const tag of domTagNames) {
+  domMethods.set(tag, [
+    { params: [anyType], rest: anyType, returns: dcomponentType },
+  ])
+}
+
+// dom 类型：dom div {...} 等消息调用即对应标签方法
 const domType: TypeInfo = {
   kind: 'object',
   name: 'dom',

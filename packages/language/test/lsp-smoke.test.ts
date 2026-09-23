@@ -9,7 +9,7 @@ import {
   parseHelper,
 } from 'langium/test'
 import { createObjectOrientedCServices } from 'object-oriented-c-language'
-import type { Model } from 'object-oriented-c-language'
+import type { Model, TypeInfo } from 'object-oriented-c-language'
 import { getSharedChecker, resetChecker } from 'object-oriented-c-language'
 
 /**
@@ -64,6 +64,43 @@ test('LSP: 应能解析对象方法', async () => {
 })
 
 // ========== Hover Provider 测试 ==========
+
+// 模拟注入的全局桥接类型（扩展/playground 注入 createBridgeGlobalsTypes，这里是同链路）
+const fakeGlobalsTypes = new Map<string, TypeInfo>([
+  ['demoDom', {
+    kind: 'object',
+    name: 'demoDom',
+    methods: new Map([
+      ['div', [{ params: [], rest: { kind: 'any' }, returns: { kind: 'function' } } as const]],
+    ]),
+  }],
+])
+
+test('LSP: Hover 全局桥接类型（如 dom/fc）应显示类型', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem, undefined, fakeGlobalsTypes)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  // 在全局对象 demoDom 上悬停，应能解析其类型（而非未定义）
+  await expect({
+    text: IDX + 'demoDom;',
+    indexMarker: IDX,
+    index: 0,
+    hover: /demoDom|object|对象/,
+  })
+})
+
+test('LSP: Hover 全局桥接对象的方法（dom div）应有接收者类型', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem, undefined, fakeGlobalsTypes)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  // 在 demoDom div 的接收者上悬停，类型应为注入的对象
+  await expect({
+    text: IDX + 'demoDom div;',
+    indexMarker: IDX,
+    index: 0,
+    hover: /demoDom|object|对象/,
+  })
+})
 
 test('LSP: Hover 变量定义应有内容', async () => {
   const services = createObjectOrientedCServices(EmptyFileSystem)
@@ -222,6 +259,42 @@ test('LSP: Completion 应在对象后空格提供方法补全', async () => {
     assert: (completions: any) => {
       const labels = completions.items.map((item: any) => item.label)
       assert.ok(labels.length > 0, `补全列表应有内容`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应建议注入的全局桥接类型（dom/fc 等）', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem, undefined, fakeGlobalsTypes)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  const result = await expect({
+    text: 'x = 1; ' + IDX,
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(
+        labels.includes('demoDom'),
+        `补全列表应包含注入的全局对象 demoDom，实际: ${labels.join(', ')}`,
+      )
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 全局建议不应与文档内同名变量重复', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem, undefined, fakeGlobalsTypes)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  const result = await expect({
+    text: 'demoDom = 1; ' + IDX,
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      const count = labels.filter((l: string) => l === 'demoDom').length
+      assert.equal(count, 1, `同名变量只应建议一次，实际出现 ${count} 次`)
     },
   })
   assert.ok(result, '应返回补全结果')
