@@ -94,6 +94,22 @@ export class ObjectOrientedCValidator {
     )
   }
 
+  /** 收集 config.ooc Model 的 globals 成员类型（供 LSP/CLI 注入全局类型） */
+  collectConfigGlobals(
+    model: Parameters<ObjectOrientedCTypeChecker['checkModel']>[0],
+  ): Map<string, TypeInfo> | undefined {
+    const importResolver = this.services
+      ? createImportResolver(
+          this.services.shared.workspace.LangiumDocuments,
+          this.services.LanguageMetaData.fileExtensions,
+        )
+      : undefined
+    return new ObjectOrientedCTypeChecker(
+      importResolver,
+      this.globalsTypes,
+    ).collectConfigGlobals(model)
+  }
+
   /** 在已加载工作区中深度优先检查 #import 环，环上的导入语句各自报告一次。 */
   private checkCircularImports(
     model: Parameters<ObjectOrientedCTypeChecker['checkModel']>[0],

@@ -12,6 +12,8 @@ import { isModel } from './generated/ast.js'
 import { interpret } from './interpreter/evaluate.js'
 import { withGlobals } from './interpreter/scope.js'
 import { sendMessage } from './interpreter/runtime.js'
+import { type ObjectOrientedCValidator } from './object-oriented-c-validator.js'
+import { type TypeInfo } from './type-system.js'
 
 /** * OOC 项目配置（类似 tsconfig.json），控制类型检查诊断的显示级别。
  *
@@ -43,6 +45,32 @@ export interface OocConfig {
 
 /** 空配置单例（无任何诊断规则） */
 const EMPTY_OOC_CONFIG: OocConfig = Object.freeze({})
+
+/**
+ * 从 config.ooc 文本收集「globals」成员对象的全局类型，供 LSP / CLI 注入。
+ * 语义见 ObjectOrientedCValidator.collectConfigGlobals：
+ * config.ooc 最后一条表达式是配置对象，globals 成员列出项目全局对象。
+ * 返回 undefined 表示没有 globals 声明，不需要注入。
+ */
+export function collectConfigGlobalsFromText(
+  text: string,
+  services: LangiumCoreServices,
+): Map<string, TypeInfo> | undefined {
+  const parseResult = services.parser.LangiumParser.parse(text)
+  if (parseResult.lexerErrors.length > 0 || parseResult.parserErrors.length > 0) {
+    return undefined
+  }
+  const model = parseResult.value
+  if (!isModel(model)) {
+    return undefined
+  }
+  const validator = (
+    services.validation as unknown as {
+      ObjectOrientedCValidator: ObjectOrientedCValidator
+    }
+  ).ObjectOrientedCValidator
+  return validator.collectConfigGlobals(model)
+}
 
 /** 简单字符串 hash（FNV-1a 32位），用于缓存键生成 */
 function hashStr(s: string): string {
@@ -397,6 +425,15 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
   /** 配置缓存：缓存键 = 路径 + ':' + 内容 hash，文件变更自动失效；LRU 策略防止内存泄漏 */
   private readonly configCache = new LruConfigCache(200)
 
+  /**
+   * globals 类型缓存：同样的「路径 + 内容 hash」键。
+   * 值允许 undefined（表示该 config.ooc 无 globals 声明），因此用 get/has 区分未命中。
+   */
+  private readonly globalsCache = new Map<
+    string,
+    Map<string, TypeInfo> | undefined
+  >()
+
   constructor(services: LangiumCoreServices) {
     super(services)
     this.fs = services.shared.workspace.FileSystemProvider
@@ -408,16 +445,19 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
     options?: ValidationOptions,
     cancelToken?: unknown,
   ): Promise<Diagnostic[]> {
+    const docDir = dirnameForConfig(uriToPath(document.uri))
+    // 先注入本项目 config.ooc 的全局类型，再走类型检查（checkModel 读取注入后的状态）
+    const globals = await this.findGlobalsCached(docDir)
+    this.applyGlobals(globals)
     const diagnostics = await super.validateDocument(
       document,
       options,
       cancelToken as never,
     )
-    const docDir = dirnameForConfig(uriToPath(document.uri))
-    const config = await this.findConfigCached(docDir)
     // 无论是否有配置都走 filterDiagnostic：
     // - EMPTY_OOC_CONFIG 时仍需应用默认级别（如 noImplicitAny 默认 off）
     // - 有配置时按配置调整
+    const config = await this.findConfigCached(docDir)
     return diagnostics.flatMap((d) => {
       const next = filterDiagnostic(config, d.severity, codeOfDiagnostic(d))
       if (next === undefined) {
@@ -425,6 +465,42 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
       }
       return [{ ...d, severity: next as DiagnosticSeverity }]
     })
+  }
+
+  /** 把 config.ooc 收集到的全局类型注入校验器（无 globals 时清空，避免串目录） */
+  private applyGlobals(globals: Map<string, TypeInfo> | undefined): void {
+    const validator = (
+      this.services.validation as unknown as {
+        ObjectOrientedCValidator: ObjectOrientedCValidator
+      }
+    ).ObjectOrientedCValidator
+    validator.setGlobalsTypes(globals)
+  }
+
+  /** 从文档目录向上找第一份 config.ooc，收集其 globals 类型（内容 hash 缓存） */
+  private async findGlobalsCached(
+    startDir: string,
+  ): Promise<Map<string, TypeInfo> | undefined> {
+    let dir = startDir
+    for (;;) {
+      const configUri = UriUtils.joinPath(URI.file(dir), 'config.ooc')
+      if (await this.fs.exists(configUri)) {
+        const text = await this.fs.readFile(configUri)
+        const key = configUri.path + ':' + hashStr(text)
+        if (this.globalsCache.has(key)) {
+          return this.globalsCache.get(key)
+        }
+        const globals = collectConfigGlobalsFromText(text, this.services)
+        this.globalsCache.set(key, globals)
+        return globals
+      }
+      // 逐级向上，直到根目录
+      const parent = dirnameForConfig(dir)
+      if (parent === dir) {
+        return undefined
+      }
+      dir = parent
+    }
   }
 
   /** 带缓存的配置查找：内容 hash 作为缓存键，文件变更自动失效 */

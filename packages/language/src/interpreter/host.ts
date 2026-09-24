@@ -6,6 +6,7 @@ import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import { run } from 'wy-helper'
 import { ImportStatement, isModel, Model } from '../generated/ast.js'
 import { createObjectOrientedCServices } from '../object-oriented-c-module.js'
+import { type ObjectOrientedCValidator } from '../object-oriented-c-validator.js'
 import type { TypeInfo } from '../type-system.js'
 import {
   extnameOf,
@@ -18,6 +19,7 @@ import { OocCircularImportError } from './errors.js'
 import { type Globals, withGlobals } from './scope.js'
 import {
   codeOfDiagnostic,
+  collectConfigGlobalsFromText,
   dirnameForConfig,
   executeConfigOoc,
   filterDiagnostic,
@@ -257,11 +259,42 @@ export function createTypeCheckAction(
     }
   }
 
+  /** 从文档目录向上找第一份 config.ooc，收集其 globals 类型（与 LSP 注入语义一致） */
+  async function findConfigGlobals(
+    dir: string,
+  ): Promise<Map<string, TypeInfo> | undefined> {
+    let d = dir
+    for (;;) {
+      const configUri = URI.file(joinPath(d, 'config.ooc'))
+      if (await fs.exists(configUri)) {
+        const text = (await fs.readFile(configUri)) as string
+        return collectConfigGlobalsFromText(text, services)
+      }
+      const parent = dirnameForConfig(d)
+      if (parent === d) {
+        return undefined
+      }
+      d = parent
+    }
+  }
+
   async function checkDocument(
     document: LangiumDocument<AstNode>,
     fileName: string,
   ): Promise<Diagnostic[]> {
     await preloadImportTree(document)
+    // 注入本项目 config.ooc 的全局类型，再走类型检查
+    const docDir = uriToPath(document.uri)
+    const startDir = docDir.startsWith('/')
+      ? dirnameForConfig(docDir)
+      : dirnameForConfig('/' + docDir)
+    const globals = await findConfigGlobals(startDir)
+    const validator = (
+      services.validation as unknown as {
+        ObjectOrientedCValidator: ObjectOrientedCValidator
+      }
+    ).ObjectOrientedCValidator
+    validator.setGlobalsTypes(globals)
     await services.shared.workspace.DocumentBuilder.build([document], {
       validation: true,
     })
