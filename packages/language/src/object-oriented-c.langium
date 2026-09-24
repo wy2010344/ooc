@@ -78,9 +78,9 @@ MethodBody:
 MethodBind:
     name=MethodDefName (':' typeAnnotation=Type)? '=' expression=Expression;
 
-//可变属性：无参返回当前值，有参修改并返回新值
+//转发属性：本 key 的一切消息原样转发给委托对象的 apply 执行（消息名不传给 apply）
 MethodBindMutable:
-    name=MethodDefName (':' typeAnnotation=Type)? '<=' expression=Expression;
+    name=MethodDefName '<=' expression=Expression;
 
 MethodDefName:
     name=(Ref|Str|StID);

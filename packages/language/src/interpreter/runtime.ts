@@ -32,7 +32,7 @@ export const OOC_META = Symbol('ooc:meta')
 
 /** 对象元信息：只含本层定义，无继承。
  *  Map 键是消息名，值是同名定义（bind/mutable/call，含 guard 重载）的完整列表——
- *  不在烧录期折叠，宿主可据 value 字段直接消费（bind/mutable 挂着缓存值、call 挂方法）。 */
+ *  不在烧录期折叠，宿主可据 value 字段直接消费（bind 挂缓存值、mutable 挂委托对象、call 挂方法）。 */
 export type OocMeta = Map<
   string,
   (
@@ -190,14 +190,13 @@ export function objectValue(methods: Method[], scope: Scope) {
               }
               continue
             case 'mutable':
-              // mutable 匹配0或1个参数（getter/setter），2+参数时跳过
-              if (arguments.length <= 1) {
-                if (arguments.length > 0) {
-                  ;(pair as { value: unknown }).value = arguments[0]
-                }
-                return pair.value
-              }
-              continue
+              // 转发属性：本 key 上的一切消息（任意参数数量）都原样转发给
+              // 委托对象的 apply 执行（消息名不传给 apply，只传实参）。
+              return sendMessage(
+                (pair as { value: unknown }).value,
+                'apply',
+                Array.from(args),
+              )
             case 'call':
               const method = pair.value
               // 计算方法期望的参数数量

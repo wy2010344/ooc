@@ -105,6 +105,7 @@ export const DIAGNOSTIC_CODES = {
   extendsValueType: 'extendsValueType',
   invalidCast: 'invalidCast',
   unionUncovered: 'unionUncovered',
+  delegateNoApply: 'delegateNoApply',
 } as const
 
 /**

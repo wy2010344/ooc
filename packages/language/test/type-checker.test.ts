@@ -1479,13 +1479,14 @@ delegate`
     test('类定义与 new 返回实例无告警', async () => {
       const diags = await checkModule(
         'class1.ooc',
-        `Animal = #classDef {
-             new(name: string) { self name name }
-         } {
-             name <= 'unknown',
-             speak(): string { this name }
+        `holder = {
+             apply(x: string) { x }
          };
-         d = Animal new 'cat';
+         Animal = #classDef {} {
+             name <= holder,
+             speak(): string { this name 'cat' }
+         };
+         d = Animal new;
          s: string = d speak;
          s`,
       )
@@ -1495,10 +1496,11 @@ delegate`
     test('new 返回实例类型，赋给 number 报不匹配', async () => {
       const diags = await checkModule(
         'class2.ooc',
-        `Animal = #classDef {
-             new(name) { self name name }
-         } {
-             name <= 'unknown'
+        `holder = {
+             apply(x: string) { x }
+         };
+         Animal = #classDef {} {
+             name <= holder
          };
          n: number = Animal new 'cat';
          n`,
@@ -1545,6 +1547,54 @@ delegate`
          Bad`,
       )
       expect(messages(diags).join('\n')).toContain('参数里已经定义了')
+    })
+  })
+
+  describe('转发属性 <=：签名取自委托 apply', () => {
+    test('实参按 apply 参数类型校验，返回类型取自 apply', async () => {
+      const diags = await checkModule(
+        'fwd1.ooc',
+        `handler = {
+             apply(a: number, b: number): number { a + b }
+         };
+         obj = { add <= handler };
+         n: number = obj add 1 2;
+         n`,
+      )
+      expect(messages(diags)).toEqual([])
+    })
+
+    test('实参类型不符告警（按 apply 签名校验）', async () => {
+      const diags = await checkModule(
+        'fwd2.ooc',
+        `handler = {
+             apply(a: number): number { a }
+         };
+         obj = { echo <= handler };
+         s: string = obj echo 5;
+         s`,
+      )
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+
+    test('委托对象无 apply 报错', async () => {
+      const diags = await checkModule(
+        'fwd3.ooc',
+        `obj = { value <= 5 };
+         obj value`,
+      )
+      expect(messages(diags).join('\n')).toContain('需要含 apply')
+    })
+
+    test('转发目标为含 apply 的变量时无告警', async () => {
+      const diags = await checkModule(
+        'fwd4.ooc',
+        `h = { apply(x: string): string { x } };
+         obj = { name <= h };
+         s: string = obj name 'hi';
+         s`,
+      )
+      expect(messages(diags)).toEqual([])
     })
   })
 

@@ -193,6 +193,22 @@ test('LSP: Hover 签名方法（无 body）显示签名', async () => {
   })
 })
 
+test('LSP: Hover 转发属性（<=）显示转发说明', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  await expect({
+    text:
+      'd = { apply(x) { x } };\n      ' +
+      'obj = {\n        ' +
+      IDX +
+      'name <= d\n      };',
+    indexMarker: IDX,
+    index: 0,
+    hover: /转发属性|name/,
+  })
+})
+
 // ========== Completion Provider 测试 ==========
 
 test('LSP: Completion 应在变量位置提供补全', async () => {

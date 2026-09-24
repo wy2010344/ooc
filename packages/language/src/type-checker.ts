@@ -358,6 +358,65 @@ export class ObjectOrientedCTypeChecker {
     return base
   }
 
+  /**
+   * 从 config.ooc 的 Model 收集「globals」成员对象里每个名字的类型，
+   * 供宿主（LSP / CLI type-check）注入为全局类型。语义：
+   * config.ooc 最后一条表达式是配置对象（执行 config.ooc 返回该值），
+   * 其中 globals 成员列出要作为项目全局对象的名字（值需在本文件顶层声明）。
+   * 没有 globals 成员时返回 undefined（不注入）。
+   */
+  collectConfigGlobals(model: Model): Map<string, TypeInfo> | undefined {
+    const env = new TypeEnv(undefined, this.globalsTypes)
+    const accept: ValidationAcceptor = () => undefined
+    for (const stmt of model.expressions) {
+      // 先注册顶层 #type（config.ooc 的 Component/Signal 等返回类型别名），
+      // 否则方法返回注解解析成 anyType
+      if (isTypeDef(stmt)) {
+        this.checkTypeDef(stmt, env, accept)
+        continue
+      }
+      if (!isAssignment(stmt)) {
+        continue
+      }
+      const objDef = this.unwrapObjectDef(stmt.expression)
+      if (objDef) {
+        const t: ObjectTypeInfo = { kind: 'object', methods: new Map() }
+        env.define(stmt.name, t)
+        this.collectObject(objDef, env, accept, t)
+        env.define(stmt.name, t)
+      } else {
+        env.define(
+          stmt.name,
+          this.inferExpression(stmt.expression, env, accept),
+        )
+      }
+    }
+    const last = model.expressions[model.expressions.length - 1]
+    if (!last) {
+      return undefined
+    }
+    const lastExpr = isAssignment(last)
+      ? last.expression
+      : (last as Expression)
+    const configType = this.inferExpression(lastExpr, env, accept)
+    const globalsSig =
+      configType.kind === 'object'
+        ? configType.methods.get('globals')?.[0]
+        : undefined
+    const globalsType = globalsSig?.returns
+    if (!globalsType || globalsType.kind !== 'object') {
+      return undefined
+    }
+    const out = new Map<string, TypeInfo>()
+    for (const [name, sigs] of globalsType.methods) {
+      const first = sigs[0]
+      if (first) {
+        out.set(name, first.returns)
+      }
+    }
+    return out.size ? out : undefined
+  }
+
   private checkTopStatement(
     stmt: Model['expressions'][number],
     env: TypeEnv,
@@ -637,24 +696,30 @@ export class ObjectOrientedCTypeChecker {
           methodTypeParams.length > 0 ? methodTypeParams : undefined,
       })
     } else if (isMethodBindMutable(method)) {
-      // 可变属性：注册 getter（无参）+ setter（一个 value 参数）两个变体
-      const valueType = method.typeAnnotation
-        ? this.resolveAnnotation(method.typeAnnotation, accept, undefined, env)
-        : anyType
-      sigs.push({
-        params: [],
-        returns: valueType,
-      })
-      sigs.push({
-        params: [valueType],
-        returns: valueType,
-      })
+      // 转发属性：本 key 的一切消息原样转发给委托对象的 apply 执行，
+      // 因此静态签名 = 委托对象 apply 方法的签名。
+      const delegateType = this.inferExpression(method.expression, env, accept)
+      const applySigs = this.resolveSigs(delegateType, 'apply') ?? []
+      if (applySigs.length > 0) {
+        for (const s of applySigs) {
+          sigs.push({ params: s.params, rest: s.rest, returns: s.returns })
+        }
+      } else {
+        // 委托对象没有 apply：类型只能给出宽松兜底（参数任意、返回任意）。
+        // 运行时也会因 methodNotFound 报错，故这里同时给出类型提示。
+        accept(
+          'error',
+          `转发目标需要含 apply 方法，委托对象类型为 ${describeType(delegateType)}，其中没有 apply`,
+          { node: method.expression, data: diagnosticData('delegateNoApply') },
+        )
+        sigs.push({ params: [], rest: anyType, returns: anyType })
+      }
     } else {
       sigs.push({
         params: [],
         returns: method.typeAnnotation
           ? this.resolveAnnotation(method.typeAnnotation, accept, undefined, env)
-          : anyType,
+          : this.inferExpression(method.expression, env, accept),
       })
     }
     objType.methods.set(name, sigs)
@@ -694,24 +759,9 @@ export class ObjectOrientedCTypeChecker {
         continue
       }
       if (isMethodBindMutable(method)) {
-        const inferred = this.inferExpression(method.expression, bodyEnv, accept)
-        this.checkAnnotation(method.typeAnnotation, inferred, accept, undefined, bodyEnv)
-        const sigs = objType.methods.get(name)
-        if (sigs && sigs.length > 0) {
-          // getter variant（无参）
-          const getter = sigs[0]
-          if (!method.typeAnnotation) {
-            getter.returns = inferred
-          }
-          // setter variant（一个参数，类型与值相同）
-          if (sigs.length > 1) {
-            const setter = sigs[1]
-            if (!method.typeAnnotation) {
-              setter.params = [inferred]
-              setter.returns = inferred
-            }
-          }
-        }
+        // 转发属性：签名已在 collectMethod 按委托 apply 记录，
+        // 这里只为副作用推断委托表达式（复用同一引用不再回填）。
+        this.inferExpression(method.expression, bodyEnv, accept)
         continue
       }
       // 签名方法（无 body）：纯类型契约。只把声明放入 sig（dispatch 推断用），

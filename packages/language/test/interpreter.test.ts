@@ -144,47 +144,57 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(42)
   })
 
-  test('可变属性 <= ：无参返回当前值', async () => {
+  test('转发属性 <= ：消息转发给委托对象的 apply 执行', async () => {
     const result = await interpreter.interpret(`
-            counter = { value <= 0 };
-            counter value
-        `)
-    expect(result).toBe(0)
-  })
-
-  test('可变属性 <= ：有参修改并返回新值', async () => {
-    const result = await interpreter.interpret(`
-            counter = { value <= 0 };
-            counter value 42
+            counter = {
+                apply(x) => x * 2
+            };
+            obj = { value <= counter };
+            obj value 21
         `)
     expect(result).toBe(42)
   })
 
-  test('可变属性 <= ：修改后无参返回新值', async () => {
+  test('转发属性 <= ：任意参数数量都转发给 apply', async () => {
     const result = await interpreter.interpret(`
-            counter = { value <= 0 };
-            counter value 42;
-            counter value
+            sum2 = {
+                apply(a, b) => a + b
+            };
+            obj = { sum <= sum2 };
+            obj sum 20 22
         `)
     expect(result).toBe(42)
   })
 
-  test('可变属性 <= ：多次修改', async () => {
+  test('转发属性 <= ：无参消息也转发（消息名不传给 apply）', async () => {
     const result = await interpreter.interpret(`
-            counter = { value <= 0 };
-            counter value 10;
-            counter value 20;
-            counter value
-        `)
-    expect(result).toBe(20)
-  })
-
-  test('可变属性 <= ：初始值非数字', async () => {
-    const result = await interpreter.interpret(`
-            obj = { greeting <= 'hello' };
-            obj greeting
+            greeting = {
+                apply() => 'hello'
+            };
+            obj = { greet <= greeting };
+            obj greet
         `)
     expect(result).toBe('hello')
+  })
+
+  test('转发属性 <= ：消息名不传给 apply，实参按位置转发', async () => {
+    const result = await interpreter.interpret(`
+            echo = {
+                apply(...args) => args
+            };
+            obj = { ping <= echo };
+            obj ping 1 2 3
+        `)
+    expect(result).toEqual([1, 2, 3])
+  })
+
+  test('转发属性 <= ：委托对象无 apply 时运行时报错', async () => {
+    await expect(
+      interpreter.interpret(`
+                obj = { value <= 5 };
+                obj value
+            `),
+    ).rejects.toThrow()
   })
 
   test('对象即 JS 对象：属性均为方法函数', async () => {
@@ -760,17 +770,15 @@ describe('ObjectValue 元信息反射', () => {
     expect(sendMessage(result, 'name', ['world'])).toBe('world')
   })
 
-  test('mutable getter/setter 行为，2+参数跳过', async () => {
+  test('转发属性 <= 参数转发给 apply，同名 call 不会被优先选中', async () => {
     const result = await interpreter.interpret(`
-        obj = { count <= 10, count(v, w) { v + w } };
+        delegate = { apply(v, w) { v + w } };
+        obj = { count <= delegate, count(v, w) { v * w } };
         obj
     `)
-    // 0参数 → mutable getter 返回当前值
-    expect(sendMessage(result, 'count', [])).toBe(10)
-    // 1参数 → mutable setter 设置新值
-    expect(sendMessage(result, 'count', [20])).toBe(20)
-    // 2参数 → mutable 跳过，call 方法匹配
-    expect(sendMessage(result, 'count', [5, 3])).toBe(8)
+    // 2参数请求 apply 实参 [3,4]，忽略同名 call（v*w = 12 不会被选中）
+    expect(sendMessage(result, 'count', [3, 4])).toBe(7)
+    expect(sendMessage(result, 'count', [5, 6])).toBe(11)
   })
 
   test('空对象 {} 是语言定义值，元信息为空 Map', async () => {
@@ -1151,13 +1159,32 @@ describe('ObjectValue 元信息反射', () => {
   })
 
   describe('#classDef 类对象', () => {
-    test('new 构造实例并读实例状态', async () => {
-      const result = await interpreter.interpret(`
+    // 实例状态依赖宿主容器（storage ref），注入独立实例供本组测试复用
+    const storageInterpreter = createInterpretAction(EmptyFileSystem, {
+      storage: {
+        ref(initial: unknown) {
+          let v = initial
+          return {
+            get() {
+              return v
+            },
+            set(x: unknown) {
+              v = x
+              return v
+            },
+          }
+        },
+      },
+    })
+
+test('new 构造实例并读实例状态', async () => {
+      const result = await storageInterpreter.interpret(`
           Animal = #classDef {
-              new(name) { self name name }
+              new(name) { this store name }
           } {
-              name <= 'unknown',
-              speak => this name
+              cell = storage ref 'unknown',
+              store(n) { this cell / set n },
+              speak => this cell / get
           };
           d = Animal new 'cat';
           d speak
@@ -1166,14 +1193,13 @@ describe('ObjectValue 元信息反射', () => {
     })
 
     test('未传参走实例默认值', async () => {
-      const result = await interpreter.interpret(`
-          Animal = #classDef {
-              new() { self name 'default' }
-          } {
-              name <= 'unknown'
+      const result = await storageInterpreter.interpret(`
+          Animal = #classDef {} {
+              cell = storage ref 'default',
+              get => this cell / get
           };
           d = Animal new;
-          d name
+          d get
       `)
       expect(result).toBe('default')
     })
@@ -1198,46 +1224,46 @@ describe('ObjectValue 元信息反射', () => {
     })
 
     test('实例状态按实例隔离，互不共享', async () => {
-      const result = await interpreter.interpret(`
+      const result = await storageInterpreter.interpret(`
           Counter = #classDef {
-              new(n) { self count n }
+              new(n) { this store n }
           } {
-              count <= 0,
-              bump => this count + 1
+              cell = storage ref 0,
+              store(n) { this cell / set n },
+              get => this cell / get,
+              bump { this cell / set ((this cell / get) + 1); this cell / get }
           };
           a = Counter new 5;
           b = Counter new 9;
-          Array of (a count) (a bump) (b count)
+          Array of (a get) (a bump) (b get)
       `)
       expect(result).toEqual([5, 6, 9])
     })
 
     test('实例方法可写回自身状态', async () => {
-      const result = await interpreter.interpret(`
+      const result = await storageInterpreter.interpret(`
           Account = #classDef {
-              new() { self balance 0 }
+              new() { this store 0 }
           } {
-              balance <= 0,
+              cell = storage ref 0,
+              store(v) { this cell / set v },
+              get => this cell / get,
               deposit(v) {
-                  total = (this balance) + v;
-                  this balance total
+                  this store ((this cell / get) + v)
               }
           };
           a = Account new;
-          a deposit 30;
-          a balance
+          a deposit 20;
+          a deposit 10;
+          a get
       `)
       expect(result).toBe(30)
     })
 
     test('include 判定 OOC 类实例归属', async () => {
       const result = await interpreter.interpret(`
-          Animal = #classDef {
-              new(name) { self name name }
-          } {
-              name <= 'unknown'
-          };
-          d = Animal new 'dog';
+          Animal = #classDef {} {};
+          d = Animal new;
           Array of (Animal include d) (Animal include 42) (d include Animal)
       `)
       expect(result).toEqual([true, false, true])

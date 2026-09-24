@@ -242,11 +242,8 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     }
 
     if (isMethodBindMutable(node)) {
-      const typeAnno = node.typeAnnotation
-        ? `: ${this.formatType(node.typeAnnotation)}`
-        : ''
       return this.buildHoverContent(
-        `可变属性 ${this.extractName(node.name)}${typeAnno}（无参读取，有参修改）`,
+        `转发属性 ${this.extractName(node.name)}（消息转发给委托对象的 apply）`,
         comment,
       )
     }

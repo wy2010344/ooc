@@ -6,20 +6,26 @@
 calc = {
     add(a, b) => a + b,      // 单表达式方法
     sub(a, b) { a - b },     // 方法体，最后一行是返回值
-    cached = 1 + 2,          // 绑定：创建时求值一次，之后发消息取缓存（也是方法）
-    counter <= 0             // 可变属性：无参返回当前值，有参修改并返回新值
+    cached = 1 + 2           // 绑定：创建时求值一次，之后发消息取缓存（也是方法）
 };
 ```
 
-## 调用
+## 转发属性
+
+`name <= delegate` 把**名字上的所有消息**原样转发给 `delegate` 的 `apply` 方法执行（消息名不传给 apply，只传实参）：
 
 ```ooc
-calc add 3 4     // 7
-calc cached      // 3
-calc counter     // 0（无参 → 返回当前值）
-calc counter 42  // 42（有参 → 修改并返回新值）
-calc counter     // 42（已修改）
+double = { apply(v) => v * 2 };
+box = { value <= double };
+
+box value 21     // 42（→ double apply 21）
+box value        // undefined（→ double apply，无参）
+box value 1 2    // 会按 apply 的形参匹配（这里 apply 只有 1 参，运行时报 methodNotFound）
 ```
+
+- 委托对象必须含 `apply`（像 lambda 或可调用对象）；没有时类型检查会报错。
+- 可与同名普通方法共存，但转发优先：消息一律走 `apply`。
+- 实例/模块级可变状态不靠属性写入，改用宿主容器（`storage ref`、signal、数组等）。
 
 ## this
 

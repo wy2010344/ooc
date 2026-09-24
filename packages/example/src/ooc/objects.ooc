@@ -37,8 +37,8 @@ math = { apply(x) => x * 3, square(x) => x * x };
 math apply 2;
 math square 4;
 
-// 可变属性 <=：无参读当前值、有参写新值
-box = { value <= 1 };
-box value;
-box value 5;
-box value
+// 转发属性 <=：本 key 的一切消息原样转发给委托对象的 apply 执行
+double = { apply(v) => v * 2 };
+box = { value <= double };
+box value 21;
+box value   // 无参消息同样转发（→ double apply）
