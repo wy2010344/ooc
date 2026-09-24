@@ -39,6 +39,9 @@ const DEFAULT_CONFIG = `// config.ooc — OOC 项目配置文件
     // callArgsMismatch = 'warning',        // 调用参数数量不匹配
     // overloadReturnMismatch = 'warning',  // 重载方法返回类型不匹配
     // guardNotBoolean = 'warning',         // #guard 条件不是布尔
+    // guardOnlyInOverload = 'error',       // guard 只在多分支重载组里出现
+    // guardOnTrailingBranch = 'error',     // 重载组末尾分支不能带 guard（是无条件兜底）
+    // overloadNotAdjacent = 'error',       // 同名重载分支需相邻定义
     // partialUnionMessage = 'warning',     // 联合类型成员专属方法未判别
 
     // --- 重复定义 ---

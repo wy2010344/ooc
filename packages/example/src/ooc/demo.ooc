@@ -13,6 +13,9 @@ area = {
     calc(s: Circle | Square) {
         #guard (s kind) == 'square';
         (s side) * (s side)
+    },
+    calc(s: Circle | Square) {
+        nil
     }
 };
 
@@ -37,6 +40,9 @@ describe = {
     calc(s: Labeled) {
         #guard (s kind) == 'square';
         'square ' + (s label) + ' s=' + (s side)
+    },
+    calc(s: Labeled) {
+        nil
     }
 };
 

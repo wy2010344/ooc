@@ -15,6 +15,9 @@ area = {
     calc(s: Circle | Square) {
         #guard (s kind) == 'square';
         (s side) * (s side)
+    },
+    calc(s: Circle | Square) {
+        nil
     }
 };
 

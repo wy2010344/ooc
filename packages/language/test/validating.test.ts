@@ -131,6 +131,79 @@ describe('Validating', () => {
         document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
   })
+
+  test('单方法 guard 报 guardOnlyInOverload', async () => {
+    document = await parse(`
+            obj = {
+                fun(a) { #guard a > 5; a }
+            };
+        `)
+
+    const output =
+      (checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
+      ''
+    expect(output).toContain('guard')
+  })
+
+  test('重载组末尾分支带 guard 报 guardOnTrailingBranch', async () => {
+    document = await parse(`
+            obj = {
+                fun(a) { #guard a > 5; a },
+                fun(a) { #guard a < 5; a }
+            };
+        `)
+
+    const output =
+      (checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
+      ''
+    expect(output).toContain('guard')
+  })
+
+  test('重载组末尾无 guard 兜底合法', async () => {
+    document = await parse(`
+            obj = {
+                fun(a) { #guard a > 5; a },
+                fun(a) { a }
+            };
+        `)
+
+    expect(
+      checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
+    ).toHaveLength(0)
+  })
+
+  test('同名重载不相邻报 overloadNotAdjacent', async () => {
+    document = await parse(`
+            obj = {
+                fun(a) { a },
+                bar(a) { a },
+                fun(a, b) { a }
+            };
+        `)
+
+    const output =
+      (checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
+      ''
+    expect(output).toContain('相邻')
+  })
+
+  test('类/实例方法相邻重载合法', async () => {
+    document = await parse(`
+            C = #classDef {} {
+                fun(a) { a },
+                fun(a, b) { a }
+            };
+        `)
+
+    expect(
+      checkDocumentValid(document) ||
+        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
+    ).toHaveLength(0)
+  })
 })
 
 function checkDocumentValid(document: LangiumDocument): string | undefined {

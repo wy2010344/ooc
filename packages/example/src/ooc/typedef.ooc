@@ -33,6 +33,9 @@ describe = {
     calc(s: Labeled) {
         #guard (s kind) == 'square';
         (s label) + ':' + (s side)
+    },
+    calc(s: Labeled) {
+        nil
     }
 };
 

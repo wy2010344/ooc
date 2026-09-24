@@ -102,11 +102,13 @@ describe('OOC Interpreter', () => {
   test('#guard 分支', async () => {
     const result = await interpreter.interpret(`
             obj = {
-                fun(a) { #guard a > 5; a }
+                fun(a) { #guard a > 5; a * 2 },
+                fun(a) { a }
             };
-            obj fun 9
+            obj fun 9;
+            obj fun 3
         `)
-    expect(result).toBe(9)
+    expect(result).toBe(3)
   })
 
   test('剩余参数', async () => {
@@ -126,6 +128,17 @@ describe('OOC Interpreter', () => {
                 obj foo 3
             `),
     ).rejects.toThrow('没有定义该方法')
+  })
+
+  test('重载组 guard 全不通过时落入末尾兜底', async () => {
+    const result = await interpreter.interpret(`
+            obj = {
+                bar(a) { #guard a > 10; 'big' },
+                bar(a) { 'small' }
+            };
+            obj bar 3
+        `)
+    expect(result).toBe('small')
   })
 
   test('bind 属性可读取', async () => {

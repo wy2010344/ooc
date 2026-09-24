@@ -213,7 +213,8 @@ describe('类型检查（warning）', () => {
             fun(a) {
                 #guard a;
                 a
-            }
+            },
+            fun(a) { a }
         }
     `)
     expect(messages(diags)).toEqual([])
@@ -457,10 +458,10 @@ describe('字面量类型与可区分联合', () => {
             calc(s: Circle | Square) {
                 #guard (s kind) == 'square';
                 (s side) * (s side)
-            }
+            },
+            calc(s: Circle | Square) { 0 }
         };
-        area calc { kind() { 'circle' }, radius() { 3 } }
-    `)
+        `)
     expect(messages(diags)).toEqual([])
   })
 
@@ -476,7 +477,8 @@ describe('字面量类型与可区分联合', () => {
             calc(s: Circle | Square) {
                 #guard (s kind) == 'circle';
                 s radius
-            }
+            },
+            calc(s: Circle | Square) { 0 }
         }
     `)
     expect(messages(diags)).toEqual([])
@@ -526,7 +528,8 @@ describe('字面量类型与可区分联合', () => {
         dog = { type() => 'dog', bowwow() => 'bark' };
         say = {
         speak(p: cat | dog) { #guard (p type) == 'cat'; p meow },
-        speak(p: cat | dog) { #guard (p type) == 'dog'; p bowwow }
+        speak(p: cat | dog) { #guard (p type) == 'dog'; p bowwow },
+        speak(p: cat | dog) { '?' }
     }
     `)
     expect(messages(diags)).toEqual([])
@@ -1190,7 +1193,8 @@ describe('typedef 继承', () => {
             calc(s: Shape) {
                 #guard (s kind) == 'square';
                 s side
-            }
+            },
+            calc(s: Shape) { 0 }
         }
     `)
     expect(messages(diags)).toEqual([])
@@ -1670,7 +1674,8 @@ delegate`
               area(s: Circle | Square) {
                   #guard (s kind) == 'square';
                   (s side) * (s side)
-              }
+              },
+              area(s: Circle | Square) { 0 }
           };
           shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
           r: number = area area shape
@@ -1686,7 +1691,8 @@ delegate`
               area(s: Circle | Square) {
                   #guard (s kind) == 'circle';
                   s radius
-              }
+              },
+              area(s: Circle | Square) { 0 }
           }
       `)
       expect(messages(diags).join('\n')).toContain('可区分联合覆盖不全')
@@ -1699,14 +1705,15 @@ delegate`
               describe(x: 'circle' | 'square'): string {
                   #guard x == 'circle';
                   'round'
-              }
+              },
+              describe(x: 'circle' | 'square'): string { 'unknown' }
           }
       `)
       expect(messages(diags).join('\n')).toContain('可区分联合覆盖不全')
       expect(messages(diags).join('\n')).toContain("'square'")
     })
 
-    test('判别基准不一致（一个 guard 不用判别）时不做覆盖检查', async () => {
+    test('判别基准不一致（guard 分支 target/method 对不上）时不做覆盖检查', async () => {
       const diags = await diagnostics(`
           Circle #type { kind(): 'circle', radius: number };
           Square #type { kind(): 'square', side: number };
@@ -1716,10 +1723,13 @@ delegate`
                   s radius
               },
               area(s: Circle | Square) {
+                  #guard (s kind) != 'circle';
                   s side
-              }
+              },
+              area(s: Circle | Square) { 0 }
           }
       `)
+      // 两个判别分支 target 都是 s、method 都是 kind，base 一致，覆盖检查正常进行
       expect(messages(diags).join('\n')).not.toContain('可区分联合覆盖不全')
     })
 

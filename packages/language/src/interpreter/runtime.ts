@@ -180,6 +180,24 @@ export function objectValue(methods: Method[], scope: Scope) {
       enumerable: true,
       value() {
         const args = arguments
+        // 预计算本名字的 call 分支：是否有 guard、最后一个 call 的下标。
+        // 存在 guard 分支的重载组，末尾 call 作为无条件兜底（else）落入。
+        let lastCallIndex = -1
+        let hasGuardBranch = false
+        let callCount = 0
+        for (let i = 0; i < methods.length; i++) {
+          if (methods[i].type === 'call') {
+            callCount++
+            lastCallIndex = i
+            if (
+              (methods[i].value as { body?: { guardExpression?: unknown } })
+                .body?.guardExpression
+            ) {
+              hasGuardBranch = true
+            }
+          }
+        }
+        const isGuardOverload = hasGuardBranch && callCount >= 2
         for (let i = 0; i < methods.length; i++) {
           const pair = methods[i]
           switch (pair.type) {
@@ -197,9 +215,36 @@ export function objectValue(methods: Method[], scope: Scope) {
                 'apply',
                 Array.from(args),
               )
-            case 'call':
+            case 'call': {
               const method = pair.value
-              // 计算方法期望的参数数量
+              if (isGuardOverload) {
+                // 重载组：只靠 #guard 显式守卫分派，不再校验参数数量
+                if (i === lastCallIndex) {
+                  // 末尾兜底：无条件落入（不看 guard 不看参数数量）
+                  const lastScope = bindMethod(
+                    method,
+                    scope,
+                    this,
+                    arguments as unknown as unknown[],
+                  )
+                  return runBody(method.body?.expressions ?? [], lastScope)
+                }
+                // 非末尾分支必须带 guard（validator 已强制），无 guard 防御性跳过
+                if (!method.body?.guardExpression) {
+                  continue
+                }
+                const guardScope = bindMethod(
+                  method,
+                  scope,
+                  this,
+                  arguments as unknown as unknown[],
+                )
+                if (interpretExpression(method.body.guardExpression, guardScope)) {
+                  return runBody(method.body?.expressions ?? [], guardScope)
+                }
+                continue
+              }
+              // 非重载组（单方法/旧参数数量重载）：保留参数数量匹配
               const minArgs = method.params.length
               const hasRest = !!method.restParam
               
@@ -230,9 +275,11 @@ export function objectValue(methods: Method[], scope: Scope) {
               ) {
                 return runBody(method.body?.expressions ?? [], s)
               }
+            }
           }
         }
-        // 本层同名方法 guard 全不通过：走通用对象方法 / methodNotFound 兜底。
+        // guard 重载组末尾兜底已在前方落入，能走到这是单方法 guard 不通过
+        // 或参数数量不匹配：走通用对象方法 / methodNotFound 兜底。
         // 无继承，不会沿原型链查找上层同名方法。
         //通用对象方法
         const fun = objectDefine[name as '&&']

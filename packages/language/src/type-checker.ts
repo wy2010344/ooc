@@ -780,6 +780,27 @@ export class ObjectOrientedCTypeChecker {
       }
     }
     // 重载返回类型一致性（宽松检查）
+    // 末尾兜底分支（guard 重载组的最后一个无条件落入分支）不参与比较：
+    // 它是 guard 全不匹配时的运行时兜底，类型无需与守卫分支一致。
+    const fallbackMethods = new Set<MethodAll>()
+    {
+      const byName = new Map<string, MethodAll[]>()
+      for (const o of overloads) {
+        const n = this.getMethodName(o.method.name)
+        const g = byName.get(n)
+        if (g) {
+          g.push(o.method)
+        } else {
+          byName.set(n, [o.method])
+        }
+      }
+      for (const group of byName.values()) {
+        const hasGuard = group.some((m) => m.body?.guardExpression)
+        if (hasGuard && group.length > 1) {
+          fallbackMethods.add(group[group.length - 1])
+        }
+      }
+    }
     for (let i = 0; i < overloads.length; i++) {
       const a = overloads[i]
       if (a.returns.kind === 'any') {
@@ -788,6 +809,9 @@ export class ObjectOrientedCTypeChecker {
       for (let j = i + 1; j < overloads.length; j++) {
         const b = overloads[j]
         if (b.returns.kind === 'any') {
+          continue
+        }
+        if (fallbackMethods.has(a.method) || fallbackMethods.has(b.method)) {
           continue
         }
         if (this.getMethodName(a.method.name) !== this.getMethodName(b.method.name)) {
@@ -1179,8 +1203,8 @@ export class ObjectOrientedCTypeChecker {
       return
     }
     const members = paramType.types
-    // 收集每个实现的 #guard 判别；target 与判别方法必须组内一致，
-    // 任一实现缺判别或不是判别测试都跳过（保守，避免误报）
+    // 收集每个 #guard 分支的判别；末尾无 guard 的兜底分支跳过（runtime 最后落入）。
+    // 判别基准（target/判别方法）在 guard 分支间不一致时跳过，避免误报。
     const tests: {
       target: string
       method: string | undefined
@@ -1189,11 +1213,17 @@ export class ObjectOrientedCTypeChecker {
     }[] = []
     for (const m of group) {
       const guardExpr = m.body?.guardExpression
-      const t = guardExpr ? this.extractTagTest(guardExpr) : undefined
+      if (!guardExpr) {
+        continue
+      }
+      const t = this.extractTagTest(guardExpr)
       if (!t || t.target !== firstParam.name) {
         return
       }
       tests.push(t)
+    }
+    if (tests.length === 0) {
+      return
     }
     const disc = tests[0]!.method
     if (tests.some((t) => t.method !== disc)) {

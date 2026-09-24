@@ -48,15 +48,24 @@ obj apply 1 2 3 4    // [2, 3, 4]
 
 ## 守卫 #guard
 
-方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找下一条同名方法（同一对象内；全部不满足则 `methodNotFound`）：
+方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找同名的下一条方法。
+
+守卫的分派规则：
+
+- **`#guard` 只用在同名重载组里**（≥2 条带 body 的同名方法）。单条方法带 guard 会报 `guardOnlyInOverload`。
+- 重载组末尾分支是**无条件兜底**，落入即执行，不能带 guard（报 `guardOnTrailingBranch`）。
+- 前面若干分支各自带 guard，条件满足即命中，全部不满足则落入末尾兜底。
+- 同名重载分支必须**相邻定义**（中间不能夹别的名字，报 `overloadNotAdjacent`）。
 
 ```ooc
 f = {
-    r(a) { #guard a > 5; 'big' },
-    r(a) { 'small' }
+    r(a) { #guard a > 5; 'big' },   // 守卫分支
+    r(a) { #guard a < 0; 'neg' },   // 守卫分支
+    r(a) { 'small' }                // 末尾兜底
 };
 f r 9    // 'big'
 f r 2    // 'small'
+f r -1   // 'neg'
 ```
 
 ## 签名方法（TS 式重载类型标注）
@@ -67,9 +76,8 @@ f r 2    // 'small'
 calc = {
     area(radius: number): number;   // 签名
     area(radius: string): string;   // 签名
-    area(r) {                       // 实现（无签名，运行时靠它 + #guard）
-        #guard (r length) != nil;
-        1
+    area(r) {                       // 实现（无签名，运行时按签名分派后落入）
+        r
     }
 };
 ```

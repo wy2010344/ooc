@@ -34,15 +34,20 @@
 // 9. overloadReturnMismatch：重载方法返回类型不匹配
 // obj = { fun(): number { 'str' }, fun(): string { 'ok' } };
 
-// 10. guardNotBoolean：#guard 条件不是布尔
+// 10. guardOnlyInOverload：guard 只在多分支重载组里起作用（单方法 guard 报错）
 // obj = { fun(a: number) { #guard a; a } };
+// 10b. guardNotBoolean：重载组守卫分支的 #guard 条件不是布尔
+// obj = { fun(a: number) { #guard a; a }, fun(a: number) { a } };
 
 // 11. partialUnionMessage：联合类型成员专属方法未判别
 // c: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
 // bad = { calc(s: Circle | Square) { s radius } };
 
-// 11b. unionUncovered：可区分联合判别分支覆盖不全（漏掉成员）
-// missing = { calc(s: Circle | Square) { #guard (s kind) == 'circle'; s radius } };
+// 11b. unionUncovered：可区分联合判别分支覆盖不全（漏掉成员；末尾兜底不算判别）
+// missing = { calc(s: Circle | Square) { #guard (s kind) == 'circle'; s radius }, calc(s: Circle | Square) { nil } };
+
+// 11c. guardOnTrailingBranch：重载组末尾分支是无条件兜底，不能带 guard
+// bad = { calc(s: Circle | Square) { #guard (s kind) == 'circle'; s radius }, calc(s: Circle | Square) { #guard (s kind) == 'square'; s side } };
 
 // 11c. 签名方法必须声明返回类型（否则是悬空的垃圾写法）
 // obj = { area(r) };

@@ -33,6 +33,7 @@ Square #type { kind(): 'square', side: number };
 shape: 'circle' | 'square' = 'circle'
 
 // 用 guard 判别收窄：guard 通过后 s 的类型自动收窄为对应成员
+// 判别分支后必须跟末尾兜底分支（无条件落入，不可带 guard）
 area = {
     calc(s: Circle | Square) {
         #guard (s kind) == 'circle';
@@ -41,6 +42,9 @@ area = {
     calc(s: Circle | Square) {
         #guard (s kind) == 'square';
         (s side) * (s side)               // 这里 s 已是 Square
+    },
+    calc(s: Circle | Square) {
+        nil                               // 末尾兜底
     }
 };
 area calc { kind() { 'circle' }, radius() { 3 } }   // 28.26
@@ -53,7 +57,7 @@ area calc { kind() { 'circle' }, radius() { 3 } }   // 28.26
 
 ### 全覆盖与分支感知返回
 
-一组同名实现方法用**同一个参数**做 `#guard` 判别时，检查器会枚举联合成员，**缺一个成员的分支报「可区分联合覆盖不全」**（`unionUncovered`）：
+一组同名实现方法用**同一个参数**做 `#guard` 判别时，检查器会枚举联合成员，**缺一个成员的分支报「可区分联合覆盖不全」**（`unionUncovered`）。末尾兜底分支不做判别，类型层仍要求 guard 判别分支全量覆盖成员：
 
 ```ooc
 // 联合是 Circle | Square，却只有 circle 一个判别分支 →
@@ -62,13 +66,17 @@ area = {
     area(s: Circle | Square) {
         #guard (s kind) == 'circle';
         s radius
+    },
+    area(s: Circle | Square) {
+        nil    // 末尾兜底：运行时兜底，不算判别
     }
 }
 ```
 
 - `!=` 判别同样计入覆盖（`#guard (s kind) != 'circle'` 覆盖其余成员）。
 - 判别分支之间返回不同类型**不告警**（和签名豁免一致）；判别基准对不上、或某方法没有判别式时不做覆盖检查（避免误报）。
-- **分支感知返回**：联合实参调用时返回类型按分支聚合。下面 `area area shape`（`shape: Circle | Square`）的返回类型是 `number | string`——两个分支的返回类型各走各的，而不是只取第一条：
+- 末尾兜底分支的返回类型**不参与**重载返回一致性比较（它是 guard 全不匹配时的运行时兜底）。
+- **分支感知返回**：联合实参调用时返回类型按分支聚合。下面 `area area shape`（`shape: Circle | Square`）的返回类型是 `number | string`——两个判别分支的返回类型各走各的，而不是只取第一条：
 
 ```ooc
 area = {
@@ -79,6 +87,9 @@ area = {
     area(s: Circle | Square): string {
         #guard (s kind) == 'square';
         s side
+    },
+    area(s: Circle | Square): nil {
+        nil
     }
 };
 shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
