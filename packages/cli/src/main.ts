@@ -43,36 +43,23 @@ function pkgContext() {
 
 const DEFAULT_CONFIG = `// config.ooc — OOC 项目配置文件
 // 这是一个真正的 OOC 文件，由解释器执行，最后一条表达式返回配置对象。
-// 诊断级别：off（隐藏）、warning（警告）、error（错误）
-// 所有规则都列在下方，按需取消注释即可。未列出的规则使用默认行为。
+// 未列出的诊断规则使用默认行为；需要时可在这里声明 globals 的类型清单
+// （globals 成员只列本项目用到的全局对象名字，类型来自各宿主包类型源）。
 
-{ diagnostics = {
-    // --- 类型检查 ---
-    // typeMismatch = 'warning',           // 类型不匹配
-    // unknownType = 'warning',             // 未知类型名
-    // typeNotFound = 'error',              // 类型未找到
-    // noImplicitAny = 'off',               // 隐式 any（默认关闭）
-    // notGeneric = 'warning',              // 非泛型类型上使用了类型参数
-    // typeArgCount = 'warning',            // 类型参数数量不匹配
-    // missingTypeArg = 'warning',          // 缺少类型参数
+config = {
+    diagnostics = {
+        // typeMismatch = 'warning',
+        // unknownType = 'off',
+        // noImplicitAny = 'off'
+    },
+    globals = {
+        storage = storage,
+        js = js,
+        delegate = delegate
+    }
+};
 
-    // --- 调用与重载 ---
-    // callArgsMismatch = 'warning',        // 调用参数数量不匹配
-    // overloadReturnMismatch = 'warning',  // 重载方法返回类型不匹配
-    // guardNotBoolean = 'warning',         // #guard 条件不是布尔
-    // guardOnlyInOverload = 'error',       // guard 只在多分支重载组里出现
-    // guardOnTrailingBranch = 'error',     // 重载组末尾分支不能带 guard（是无条件兜底）
-    // overloadNotAdjacent = 'error',       // 同名重载分支需相邻定义
-    // partialUnionMessage = 'warning',     // 联合类型成员专属方法未判别
-
-    // --- 重复定义 ---
-    // duplicateType = 'error',             // 重复的 typedef
-    // duplicateMethod = 'error',          // 重复的方法
-    // duplicateParam = 'error',           // 重复的参数
-
-    // --- 变量与赋值 ---
-    // reassignmentMismatch = 'warning',    // 重新赋值类型不匹配
-} }
+config
 `
 
 export const generateAction = async (

@@ -1,5 +1,5 @@
 // 诊断错误示例：这些行会触发 IDE 波浪线
-// 配置由 config.ooc / ooc.json 决定显示级别（off / warning / error）
+// 配置由项目根 config.ooc 决定显示级别（off / warning / error）
 
 // === 类型检查类 ===
 

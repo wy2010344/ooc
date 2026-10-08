@@ -38,7 +38,9 @@ math apply 2;
 math square 4;
 
 // 转发属性 <=：本 key 的一切消息原样转发给委托对象的 apply 执行
-double = { apply(v) => v * 2 };
+// （消息名不传给 apply，只传实参）。委托 apply 用 rest 参数兼容任意参数数量，
+// 无参消息 `box value` 同样转发（→ double apply()，空数组）。
+double = { apply(...args) { args } };
 box = { value <= double };
 box value 21;
-box value   // 无参消息同样转发（→ double apply）
+box value   // 无参消息同样转发（→ double apply()，返回 []）
