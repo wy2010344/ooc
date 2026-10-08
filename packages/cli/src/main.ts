@@ -6,6 +6,9 @@ import {
   createPackageAwareFileSystem,
   createTypeCheckAction,
   createDirPackageResolver,
+  delegate,
+  js,
+  storage,
   ObjectOrientedCLanguageMetaData,
 } from 'object-oriented-c-language'
 import chalk from 'chalk'
@@ -92,8 +95,13 @@ export type GenerateOptions = {
   destination?: string
 }
 
-export const interpretAction = (fileName: string) =>
-  createInterpretAction(pkgContext()).interpretPath(fileName)
+export const interpretAction = (fileName: string) => {
+  // 注入语言包自带宿主桥接（storage/js/delegate），与浏览器 demo 一致，
+  // 让同一份 OOC 项目源码在 Node（CLI）与浏览器（vite）端行为相同。
+  return createInterpretAction(pkgContext(), { storage, js, delegate }).interpretPath(
+    fileName,
+  )
+}
 
 export const typeCheckAction = async (fileName: string): Promise<void> => {
   const diagnostics = await createTypeCheckAction(pkgContext()).checkPath(

@@ -1,5 +1,6 @@
 // ===== 项目配置（config.ooc）=====
 // 解释器执行本文件，最后一条表达式返回配置对象。
+// diagnostics：诊断级别策略（'off' | 'warning' | 'error'）。
 // globals 成员只列本项目用到的全局对象名字（相当于 tsconfig 的 types 清单），
 // 类型来自各宿主包自持的 .ooc 类型源（Route A）：
 //   storage / js / ObjectValue —— language 包 coreBridgeTypesSource
@@ -9,6 +10,9 @@
 
 config = {
     diagnostics = {
+        unknownType = 'off',
+        typeMismatch = 'error',
+        noImplicitAny = 'off'
     },
     globals = {
         storage = storage,
