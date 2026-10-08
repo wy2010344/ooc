@@ -3,7 +3,7 @@
 // loop repeat：次数已知的有限循环，恰好执行 n 次。
 // 实现见 base 包 src/loop.ooc（apply=递归+#guard 短路，repeat='x' repeat n 数据化）。
 
-loop = #import 'loop';
+loop = #import '@base/loop';
 
 // 基本 apply 循环：计数到 5
 n = storage ref 0;

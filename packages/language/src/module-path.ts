@@ -38,14 +38,52 @@ export function joinPath(dir: string, rel: string): string {
 }
 
 /**
+ * 包引用虚拟根前缀：#import '@pkg' / '@pkg/sub' 解析为 /ooc-pkg/<pkg>/<file>，
+ * 由宿主 FileSystemProvider 重定向到实际存储（Node 的 .ooc_modules、浏览器内存 map）。
+ */
+export const PACKAGE_URI_PREFIX = '/ooc-pkg'
+
+/** #import 字符串是否包引用：以 @ 开头（Windows 盘符 C: 不以 @ 开头，不冲突）。 */
+export function isPackageRef(rawName: string): boolean {
+  return rawName.startsWith('@')
+}
+
+/**
+ * 把包引用解析为统一虚拟路径。
+ * - '@base'        → /ooc-pkg/base/index.ooc   （包入口默认 index.ooc）
+ * - '@base/loop'   → /ooc-pkg/base/loop.ooc
+ * - '@base/a/b'    → /ooc-pkg/base/a/b.ooc     （包子路径，保留子目录层级）
+ * 子路径不带扩展名时按默认扩展名补全；带未知扩展名按原样返回，交给 FS 报错。
+ */
+export function resolvePackageModule(
+  rawName: string,
+  extensions: readonly string[],
+): string {
+  const rest = rawName.slice(1)
+  const slash = rest.indexOf('/')
+  const pkg = slash === -1 ? rest : rest.slice(0, slash)
+  let sub = slash === -1 ? '' : rest.slice(slash + 1)
+  if (!sub) {
+    sub = 'index'
+  }
+  if (extnameOf(sub) === '') {
+    sub += extensions[0]
+  }
+  return `${PACKAGE_URI_PREFIX}/${pkg}/${sub}`
+}
+
+/**
  * 相对 fromPath 所在目录解析 #import 路径：统一 posix；无扩展名补默认扩展
- * （Langium 按扩展名注册语言服务）。
+ * （Langium 按扩展名注册语言服务）。包引用（@ 开头）走 PACKAGE_URI_PREFIX 虚拟路径。
  */
 export function resolveModuleName(
   rawName: string,
   fromPath: string,
   extensions: readonly string[],
 ): string {
+  if (isPackageRef(rawName)) {
+    return resolvePackageModule(rawName, extensions)
+  }
   let fileName = joinPath(dirnameOf(fromPath), rawName)
   fileName = toPosix(fileName)
   // rawName 是绝对路径时，确保结果也保持绝对

@@ -1,10 +1,7 @@
 import type { StateHolderWithNode } from 'mve-core'
 import { renderFDom, renderHtmlContent, renderTextContent } from 'mve-dom'
-import type { DomElementType } from 'wy-dom-helper'
-import { domTagNames } from 'wy-dom-helper'
-
-import { createOrProxy } from 'wy-helper'
 import type { GetValue } from 'wy-helper'
+
 import { fc } from './fc.js'
 import { ObjectValue } from 'object-oriented-c-language'
 
@@ -14,12 +11,16 @@ export type DComponent = (
   ctx: StateHolderWithNode<Node, readonly Node[]>,
 ) => unknown
 
-export const dom: {
-  readonly [key in DomElementType]: (
-    props?: unknown,
-    ...children: DComponent[]
-  ) => DComponent
-} = createOrProxy(domTagNames, (tag) => {
+//标签构造器：接收 (props?, ...lambda children)，返回 DComponent（挂载期执行组件体）
+export type TagFactory = (
+  props?: unknown,
+  ...children: DComponent[]
+) => DComponent
+
+//宽泛元素：任意标签名都可调用（TS 侧 Proxy 暴露方法，接受 lambda children），
+//未知标签在类型上静默退化为 any（见 type-checker），运行时经 Proxy 动态创建，
+//不依赖语言级 methodNotFound——methodNotFound 让位给 JS Proxy 的动态派发。
+const makeTagFn = (tag: string): TagFactory => {
   return function (arg: any, ...children: DComponent[]) {
     //这里在 build 窗口已由调用方执行，属性按元信息分流
     return function (this: StateHolderWithNode<Node, readonly Node[]>) {
@@ -45,7 +46,24 @@ export const dom: {
       }) as any
     }
   }
-})
+}
+
+const tagFns = new Map<string, TagFactory>()
+
+export const dom: { readonly [tag: string]: TagFactory } = new Proxy(
+  Object.create(null) as Record<string, TagFactory>,
+  {
+    get(_target, tag) {
+      if (typeof tag !== 'string') return undefined
+      let fn = tagFns.get(tag)
+      if (!fn) {
+        fn = makeTagFn(tag)
+        tagFns.set(tag, fn)
+      }
+      return fn
+    },
+  },
+)
 
 function renderChildren(children: any, ctx: any) {
   children.forEach((child: any) => {

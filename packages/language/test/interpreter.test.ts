@@ -10,8 +10,11 @@ import * as nodeFs from 'node:fs/promises'
 import * as nodeOs from 'node:os'
 import * as nodePath from 'node:path'
 import {
+  createDirPackageResolver,
   createInterpretAction,
+  createPackageAwareFileSystem,
   createTypeCheckAction,
+  delegate,
   ObjectValue,
   OocCircularImportError,
   OocMethodNotFoundError,
@@ -38,6 +41,22 @@ async function diagnostics(input: string): Promise<Diagnostic[]> {
 function messages(diags: Diagnostic[]): string[] {
   return diags.map((d) => d.message)
 }
+
+// base 包 loop.ooc 的等价源码（包引用测试用，与 packages/base/src/loop.ooc 同语义）
+const baseLoopSource = `
+loop = {
+    apply(fn) {
+        #guard fn apply;
+        this apply fn
+    },
+    apply(fn) => nil,
+    repeat(n, fn) {
+        (('x' repeat n) split '') forEach [v, i => fn apply i];
+        nil
+    }
+};
+loop
+`
 
 describe('OOC Interpreter', () => {
   test('变量与算术', async () => {
@@ -265,7 +284,7 @@ describe('OOC Interpreter', () => {
     ).rejects.toThrow('没有定义该方法')
   })
 
-test('未处理消息抛出包含调用信息的错误对象', async () => {
+  test('未处理消息抛出包含调用信息的错误对象', async () => {
     await expect(
       interpreter.interpret(`Math _ooc_notexist_method 1 2`),
     ).rejects.toThrow(OocMethodNotFoundError)
@@ -302,14 +321,30 @@ good = 3;`
     throw new Error('预期抛错但没有抛')
   })
 
-  test('custom object 未绑定触发 methodNotFound 方法', async () => {
-    const result = await interpreter.interpret(`
-            obj = {
-                methodNotFound(name) { 'fallback:' + name }
-            };
+  test('methodNotFound 不再是魔法方法：同名方法也不自动兜底', async () => {
+    // 解释器不认 methodNotFound 这个名字：OOC 声明了它也只是一个普通方法，
+    // 未知消息仍直接抛错（要兜底必须显式 js proxy + handler）。
+    await expect(
+      interpreter.interpret(`
+            obj = { methodNotFound(name) { 'fallback:' + name } };
             obj foo
+        `),
+    ).rejects.toThrow('没有定义该方法')
+  })
+
+  test('未知消息：未包兜底 Proxy 的对象直接抛结构化错误', async () => {
+    try {
+      await interpreter.interpret(`
+            obj = { foo() => 1 };
+            obj bar 2 3
         `)
-    expect(result).toBe('fallback:foo')
+      throw new Error('预期抛错但没有抛')
+    } catch (error) {
+      const oocError = error as OocMethodNotFoundError
+      expect(oocError.name).toBe('OocMethodNotFoundError')
+      expect(oocError.methodName).toBe('bar')
+      expect(oocError.argumentsList).toEqual([2, 3])
+    }
   })
 
   test('lambda 表达式函数体', async () => {
@@ -670,6 +705,144 @@ describe('OOC #import 模块', () => {
       '不允许循环模块导入',
     )
   })
+
+  test('包引用 @pkg/sub 经包感知 FS 解析执行', async () => {
+    // 底层内存 FS 以完整路径为键，模拟 Node .ooc_modules 布局
+    const files = new Map<string, string>([
+      ['/repo/.ooc_modules/base/loop.ooc', baseLoopSource],
+    ])
+    const nameOf = (uri: import('langium').URI) =>
+      decodeURIComponent(uri.path)
+    const underlying: FileSystemProvider = {
+      stat(uri) {
+        if (files.has(nameOf(uri))) {
+          return Promise.resolve({ isFile: true, isDirectory: false, uri })
+        }
+        return Promise.reject(new Error(`文件不存在: ${uri.path}`))
+      },
+      statSync(uri) {
+        if (files.has(nameOf(uri))) {
+          return { isFile: true, isDirectory: false, uri }
+        }
+        throw new Error(`文件不存在: ${uri.path}`)
+      },
+      exists(uri) {
+        return Promise.resolve(files.has(nameOf(uri)))
+      },
+      existsSync(uri) {
+        return files.has(nameOf(uri))
+      },
+      readBinary() {
+        return Promise.resolve(new Uint8Array())
+      },
+      readBinarySync() {
+        return new Uint8Array()
+      },
+      readFile(uri) {
+        const c = files.get(nameOf(uri))
+        if (c == null) {
+          return Promise.reject(new Error(`文件不存在: ${uri.path}`))
+        }
+        return Promise.resolve(c)
+      },
+      readFileSync(uri) {
+        const c = files.get(nameOf(uri))
+        if (c == null) {
+          throw new Error(`文件不存在: ${uri.path}`)
+        }
+        return c
+      },
+      readDirectory() {
+        return Promise.resolve([])
+      },
+      readDirectorySync() {
+        return []
+      },
+    }
+    const fs = createPackageAwareFileSystem(
+      underlying,
+      createDirPackageResolver('/repo/.ooc_modules'),
+    )
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs,
+    })
+    const result = await interpret(
+      `loop = #import '@base/loop';
+       loop repeat 3 [i => i + 1];
+       loop`,
+      '/proj/demo.ooc',
+    )
+    const meta = ObjectValue.metaOf(result)
+    expect(meta instanceof Map).toBe(true)
+    expect([...meta!.keys()]).toContain('repeat')
+  })
+
+  test('包入口 @pkg 默认解析 index.ooc', async () => {
+    const files = new Map<string, string>([
+      ['/repo/.ooc_modules/base/index.ooc', 'base = { hello => 42 }; base'],
+    ])
+    const nameOf = (uri: import('langium').URI) =>
+      decodeURIComponent(uri.path)
+    const underlying: FileSystemProvider = {
+      stat(uri) {
+        if (files.has(nameOf(uri))) {
+          return Promise.resolve({ isFile: true, isDirectory: false, uri })
+        }
+        return Promise.reject(new Error(`文件不存在: ${uri.path}`))
+      },
+      statSync(uri) {
+        if (files.has(nameOf(uri))) {
+          return { isFile: true, isDirectory: false, uri }
+        }
+        throw new Error(`文件不存在: ${uri.path}`)
+      },
+      exists(uri) {
+        return Promise.resolve(files.has(nameOf(uri)))
+      },
+      existsSync(uri) {
+        return files.has(nameOf(uri))
+      },
+      readBinary() {
+        return Promise.resolve(new Uint8Array())
+      },
+      readBinarySync() {
+        return new Uint8Array()
+      },
+      readFile(uri) {
+        const c = files.get(nameOf(uri))
+        if (c == null) {
+          return Promise.reject(new Error(`文件不存在: ${uri.path}`))
+        }
+        return Promise.resolve(c)
+      },
+      readFileSync(uri) {
+        const c = files.get(nameOf(uri))
+        if (c == null) {
+          throw new Error(`文件不存在: ${uri.path}`)
+        }
+        return c
+      },
+      readDirectory() {
+        return Promise.resolve([])
+      },
+      readDirectorySync() {
+        return []
+      },
+    }
+    const fs = createPackageAwareFileSystem(
+      underlying,
+      createDirPackageResolver('/repo/.ooc_modules'),
+    )
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs,
+    })
+    const result = await interpret(
+      `base = #import '@base';
+       base hello`,
+      '/proj/demo.ooc',
+    )
+    expect(result).toBe(42)
+  })
 })
 
 describe('除法运算', () => {
@@ -763,7 +936,7 @@ describe('ObjectValue 元信息反射', () => {
     expect(sendMessage(result, 'area', [])).toBe(42)
   })
 
-  test('纯签名方法（连实现都没有）运行时走 methodNotFound，无成员烧录', async () => {
+  test('纯签名方法（连实现都没有）运行时未知消息抛错，无成员烧录', async () => {
     const result = await interpreter.interpret(`
         calc = { area(): number };
         calc
@@ -833,13 +1006,13 @@ describe('ObjectValue 元信息反射', () => {
 
   test('js send：薄原语动态派发', async () => {
     const withBridge = createInterpretAction(EmptyFileSystem, { js })
-    // 消息名是运行期字符串：methodNotFound 拿到 name 后用 js send 转发
+    // 消息名是运行期字符串：兜底 handler 拿到 name 后用 js send 转发
     const result = await withBridge.interpret(`
         defaults = { greet() => 'hi' };
-        spec = { meow() => 'miao', methodNotFound(name, ...args) { js send defaults name args } };
-        spec greet
+        w = js proxy { meow() => 'miao' } [name, ...args => js send defaults name args];
+        (w meow) + ' ' + (w greet)
     `)
-    expect(result).toBe('hi')
+    expect(result).toBe('miao hi')
   })
 
   test('js send 无参消息：参数列表为空', async () => {
@@ -851,41 +1024,33 @@ describe('ObjectValue 元信息反射', () => {
     expect(result).toBe('hay')
   })
 
-  describe('base 包 delegate：OOC 语言实现的 withDefault', () => {
+  test('js proxy：宿主对象显式包装，未知消息交给 handler(name, ...args)', async () => {
+    const withBridge = createInterpretAction(EmptyFileSystem, { js })
+    const result = await withBridge.interpret(`
+        o = js new Object;
+        js send Object 'assign' o { hi() => 'hay' };
+        w = js proxy o [name, ...args => 'fb:' + name];
+        (w hi) + ' ' + (w ping 7)
+    `)
+    // 自有消息优先；未命中的交给 handler
+    expect(result).toBe('hay fb:ping')
+  })
+
+  describe('宿主端 delegate：withDefault 链式委托（host 桥上实现）', () => {
     function delegateInterpreter() {
-      const fs = memoryFs({
-        'delegate.ooc': `
-          delegate = {
-              withDefault(x, y) {
-                  wrapper = js new Object;
-                  js send Object 'assign' wrapper x;
-                  js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send y name args } };
-                  wrapper
-              },
-              withDefault(x, ...rest) {
-                  fallback = js send this 'withDefault' rest;
-                  wrapper = js new Object;
-                  js send Object 'assign' wrapper x;
-                  js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send fallback name args } };
-                  wrapper
-              }
-          };
-          delegate
-        `,
-      })
+      // delegate 是宿主注入的全局桥（bridges.ts），语言包导出与浏览器 demo 同一份
       return createInterpretAction(
-        { fileSystemProvider: () => fs.provider },
-        { js },
+        { fileSystemProvider: () => memoryFs({}).provider },
+        { js, delegate },
       )
     }
 
     test('spec 自有消息优先，未知消息转发给 defaults', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          d = #import 'delegate';
           defaults = { greet() => 'hi', gadget() => 'gadget' };
           spec = { meow() => 'miao' };
-          w = d withDefault spec defaults;
+          w = delegate withDefault spec defaults;
           (w meow) + ' ' + (w greet) + ' ' + (w gadget)
         `,
         'demo.ooc',
@@ -893,28 +1058,27 @@ describe('ObjectValue 元信息反射', () => {
       expect(result).toBe('miao hi gadget')
     })
 
-    test('转发时 this 断链：defaults 方法体内 this 是 defaults', async () => {
+    test('转发时 this 也是包装对象：defaults 方法体内 this 回读 spec', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          d = #import 'delegate';
           defaults = { name() => 'D', who() { this name } };
           spec = { name() => 'S' };
-          w = d withDefault spec defaults;
+          w = delegate withDefault spec defaults;
           w who
         `,
         'demo.ooc',
       )
-      // spec 也有 name，但转发发生在 defaults 上：who 里 this 是 defaults
-      expect(result).toBe('D')
+      // 方法以包装对象为 receiver 调用：who 里 this 是 w，w name 走链
+      // 先找 spec（spec 优先）→ 'S'。原对象（defaults/spec）只读不写。
+      expect(result).toBe('S')
     })
 
     test('spec 方法抢占同名消息，不经过转发', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          d = #import 'delegate';
           defaults = { greet() => 'hi' };
           spec = { greet() => 'miaoo' };
-          w = d withDefault spec defaults;
+          w = delegate withDefault spec defaults;
           w greet
         `,
         'demo.ooc',
@@ -926,10 +1090,9 @@ describe('ObjectValue 元信息反射', () => {
       await expect(
         delegateInterpreter().interpret(
           `
-            d = #import 'delegate';
             defaults = { greet() => 'hi' };
             spec = { meow() => 'miao' };
-            w = d withDefault spec defaults;
+            w = delegate withDefault spec defaults;
             w missing
           `,
           'demo.ooc',
@@ -937,23 +1100,22 @@ describe('ObjectValue 元信息反射', () => {
       ).rejects.toThrow()
     })
 
-    test('多参数 withDefault：三个参数递归构建转发链', async () => {
+    test('多参数 withDefault：三个参数按链依次查找', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          d = #import 'delegate';
           defaults1 = { a() => 'a1', b() => 'b1' };
           defaults2 = { a() => 'a2', c() => 'c2' };
           spec = { d() => 'd_spec' };
-          w = d withDefault spec defaults1 defaults2;
+          w = delegate withDefault spec defaults1 defaults2;
           (w a) + ' ' + (w b) + ' ' + (w c) + ' ' + (w d)
         `,
         'demo.ooc',
       )
       // spec.d 优先，defaults1.b 存在，defaults2.a 存在（defaults1 也有 a，但 spec 没有，所以转发到 defaults1）
-      // withDefault(spec, defaults1, defaults2) = 拷贝 spec 方法到包装, methodNotFound → withDefault(defaults1, defaults2)
-      // w.a → spec 没有 a → 转发到 defaults1 → defaults1 有 a，返回 'a1'
-      // w.b → spec 没有 b → 转发到 defaults1 → defaults1 有 b，返回 'b1'
-      // w.c → spec 没有 c → 转发到 defaults1 → defaults1 没有 c → 转发到 defaults2 → defaults2 有 c，返回 'c2'
+      // 链式查找按 [spec, defaults1, defaults2] 顺序
+      // w.a → spec 没有 a → defaults1 有 a，返回 'a1'
+      // w.b → spec 没有 b → defaults1 有 b，返回 'b1'
+      // w.c → spec/defaults1 都没有 c → defaults2 有 c，返回 'c2'
       // w.d → spec 有 d，返回 'd_spec'
       expect(result).toBe('a1 b1 c2 d_spec')
     })
@@ -962,16 +1124,58 @@ describe('ObjectValue 元信息反射', () => {
       await expect(
         delegateInterpreter().interpret(
           `
-            d = #import 'delegate';
             defaults1 = { a() => 'a1' };
             defaults2 = { b() => 'b2' };
             spec = { c() => 'c_spec' };
-            w = d withDefault spec defaults1 defaults2;
+            w = delegate withDefault spec defaults1 defaults2;
             w missing
           `,
           'demo.ooc',
         ),
       ).rejects.toThrow()
+    })
+
+    test('二次拼接：把已组合的 c 再 withDefault d，链不丢', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          a = { a1() => 'a1' };
+          b = { b1() => 'b1' };
+          c = delegate withDefault a b;
+          e = delegate withDefault c { e1() => 'e1' };
+          (e a1) + ' ' + (e b1) + ' ' + (e e1)
+        `,
+        'demo.ooc',
+      )
+      // 组装期把 c 的链展平进 e：链 [a, b, defaultsE]，查 a1/b1 直接命中
+      expect(result).toBe('a1 b1 e1')
+    })
+
+    test('两次拼接不影响原组合：c 依旧独立可用', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          a = { a1() => 'a1' };
+          b = { b1() => 'b1' };
+          c = delegate withDefault a b;
+          e = delegate withDefault c { e1() => 'e1' };
+          (c b1) + ' ' + (e b1)
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe('b1 b1')
+    })
+
+    test('共享 defaults：多个包装互相不污染原对象', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          shared = { tag() => 'shared' };
+          w1 = delegate withDefault { n1() => 1 } shared;
+          w2 = delegate withDefault { n2() => 2 } shared;
+          (w1 tag) + '-' + (w2 tag) + '-' + ((w1 n1) + (w2 n2))
+        `,
+        'demo.ooc',
+      )
+      // tag 都落在各自包装上，shared 只读不写
+      expect(result).toBe('shared-shared-3')
     })
   })
 
@@ -1166,127 +1370,7 @@ describe('ObjectValue 元信息反射', () => {
       const result = await interpreter.interpret(`
           x = 42;
           (x include 42) == true
-      `)
-      expect(result).toBe(true)
-    })
-  })
-
-  describe('#classDef 类对象', () => {
-    // 实例状态依赖宿主容器（storage ref），注入独立实例供本组测试复用
-    const storageInterpreter = createInterpretAction(EmptyFileSystem, {
-      storage: {
-        ref(initial: unknown) {
-          let v = initial
-          return {
-            get() {
-              return v
-            },
-            set(x: unknown) {
-              v = x
-              return v
-            },
-          }
-        },
-      },
-    })
-
-test('new 构造实例并读实例状态', async () => {
-      const result = await storageInterpreter.interpret(`
-          Animal = #classDef {
-              new(name) { this store name }
-          } {
-              cell = storage ref 'unknown',
-              store(n) { this cell / set n },
-              speak => this cell / get
-          };
-          d = Animal new 'cat';
-          d speak
-      `)
-      expect(result).toBe('cat')
-    })
-
-    test('未传参走实例默认值', async () => {
-      const result = await storageInterpreter.interpret(`
-          Animal = #classDef {} {
-              cell = storage ref 'default',
-              get => this cell / get
-          };
-          d = Animal new;
-          d get
-      `)
-      expect(result).toBe('default')
-    })
-
-    test('未声明 new 也有默认空构造', async () => {
-      const result = await interpreter.interpret(`
-          Empty = #classDef {} { value = 7 };
-          e = Empty new;
-          e value
-      `)
-      expect(result).toBe(7)
-    })
-
-    test('类方法（静态）可直接调用', async () => {
-      const result = await interpreter.interpret(`
-          Calc = #classDef {
-              twice(n) => n * 2
-          } {};
-          Calc twice 21
-      `)
-      expect(result).toBe(42)
-    })
-
-    test('实例状态按实例隔离，互不共享', async () => {
-      const result = await storageInterpreter.interpret(`
-          Counter = #classDef {
-              new(n) { this store n }
-          } {
-              cell = storage ref 0,
-              store(n) { this cell / set n },
-              get => this cell / get,
-              bump { this cell / set ((this cell / get) + 1); this cell / get }
-          };
-          a = Counter new 5;
-          b = Counter new 9;
-          Array of (a get) (a bump) (b get)
-      `)
-      expect(result).toEqual([5, 6, 9])
-    })
-
-    test('实例方法可写回自身状态', async () => {
-      const result = await storageInterpreter.interpret(`
-          Account = #classDef {
-              new() { this store 0 }
-          } {
-              cell = storage ref 0,
-              store(v) { this cell / set v },
-              get => this cell / get,
-              deposit(v) {
-                  this store ((this cell / get) + v)
-              }
-          };
-          a = Account new;
-          a deposit 20;
-          a deposit 10;
-          a get
-      `)
-      expect(result).toBe(30)
-    })
-
-    test('include 判定 OOC 类实例归属', async () => {
-      const result = await interpreter.interpret(`
-          Animal = #classDef {} {};
-          d = Animal new;
-          Array of (Animal include d) (Animal include 42) (d include Animal)
-      `)
-      expect(result).toEqual([true, false, true])
-    })
-
-    test('类对象是普通 JS 对象，可发通用消息', async () => {
-      const result = await interpreter.interpret(`
-          Empty = #classDef {} {};
-          Empty == Empty
-      `)
+`)
       expect(result).toBe(true)
     })
   })

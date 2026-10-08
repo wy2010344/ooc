@@ -20,7 +20,7 @@ box = { value <= double };
 
 box value 21     // 42（→ double apply 21）
 box value        // undefined（→ double apply，无参）
-box value 1 2    // 会按 apply 的形参匹配（这里 apply 只有 1 参，运行时报 methodNotFound）
+box value 1 2    // 会按 apply 的形参匹配（这里 apply 只有 1 参，运行时抛「没有定义该方法」）
 ```
 
 - 委托对象必须含 `apply`（像 lambda 或可调用对象）；没有时类型检查会报错。
@@ -88,10 +88,9 @@ calc = {
 
 ## 委托组合 withDefault
 
-OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `withDefault` 委托（base 包 `delegate`）：spec 的方法优先，未知消息按 defaults 顺序查找。
+OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `withDefault` 委托（宿主端 `delegate` 全局）：spec 的方法优先，未知消息按 defaults 顺序查找。
 
 ```ooc
-delegate = #import 'delegate';
 defaults = { speak() => 'voice', bark() => 'wang' };
 spec = { fly() => 'fly' };
 w = delegate withDefault spec defaults;
@@ -107,6 +106,9 @@ spec2 = { speak() => 'wang' };
 w2 = delegate withDefault spec2 defaults;
 w2 speak   // 'wang'
 ```
+
+`withDefault` 的产物也是包装对象，可以再次拼进新链（`e = delegate withDefault c d`），
+已组合的链在组装期展平，原对象（spec/defaults）只读不写，可被多个包装安全共享。
 
 ## 嵌套对象
 

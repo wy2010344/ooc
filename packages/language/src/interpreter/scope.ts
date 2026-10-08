@@ -20,11 +20,19 @@ export function getScope(scope: Scope, key: string) {
       if (old) {
         return old
       }
-      old = {
-        methodNotFound(name: string) {
-          return getScope(scope, name)
+      // currentScope 是作用域伪对象：消息名即待查变量名，按作用域链取值。
+      // 用 JS Proxy 动态派发（旧写法靠 methodNotFound 兜底，解释器已不再隐式兜底）。
+      old = new Proxy({} as Record<PropertyKey, unknown>, {
+        get(_t, prop) {
+          if (typeof prop !== 'string') {
+            return undefined
+          }
+          // 返回值与旧 methodNotFound(name) 一致：消息调用后拿到原始值，
+          // 值是函数也不二次调用（sendMessage 会对返回的包装函数 apply，
+          // 包装函数在这里拿到 getScope 结果并原样返回）。
+          return () => getScope(scope, prop)
         },
-      }
+      })
       temp[scopeSymbol] = old
       return old
     }

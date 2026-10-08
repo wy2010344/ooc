@@ -27,14 +27,14 @@
 
 **OOC 无继承**（曾有的 `{ ...base }` 原型合并已移除——「路由、层、链」塞进最简的元，与 guard 路由耦合引出大量角落语义）。复用与兜底统一收敛到一条唯一路径：
 
-| | methodNotFound（委托/withDefault） |
+| | 兜底 Proxy + handler（委托/withDefault） |
 | --- | --- |
 | 语义 | 开放世界运行时兜底：spec 方法优先，未知消息按 defaults 顺序转发 |
-| 组合 | `withDefault`（base 包 delegate）：把 spec 的方法扁平拷贝进包装对象，methodNotFound 按键转发——等效于浅拷贝调用，无共享状态、无自指撕裂 |
-| this | 委托进 defaults 方法时 this 是 defaults（方法库自洽，不与调用方纠缠） |
+| 组合 | `withDefault`（宿主端 delegate 全局）：把 parts 展平成链（spec 优先），包成兜底 Proxy；未命中消息按链顺序查找 |
+| this | 委托进 defaults 方法时 this 仍是包装对象（方法体 this 回读继续走整条链，spec 优先） |
 | 静态分析 | defaults 的签名以交集类型（D∩S）合并进包装类型，检查器可分析 |
 
-**结论**：消息查找只留一种兜底——本对象没有的消息 → `methodNotFound`。继承曾提供的「结构级复用」降级为 `withDefault` 的显式委托（写进调用面，不做隐式链）。
+**结论**：消息查找只留一种兜底——本对象没有的消息 → 抛「没有定义该方法」；要拦截它就把对象显式包成兜底 Proxy（`js proxy 对象 handler`，handler 是 `(name, ...args)` 转发函数；宿主侧对应 `proxyCatchAll(target, handler)`）。没有 methodNotFound 魔法，解释器不做隐式查找。继承曾提供的「结构级复用」降级为 `withDefault` 的显式委托（宿主端 delegate，写进调用面，不做隐式链）。
 
 ## 5. 类型是字典不是法条（soft typing）
 
@@ -43,29 +43,26 @@
 - 类型系统采用 **soft typing**：能证明的证明，证明不了的标 `any/unknown`，不承诺全对，但绝不拦运行。
 - 类型检查与运行是独立分支（AGENTS.md 第 3 节已钉死）：解释器从不因类型诊断中断。
 
-## 6. 双线模型：类-实例线 与 匿名对象线
+## 6. 只复用 JS 原生类，不造类语法
 
-两种对象获取方式，各守各的语义，平行不互渗：
+`#classDef` / `new` / typedef 继承已删除（`.ooc` 里从没用过，教科书式 OO 不提供价值）。没有 OOC 侧的类、实例、继承、instanceof：
 
 ```
-类-实例线（复用 JS 原生）         匿名对象线（OOC 维度）
---------------------------        ---------------------------
-class / new / instanceof          { ... } / ObjectValue / metaOf
-有身份，封闭                      无身份，开放
-方法走 this，未知消息直接抛错     方法发消息，methodNotFound 兜底（委托见 §4）
-「属于某类才允许用其方法」        鸭子派发 + guard
-典型：联合里可判别成员            典型：联合里「最多一个」的兜底名额
+匿名对象线（OOC 维度）                 JS 原生（复用不造语法）
+-------------------------              --------------------------
+{ ... } / lambda / 对象字面量          Array / Date / Set / Map / js new
+无身份，开放                           有身份，封闭（v instanceof sender：include）
+方法发消息，未知消息兜底 Proxy         方法走 this，未知消息直接抛错
+鸭子派发 + guard                      「属于某类才允许用其方法」
 ```
 
-- **类不是门口的保安，是消息路由链上的一段**：发消息 → 实例方法表 → 父链 → 类的方法表 → 类的父链 → methodNotFound 兜底。`instanceof` 是一条消息。
-- **类 = 原型链顶端的标记对象**（带 `name`/`isClass` 等普通成员的普通对象），实例判别靠原型链查找，`OOC_META` 无需新槽（父层元信息本就沿链读）。
-- **转换点（唯一不对称）**：类实例可随时作为对象线参与发消息；匿名对象无身份、进联合只能靠配额。
-- **实例变量归属**：方法/常量放类对象（实例沿链共享一份）；实例状态必须挂实例自己（写入走 `o[value] = args[0]` 落 own 属性）。加「类」语法时，声明要分「类节」（方法/常量）与「实例节」（实例变量）两段，否则实例状态互相污染。
+- 类型组合一律走 typedef + 联合 / 交集（§5），不做继承合并。
+- 状态归属：对象字面量绑定（`=` 常量 / `=>` 动态），跨调用可变状态用宿主 `storage ref`。
 
 ## 7. 联合类型：判别靠身份，不靠结构 tag
 
 - **不做 TS 式可辨识联合**（tag 字段 = 把类型信息降级成数据再用结构反推身份）。身份应先天自知（`isKindOf` / `isA` 消息）。
-- 联合必覆盖所有情况：str 走 str、num 走 num、lambda 走 lambda、plainObject 走 methodNotFound。
+- 联合必覆盖所有情况：str 走 str、num 走 num、lambda 走 lambda、plainObject 走兜底（或抛「没有定义该方法」）。
 - **plainObject 最多一个参与联合**：联合里每个成员必须不可混淆地可判别。值类靠 `typeof`、类实例靠类身份；plainObject 无身份 → 配额最多一个，作为兜底成员。这是对「无身份区域」的诚实封顶。
 - 静态判别走 `TypeInfo`（`unionOf`/`isSubtype`），运行时判别 = 发送消息（发送即判别），两处都不依赖 `OOC_META`。
 
@@ -77,13 +74,13 @@ class / new / instanceof          { ... } / ObjectValue / metaOf
 
 ## 9. 元模型
 
-- **一切皆是某类的实例**（含顶层函数、类自身）：lambda 是 Function 的实例，类是 Class 的实例。类本身既然是无方法表上的对象，methodNotFound 就是类对象方法表最后一格的出口——「身份」与「开放」在同一路由里自然嵌套。
+- **一切皆可发消息**（含顶层函数、lambda、JS 原生类）：值、对象字面量、lambda、宿主对象都是普通接收者，消息哲学不区分形态。无「类-实例」层次，身份/归属靠鸭子派发 + `include`（对函数型类对象是 `v instanceof sender`）。
 - 全局对象/`globalRoot` = 单例对象（第一类的实例），不单列为第三种形态。
 
 ## 决策判据（写代码前先问）
 
-1. 这个特性属于哪条线（值 / 匿名对象 / 类-实例 / 全局单例）？
+1. 这个特性属于哪条线（值 / 匿名对象 / lambda / 宿主全局）？
 2. 合法性谁执法——运行时 guard（可靠）？还是静态类型（只导航不拦）？
-3. 未知消息谁兜底——`methodNotFound`（本对象可自定义，withDefault 用它做委托链）。无隐式继承链。
+3. 未知消息谁兜底——兜底 Proxy（`js proxy 对象 handler`，宿主侧 `proxyCatchAll(target, handler)`，转发 `(name, ...args)`；withDefault 委托链路同样由宿主端 delegate 用这套 Proxy 组装）。无隐式继承链，也没有 methodNotFound 魔法名字。
 4. 有没有引入动态名逃逸（`send`）？要不要现在付 LSP 全栈成本？
-5. 状态挂哪个对象——类的共享？还是实例 own？
+5. 状态挂哪个对象——对象字面量绑定（`=`/`=>`）？还是宿主 storage/全局？

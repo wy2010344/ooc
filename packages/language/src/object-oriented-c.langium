@@ -30,7 +30,7 @@ TypeParam:
     name=ID;
 
 TypeMemberList:
-    '{' ('...' extends=Type ',')? (members+=TypeMember (',' members+=TypeMember)*)? '}';
+    '{' (members+=TypeMember (',' members+=TypeMember)*)? '}';
 
 TypeMember:
     name=MethodDefName 
@@ -136,18 +136,6 @@ ObjectDef:
         (methods+=Method (',' methods+=Method)*)?  
     '}';
 
-
-//类定义：#classDef { 类方法 } { 实例方法 }，类方法中的 new 是构造方法
-ClassDef:
-    '#classDef' '{' (
-        classMethods+=Method (',' classMethods+=Method)*
-    )? '}' '{' (
-        instanceMethods+=Method (',' instanceMethods+=Method)*
-    )? '}';
-
-ComplexPrimary:
-    ObjectDef | LambdaDef | ClassDef | '(' Expression ')';
-
 //lambda，等价于 { apply(...) { ... } }
 //  [x => x + 1]          带参 lambda，函数体为表达式
 //  [a, b => a + b]       多参数，逗号分割，参数可带类型注解
@@ -158,6 +146,9 @@ LambdaDef:
         (ParamAll '=>')?
         (expressions+=Statement (';' expressions+=Statement)* ';'?)?
     ']';
+
+ComplexPrimary:
+    ObjectDef | LambdaDef | '(' Expression ')';
 
 Primary:
     Num | Str | StID | Bool | Nil | Ref | ComplexPrimary;

@@ -7,7 +7,6 @@ import type {
   LambdaDef,
   MethodAll,
   Method,
-  ClassDef,
 } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import { getMethodName } from './completion-type-utils.js'
@@ -16,7 +15,12 @@ import {
   ObjectOrientedCTypeChecker,
 } from './type-checker.js'
 import type { TypeInfo } from './type-system.js'
-import { diagnosticData, filterDiagnostic, type OocConfig } from './diagnostics-config.js'
+import {
+  diagnosticData,
+  filterDiagnostic,
+  mergeGlobalsTypes,
+  type OocConfig,
+} from './diagnostics-config.js'
 import { resolveModuleName } from './module-path.js'
 
 /**
@@ -34,7 +38,6 @@ export function registerValidationChecks(
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     ObjectDef: validator.checkObjectDef,
     LambdaDef: validator.checkLambdaDef,
-    ClassDef: validator.checkClassDef,
     Model: validator.checkModel,
   }
   registry.register(checks, validator)
@@ -45,6 +48,9 @@ export function registerValidationChecks(
  */
 export class ObjectOrientedCValidator {
   private config: OocConfig | undefined
+  /** 宿主注入的全局类型注册表（Route A：从宿主包 .ooc 类型源加载），构造时设一次，不被 per-doc 覆盖 */
+  private registry: Map<string, TypeInfo> | undefined
+  /** 当前有效的全局类型（= 注册表 ∪ 本项目 config.ooc 收集的 globals），供 checkModel 读取 */
   private globalsTypes: Map<string, TypeInfo> | undefined
 
   constructor(private readonly services?: ObjectOrientedCServices) {}
@@ -53,8 +59,26 @@ export class ObjectOrientedCValidator {
     this.config = config
   }
 
+  /** 设置全局类型注册表（宿主注入）：同时作为初始的有效全局类型 */
+  setRegistry(types: Map<string, TypeInfo> | undefined): void {
+    this.registry = types
+    if (this.globalsTypes === undefined) {
+      this.globalsTypes = types
+    }
+  }
+
+  /** 覆盖有效全局类型（仅 per-doc 项目 globals 合并结果），不影响注册表 */
   setGlobalsTypes(types: Map<string, TypeInfo> | undefined): void {
     this.globalsTypes = types
+  }
+
+  /**
+   * 注入本项目 config.ooc 收集的项目 globals：合并到注册表之上作为本次校验
+   * 的有效全局类型。注册表保持不动，多文档之间不会串（#2 修复：以前直接
+   * 覆盖 globalsTypes，会污染后续 collectConfigGlobals 的解析基准）。
+   */
+  applyGlobals(docGlobals: Map<string, TypeInfo> | undefined): void {
+    this.globalsTypes = mergeGlobalsTypes(this.registry, docGlobals)
   }
 
   /** 注入的全局桥接类型（供 shared checker 的 hover/补全等只读场景复用） */
@@ -107,7 +131,7 @@ export class ObjectOrientedCValidator {
       : undefined
     return new ObjectOrientedCTypeChecker(
       importResolver,
-      this.globalsTypes,
+      this.registry,
     ).collectConfigGlobals(model)
   }
 
@@ -176,17 +200,6 @@ export class ObjectOrientedCValidator {
 
   checkLambdaDef(lambda: LambdaDef, accept: ValidationAcceptor): void {
     checkParamDuplicates(lambda, this.wrap(accept))
-  }
-
-  checkClassDef(model: ClassDef, accept: ValidationAcceptor): void {
-    // 类方法与实例方法块都检查参数重名
-    ;[...model.classMethods, ...model.instanceMethods].forEach((method) => {
-      if (method.$type == 'MethodAll') {
-        checkParamDuplicates(method, this.wrap(accept))
-      }
-    })
-    checkOverloadRules(model.classMethods, this.wrap(accept), '类方法')
-    checkOverloadRules(model.instanceMethods, this.wrap(accept), '实例方法')
   }
 }
 

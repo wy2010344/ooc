@@ -3,7 +3,10 @@ import { EmptyFileSystem, URI } from 'langium'
 import { parseHelper } from 'langium/test'
 import type { Diagnostic } from 'vscode-languageserver-types'
 import type { Model } from 'object-oriented-c-language'
-import { createObjectOrientedCServices } from 'object-oriented-c-language'
+import {
+  coreBridgeGlobals,
+  createObjectOrientedCServices,
+} from 'object-oriented-c-language'
 
 let services: ReturnType<typeof createObjectOrientedCServices>
 let parse: ReturnType<typeof parseHelper<Model>>
@@ -1115,143 +1118,6 @@ describe('方法层泛型', () => {
   })
 })
 
-describe('typedef 继承', () => {
-  async function loadImport(
-    name: string,
-    source: string,
-  ): Promise<void> {
-    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
-  }
-
-  async function checkModule(
-    uri: string,
-    source: string,
-  ): Promise<Diagnostic[]> {
-    const doc = await parse(source, {
-      documentUri: URI.file(uri).toString(),
-      validation: true,
-    })
-    return doc.diagnostics ?? []
-  }
-
-  test("语法：'...' extends 子句可解析", async () => {
-    const doc = await parse(`
-        Animal #type { speak(): string };
-        Dog #type { ...Animal, bark(): string }
-    `)
-    expect(doc.parseResult.parserErrors).toHaveLength(0)
-  })
-
-  test('单继承：继承父类型方法，自有方法覆盖同名', async () => {
-    const diags = await diagnostics(`
-        Animal #type { speak(): string, move(): number };
-        Dog #type { ...Animal, bark(): string, move(): number };
-        d: Dog = { speak() { 'wang' }, bark() { 'bow' }, move() { 4 } }
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
-  test('单继承：缺少父类型方法告警', async () => {
-    const diags = await diagnostics(`
-        Animal #type { speak(): string };
-        Dog #type { ...Animal, bark(): string };
-        d: Dog = { bark() { 'bow' } }
-    `)
-    expect(messages(diags).join('\n')).toContain('类型不匹配')
-  })
-
-  test('联合父类型：A 变成联合，只有部分分支的方法调用告警', async () => {
-    const diags = await diagnostics(`
-        Circle #type { kind(): 'circle', radius: number };
-        Square #type { kind(): 'square', side: number };
-        Shape #type { ...Circle | Square, m1(): number };
-        use = { calc(s: Shape) { s radius } }
-    `)
-    expect(messages(diags).join('\n')).toContain("消息 'radius' 只定义在部分联合成员上")
-  })
-
-  test('联合父类型：公共方法无告警', async () => {
-    const diags = await diagnostics(`
-        Circle #type { kind(): 'circle', radius: number };
-        Square #type { kind(): 'square', side: number };
-        Shape #type { ...Circle | Square, m1(): number };
-        use = { calc(s: Shape) { s kind } }
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
-  test('联合父类型：#guard 判别后可访问成员专属方法', async () => {
-    const diags = await diagnostics(`
-        Circle #type { kind(): 'circle', radius: number };
-        Square #type { kind(): 'square', side: number };
-        Shape #type { ...Circle | Square, m1(): number };
-        area = {
-            calc(s: Shape) {
-                #guard (s kind) == 'circle';
-                s radius
-            },
-            calc(s: Shape) {
-                #guard (s kind) == 'square';
-                s side
-            },
-            calc(s: Shape) { 0 }
-        }
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
-  test('联合父类型：对象字面量匹配任一分支（含自有方法）', async () => {
-    const diags = await diagnostics(`
-        Circle #type { kind(): 'circle', radius: number };
-        Square #type { kind(): 'square', side: number };
-        Shape #type { ...Circle | Square, m1(): number };
-        c: Shape = { kind() { 'circle' }, radius() { 3 }, m1() { 1 } };
-        s: Shape = { kind() { 'square' }, side() { 4 }, m1() { 1 } }
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
-  test('联合父类型：对象字面量缺少自有方法告警', async () => {
-    const diags = await diagnostics(`
-        Circle #type { kind(): 'circle', radius: number };
-        Square #type { kind(): 'square', side: number };
-        Shape #type { ...Circle | Square, m1(): number };
-        bad: Shape = { kind() { 'circle' }, radius() { 3 } }
-    `)
-    expect(messages(diags).join('\n')).toContain('类型不匹配')
-  })
-
-  test('泛型继承：实例化为对象', async () => {
-    const diags = await diagnostics(`
-        Named #type { name(): string };
-        Box #type<T> { ...T, m1(): number };
-        b: Box<Named> = { name() { 'box' }, m1() { 1 } }
-    `)
-    expect(messages(diags)).toEqual([])
-  })
-
-  test('泛型继承：实例化为联合', async () => {
-    const diags = await diagnostics(`
-        Circle #type { kind(): 'circle', radius: number };
-        Square #type { kind(): 'square', side: number };
-        Box #type<T> { ...T, m1(): number };
-        use = { calc(s: Box<Circle | Square>) { s radius } }
-    `)
-    expect(messages(diags).join('\n')).toContain("消息 'radius' 只定义在部分联合成员上")
-  })
-
-  test('继承跨模块 typedef', async () => {
-    await loadImport('base', `Animal #type { speak(): string }`)
-    const diags = await checkModule(
-      'demo5.ooc',
-      `base = #import 'base';
-       Dog #type { ...Animal, bark(): string };
-       d: Dog = { speak() { 'wang' }, bark() { 'bow' } }`,
-    )
-    expect(messages(diags)).toEqual([])
-  })
-})
-
 describe('typedef 方法级泛型', () => {
   async function loadImport(
     name: string,
@@ -1375,53 +1241,41 @@ describe('typedef 方法级泛型', () => {
   })
 })
 
-describe('withDefault 交集类型（base 包 delegate）', () => {
-  // 与解释器同款 delegate 源码，验证声明签名 <D,S> ⇒ D∩S 的静态语义
-  async function loadImport(
-    name: string,
-    source: string,
-  ): Promise<void> {
-    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
-  }
+describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
+  // 类型源声明 delegate 为宿主全局桥（withDefault 返回委托交集）。
+  // 用带 coreBridgeGlobals registry 的独立服务，让 `delegate withDefault ...`
+  // 命中检查器里的 withDefault 特判（D∩S 方法并集）。
+  let svc: ReturnType<typeof createObjectOrientedCServices>
+  let parseLocal: ReturnType<typeof parseHelper<Model>>
+
+  beforeAll(async () => {
+    svc = createObjectOrientedCServices(
+      EmptyFileSystem,
+      undefined,
+      coreBridgeGlobals(),
+    )
+    parseLocal = parseHelper<Model>(svc.ObjectOrientedC)
+  })
 
   async function checkModule(
     uri: string,
     source: string,
   ): Promise<Diagnostic[]> {
-    const doc = await parse(source, {
+    const doc = await parseLocal(source, {
       documentUri: URI.file(uri).toString(),
       validation: true,
     })
     return doc.diagnostics ?? []
   }
 
-  const DELEGATE = `delegate = {
-    withDefault(x, y) {
-        wrapper = js new Object;
-        js send Object 'assign' wrapper x;
-        js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send y name args } };
-        wrapper
-    },
-    withDefault(x, ...rest) {
-        fallback = js send this 'withDefault' rest;
-        wrapper = js new Object;
-        js send Object 'assign' wrapper x;
-        js send Object 'assign' wrapper { methodNotFound(name, ...args) { js send fallback name args } };
-        wrapper
-    }
-};
-delegate`
-
   test('交集：defaults 专属与 spec 专属方法都可调用', async () => {
-    await loadImport('delegate', DELEGATE)
     const diags = await checkModule(
       'wd-demo1.ooc',
-      `d = #import 'delegate';
-       Cat #type { meow(): string };
+      `Cat #type { meow(): string };
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault spec defaults;
+       w = delegate withDefault spec defaults;
        g: string = w greet;
        m: string = w meow;
        g; m`,
@@ -1430,15 +1284,13 @@ delegate`
   })
 
   test('交集：任一侧有方法即可（不完全交集不误报）', async () => {
-    await loadImport('delegate2', DELEGATE)
     const diags = await checkModule(
       'wd-demo2.ooc',
-      `d = #import 'delegate2';
-       Cat #type { meow(): string };
+      `Cat #type { meow(): string };
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault spec defaults;
+       w = delegate withDefault spec defaults;
        x: string = w greet;
        x`,
     )
@@ -1446,16 +1298,14 @@ delegate`
     expect(messages(diags)).toEqual([])
   })
 
-  test('交集：两侧都没有的消息运行时兜底 methodNotFound，类型静默', async () => {
-    await loadImport('delegate3', DELEGATE)
+  test('交集：两侧都没有的消息运行时兜底 proxy，类型静默', async () => {
     const diags = await checkModule(
       'wd-demo3.ooc',
-      `d = #import 'delegate3';
-       Cat #type { meow(): string };
+      `Cat #type { meow(): string };
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault spec defaults;
+       w = delegate withDefault spec defaults;
        w bark`,
     )
     // 检查器鸭子语义：resolveSigs 未命中返回 any 放行，不做未知消息告警
@@ -1463,95 +1313,18 @@ delegate`
   })
 
   test('交集：返回类型参与赋值检查，类型不符仍告警', async () => {
-    await loadImport('delegate4', DELEGATE)
     const diags = await checkModule(
       'wd-demo4.ooc',
-      `d = #import 'delegate4';
-       Cat #type { meow(): string };
+      `Cat #type { meow(): string };
        Dog #type { greet(): string };
        defaults: Dog = { greet() => 'hi' };
        spec: Cat = { meow() => 'miao' };
-       w = d withDefault spec defaults;
+       w = delegate withDefault spec defaults;
        n: number = w greet;
        n`,
     )
     // greet 返回 string，标 number 应报类型不匹配
     expect(messages(diags).join('\n')).toContain('类型不匹配')
-  })
-
-  describe('#classDef 类对象类型', () => {
-    test('类定义与 new 返回实例无告警', async () => {
-      const diags = await checkModule(
-        'class1.ooc',
-        `holder = {
-             apply(x: string) { x }
-         };
-         Animal = #classDef {} {
-             name <= holder,
-             speak(): string { this name 'cat' }
-         };
-         d = Animal new;
-         s: string = d speak;
-         s`,
-      )
-      expect(messages(diags)).toEqual([])
-    })
-
-    test('new 返回实例类型，赋给 number 报不匹配', async () => {
-      const diags = await checkModule(
-        'class2.ooc',
-        `holder = {
-             apply(x: string) { x }
-         };
-         Animal = #classDef {} {
-             name <= holder
-         };
-         n: number = Animal new 'cat';
-         n`,
-      )
-      expect(messages(diags).join('\n')).toContain('类型不匹配')
-    })
-
-    test('实例方法返回类型参与赋值检查', async () => {
-      const diags = await checkModule(
-        'class3.ooc',
-        `Animal = #classDef {} { speak(): string { 'a' } };
-         d = Animal new;
-         n: number = d speak;
-         n`,
-      )
-      expect(messages(diags).join('\n')).toContain('类型不匹配')
-    })
-
-    test('类方法（静态）返回类型参与赋值检查', async () => {
-      const diags = await checkModule(
-        'class4.ooc',
-        `Calc = #classDef {
-             twice(n: number): number { n * 2 }
-         } {};
-         s: string = Calc twice 3;
-         s`,
-      )
-      expect(messages(diags).join('\n')).toContain('类型不匹配')
-    })
-
-    test('构造方法参数重名报错', async () => {
-      const diags = await checkModule(
-        'class5.ooc',
-        `Bad = #classDef { new(a, a) {} } {};
-         Bad`,
-      )
-      expect(messages(diags).join('\n')).toContain('参数里已经定义了')
-    })
-
-    test('实例方法参数重名报错', async () => {
-      const diags = await checkModule(
-        'class6.ooc',
-        `Bad = #classDef {} { do(a, a) {} };
-         Bad`,
-      )
-      expect(messages(diags).join('\n')).toContain('参数里已经定义了')
-    })
   })
 
   describe('转发属性 <=：签名取自委托 apply', () => {

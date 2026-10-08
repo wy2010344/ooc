@@ -15,21 +15,12 @@ export type TypeInfo =
 export interface ObjectTypeInfo {
   kind: 'object'
   name?: string
-  /** 继承的父类型名：对象字面量 '...' 单继承（运行时是方法路由的策略链） */
-  parent?: string
-  /** 继承的父类型（泛型占位等尚未实例化的形式保留在这里，实例化时展开/合并） */
-  extendsType?: TypeInfo
   methods: Map<string, MethodSig[]>
   /**
    * 类型成员（同像性：#import 模块顶层 typedef 挂载为导出对象的类型成员）。
    * 导入方用 math#Circle 访问；泛型 typedef 存模板，params 用于 math#Box<number> 实例化。
    */
   typeMembers?: Map<string, { type: TypeInfo; params: string[] }>
-  /**
-   * 类的实例类型（#classDef）：类对象自身的 methods 是类（静态）方法，
-   * instanceType 挂「实例方法块」生成的新实例类型（new 的返回类型）。
-   */
-  instanceType?: ObjectTypeInfo
 }
 
 export interface MethodSig {

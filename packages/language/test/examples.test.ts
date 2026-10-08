@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { FileSystemProvider } from 'langium'
 import {
   createInterpretAction,
+  delegate,
   js,
   sendMessage,
   storage,
@@ -10,7 +11,7 @@ import {
 import { describe, expect, test } from './compat.js'
 
 // 浏览器 demo 的自测案例（packages/example/src/ooc）作为单元测试回归，
-// 宿主桥接用语言包导出的同一份 storage/js，保证与 main.ts 行为一致。
+// 宿主桥接用语言包导出的同一份 storage/js/delegate，保证与 main.ts 行为一致。
 // example 与 base 包源码共同组成可 #import 的模块集合（与浏览器 FS 同构）。
 const fixtures = join(
   import.meta.dirname,
@@ -27,7 +28,7 @@ const baseDir = join(import.meta.dirname, '..', '..', 'base', 'src')
 function memoryFs(): FileSystemProvider {
   const sources = new Map<string, string>()
   for (const dir of [fixtures, baseDir]) {
-    for (const file of ['loop.ooc', 'delegate.ooc']) {
+    for (const file of ['loop.ooc']) {
       try {
         const name = join(dir, file)
         sources.set(file, readFileSync(name, 'utf-8'))
@@ -89,6 +90,7 @@ function runCase(file: string) {
     {
       storage,
       js,
+      delegate,
     },
   )
   return interpreter.interpret(src, join(fixtures, file))

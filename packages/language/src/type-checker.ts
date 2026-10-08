@@ -5,7 +5,6 @@ import {
   isAssignment,
   isBool,
   isCastExpression,
-  isClassDef,
   isComplexPrimary,
   isImportList,
   isImportStatement,
@@ -29,7 +28,6 @@ import {
   isStr,
   isTypeDef,
   type Assignment,
-  type ClassDef,
   type ComplexPrimary,
   type Expression,
   type ImportItem,
@@ -235,8 +233,6 @@ export class ObjectOrientedCTypeChecker {
       kind: 'object',
       name: result.name,
       methods: new Map(result.methods),
-      parent: result.parent,
-      extendsType: result.extendsType,
     }
     base.typeMembers = new Map(members)
     return base
@@ -350,8 +346,6 @@ export class ObjectOrientedCTypeChecker {
             kind: 'object',
             name: moduleName,
             methods: new Map(result.methods),
-            parent: result.parent,
-            extendsType: result.extendsType,
           }
         : { kind: 'object', name: moduleName, methods: new Map() }
     base.typeMembers = new Map(members)
@@ -507,58 +501,7 @@ export class ObjectOrientedCTypeChecker {
       placeholder.methods.set(name, sigs)
     }
     placeholder.name = stmt.name
-    // 继承：'...' 父类型（单继承，父类型联合时 A 本身变成联合）
-    const parent = stmt.body.extends
-      ? this.resolveAnnotation(stmt.body.extends, accept, typeParams, env)
-      : undefined
-    if (!parent) {
-      this.registerTypeDef(stmt.name, placeholder, typeParams, env)
-      return
-    }
-    if (parent.kind === 'object') {
-      // 单继承：合并父类型形状，自己的方法覆盖同名
-      this.mergeParentMethods(placeholder, parent)
-      this.registerTypeDef(stmt.name, placeholder, typeParams, env)
-      return
-    }
-    if (parent.kind === 'union') {
-      // A 变成联合：每个分支 = 父联合成员 + 自己的方法
-      const ownMethods = new Map(placeholder.methods)
-      const branches = parent.types.map((m) => {
-        if (m.kind !== 'object') {
-          return m
-        }
-        const branch: ObjectTypeInfo = {
-          kind: 'object',
-          name: stmt.name,
-          methods: new Map(m.methods),
-        }
-        for (const [k, sigs] of ownMethods) {
-          branch.methods.set(k, sigs)
-        }
-        branch.parent = m.name ?? describeType(m)
-        return branch
-      })
-      this.registerTypeDef(stmt.name, unionOf(branches), typeParams, env)
-      return
-    }
-    // 其余（类型参数占位、内置名等）：保留 extendsType，实例化时处理
-    placeholder.extendsType = parent
-    placeholder.parent = describeType(parent)
     this.registerTypeDef(stmt.name, placeholder, typeParams, env)
-  }
-
-  private mergeParentMethods(
-    target: ObjectTypeInfo,
-    parent: ObjectTypeInfo,
-  ): void {
-    for (const [k, v] of parent.methods) {
-      if (!target.methods.has(k)) {
-        target.methods.set(k, v)
-      }
-    }
-    target.parent = parent.name ?? describeType(parent)
-    target.extendsType = parent
   }
 
   private registerTypeDef(
@@ -596,12 +539,6 @@ export class ObjectOrientedCTypeChecker {
         env,
       )
       env.define(stmt.name, declared)
-      return
-    }
-    const classDef = this.unwrapClassDef(stmt.expression)
-    if (classDef) {
-      // 类定义：#classDef { 类方法 } { 实例方法 }，类对象类型 + 实例类型
-      this.checkClassDef(stmt, classDef, env, accept)
       return
     }
     const inferred = this.inferExpression(stmt.expression, env, accept)
@@ -706,7 +643,7 @@ export class ObjectOrientedCTypeChecker {
         }
       } else {
         // 委托对象没有 apply：类型只能给出宽松兜底（参数任意、返回任意）。
-        // 运行时也会因 methodNotFound 报错，故这里同时给出类型提示。
+        // 运行时也会抛「没有定义该方法」，故这里同时给出类型提示。
         accept(
           'error',
           `转发目标需要含 apply 方法，委托对象类型为 ${describeType(delegateType)}，其中没有 apply`,
@@ -865,84 +802,6 @@ export class ObjectOrientedCTypeChecker {
     for (const [n, group] of implGroups) {
       this.checkUnionCoverage(n, group, bodyEnv, accept)
     }
-  }
-
-  /**
-   * 类定义类型：#classDef { 类方法 } { 实例方法 }。
-   * 类对象类型 methods 挂类（静态）方法，new 的返回类型固定为实例类型；
-   * 实例类型挂在类类型的 instanceType 上供派发。
-   */
-  private checkClassDef(
-    stmt: Assignment,
-    classDef: ClassDef,
-    env: TypeEnv,
-    accept: ValidationAcceptor,
-  ): void {
-    const classType: ObjectTypeInfo = {
-      kind: 'object',
-      name: stmt.name,
-      methods: new Map(),
-    }
-    const instanceType: ObjectTypeInfo = {
-      kind: 'object',
-      name: stmt.name,
-      methods: new Map(),
-    }
-    // 收集两条方法块的签名
-    for (const m of classDef.classMethods) {
-      this.collectMethod(m, classType, accept, env)
-    }
-    for (const m of classDef.instanceMethods) {
-      this.collectMethod(m, instanceType, accept, env)
-    }
-    // new 的返回类型固定为实例类型；没声明也提供一个默认构造
-    const newSigs = classType.methods.get('new')
-    if (newSigs && newSigs.length > 0) {
-      newSigs.forEach((s) => (s.returns = instanceType))
-    } else {
-      classType.methods.set('new', [{ params: [], returns: instanceType }])
-    }
-    classType.instanceType = instanceType
-    this.checkClassBodies(classDef, env, classType, instanceType, accept)
-    // 类名在定义完成后才对后续语句可见（与运行时作用域一致）
-    env.define(stmt.name, classType)
-  }
-
-  /** 检查类/实例方法体（复用对象方法体的重载检查；new 单独按构造检查）。 */
-  private checkClassBodies(
-    classDef: ClassDef,
-    env: TypeEnv,
-    classType: ObjectTypeInfo,
-    instanceType: ObjectTypeInfo,
-    accept: ValidationAcceptor,
-  ): void {
-    // 类方法（去掉 new）
-    const classMethods = classDef.classMethods.filter(
-      (m) => this.getMethodName(m.name) !== 'new',
-    )
-    this.checkObjectBody(
-      { methods: classMethods } as unknown as ObjectDef,
-      env,
-      classType,
-      accept,
-    )
-    // 构造方法：self 指向实例（实例状态写入实例自身）
-    const newDef = classDef.classMethods.find(
-      (m) => this.getMethodName(m.name) === 'new' && isMethodAll(m),
-    ) as MethodAll | undefined
-    if (newDef) {
-      const newEnv = env.child()
-      newEnv.define('self', instanceType)
-      newEnv.define('this', instanceType)
-      this.checkMethod(newDef, newEnv, accept)
-    }
-    // 实例方法
-    this.checkObjectBody(
-      { methods: classDef.instanceMethods } as unknown as ObjectDef,
-      env,
-      instanceType,
-      accept,
-    )
   }
 
   private checkMethod(
@@ -1776,7 +1635,7 @@ export class ObjectOrientedCTypeChecker {
         if (!sigs) {
           return anyType
         }
-        // withDefault 库签名（base 包 delegate）：返回委托交集（任一侧定义即可）
+        // withDefault 库签名（宿主端 delegate）：返回委托交集（任一侧定义即可）
         if (name === 'withDefault' && args.length >= 2) {
           return intersectionOf(args, true)
         }
@@ -1971,25 +1830,6 @@ export class ObjectOrientedCTypeChecker {
       this.checkObjectBody(e, env, t, accept, context)
       return t
     }
-    if (isClassDef(e)) {
-      // 内联类定义（非赋值）：只做签名收集，方法体在赋值处已检查
-      const t: ObjectTypeInfo = { kind: 'object', methods: new Map() }
-      const it: ObjectTypeInfo = { kind: 'object', methods: new Map() }
-      for (const m of e.classMethods) {
-        this.collectMethod(m, t, accept, env)
-      }
-      for (const m of e.instanceMethods) {
-        this.collectMethod(m, it, accept, env)
-      }
-      const newSigs = t.methods.get('new')
-      if (newSigs && newSigs.length > 0) {
-        newSigs.forEach((s) => (s.returns = it))
-      } else {
-        t.methods.set('new', [{ params: [], returns: it }])
-      }
-      t.instanceType = it
-      return t
-    }
     if (isLambdaDef(e)) {
       // 同像性：lambda 就是 { apply(...) { ... } }，类型即只有一个 apply 方法的对象。
       // 参数注解收集为 MethodSig，函数体最后一条表达式推断为返回类型。
@@ -2058,28 +1898,6 @@ export class ObjectOrientedCTypeChecker {
       return undefined
     }
     return this.unwrapPrimary(expr.primary)
-  }
-
-  private unwrapClassDef(expr: Expression): ClassDef | undefined {
-    if (!isMessageOrChain(expr) || expr.message) {
-      return undefined
-    }
-    return this.unwrapClassPrimary(expr.primary)
-  }
-
-  private unwrapClassPrimary(p: Primary): ClassDef | undefined {
-    if (isClassDef(p)) {
-      return p
-    }
-    if (isComplexPrimary(p)) {
-      if (isClassDef(p)) {
-        return p
-      }
-      if (isPiplingExpression(p) || isMessageOrChain(p)) {
-        return this.unwrapClassDef(p)
-      }
-    }
-    return undefined
   }
 
   private unwrapPrimary(p: Primary): ObjectDef | undefined {

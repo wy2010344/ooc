@@ -6,5 +6,5 @@ export type { DComponent } from './dom.js'
 export { fc, forEach } from './fc.js'
 export type { ForEachConfig } from './fc.js'
 
-// 桥接类型定义（供 OOC 类型检查器使用）
-export { createBridgeGlobalsTypes } from './types.js'
+// 桥接类型源与 loader（供 OOC 类型检查器解析全局类型，Route A）
+export { createBridgeGlobalsTypes, bridgeTypesSource } from './types.js'

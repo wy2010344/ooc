@@ -294,7 +294,7 @@ export function createTypeCheckAction(
         ObjectOrientedCValidator: ObjectOrientedCValidator
       }
     ).ObjectOrientedCValidator
-    validator.setGlobalsTypes(globals)
+    validator.applyGlobals(globals)
     await services.shared.workspace.DocumentBuilder.build([document], {
       validation: true,
     })

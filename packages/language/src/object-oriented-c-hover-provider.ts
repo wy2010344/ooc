@@ -437,9 +437,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
       return `联合类型：${branches}`
     }
     if (t.kind === 'object') {
-      const head = t.name
-        ? `类型 ${t.name}${t.parent ? ` (extends ${t.parent})` : ''}`
-        : `对象${t.parent ? ` (extends ${t.parent})` : ''}`
+      const head = t.name ? `类型 ${t.name}` : '对象'
       const lines = [...t.methods.entries()].flatMap(([n, sigs]) =>
         (sigs as any[]).map((sig: any) => {
           const params = (sig.params ?? [])

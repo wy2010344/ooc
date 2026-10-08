@@ -1,11 +1,9 @@
 import {
   anyType,
-  describeType,
   intersectionOf,
   isSubtype,
   unionOf,
   type MethodSig,
-  type ObjectTypeInfo,
   type TypeInfo,
 } from '../type-system.js'
 
@@ -40,48 +38,6 @@ export function instantiate(
             typeParams: s.typeParams,
           })),
         )
-      }
-      if (t.extendsType) {
-        const parent = instantiate(t.extendsType, params, args)
-        if (parent.kind === 'object') {
-          for (const [k, v] of parent.methods) {
-            if (!methods.has(k)) {
-              methods.set(k, v)
-            }
-          }
-          return {
-            kind: 'object',
-            name: t.name,
-            methods,
-            parent: parent.name ?? describeType(parent),
-            extendsType: parent,
-          }
-        }
-        if (parent.kind === 'union') {
-          const branches = parent.types.map((m) => {
-            if (m.kind !== 'object') {
-              return m
-            }
-            const branch: ObjectTypeInfo = {
-              kind: 'object',
-              name: t.name,
-              methods: new Map(m.methods),
-            }
-            for (const [k, sigs] of methods) {
-              branch.methods.set(k, sigs)
-            }
-            branch.parent = m.name ?? describeType(m)
-            return branch
-          })
-          return unionOf(branches)
-        }
-        return {
-          kind: 'object',
-          name: t.name,
-          methods,
-          parent: describeType(parent),
-          extendsType: parent,
-        }
       }
       return { kind: 'object', name: t.name, methods }
     }

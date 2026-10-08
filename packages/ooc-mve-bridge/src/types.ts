@@ -1,243 +1,178 @@
 /**
- * 桥接类型定义：供 OOC 类型检查器使用。
- * 宿主（playground/example）调用 createBridgeGlobalsTypes() 生成 Map<string, TypeInfo>，
- * 传给 createObjectOrientedCServices 的 globalsTypes 参数。
+ * 桥接类型源（Route A）：宿主包自持 .ooc 类型声明（相当于 TS 的 dom.d.ts），
+ * 调用方用 language 的 loadGlobalsTypesFromSource 解析成 Map<string, TypeInfo>，
+ * 传给 createObjectOrientedCServices 的 globalsTypes / createTypeCheckAction。
+ * 运行时实现见 src/dom.ts / src/fc.ts，这里只声明类型（签名方法不落地）。
+ * dom 标签签名：(props, ...children) => DComponent，与 wy-dom-helper 的 tag 一致。
+ * 宽泛语义：dom 运行时是 JS Proxy，任意标签名都暴露方法并接受 lambda children；
+ * 此处只枚举常见标签供补全，未知标签在类型上静默退化为 any，无需 methodNotFound。
  */
-import type {
-  TypeInfo,
-  MethodSig,
-} from 'object-oriented-c-language'
-import {
-  anyType,
-  numberType,
-} from 'object-oriented-c-language'
+import type { LangiumCoreServices } from 'langium'
+import { loadGlobalsTypesFromSource } from 'object-oriented-c-language'
+import type { TypeInfo } from 'object-oriented-c-language'
 
-// DComponent 类型：(ctx) => unknown
-const dcomponentType: TypeInfo = {
-  kind: 'function',
-}
+/** ooc-mve-bridge 的 .ooc 类型源：视图层组件（dom/text/html/fc/forEach） */
+export const bridgeTypesSource = `// ooc-mve-bridge 类型源（视图层组件）
+// 运行时实现见 src/dom.ts / src/fc.ts。
+Component #type {
+    class(props): Component,
+    on(event): Component
+};
 
-// text.apply(value): DComponent
-const textApplyMethod: MethodSig = {
-  params: [anyType],
-  returns: dcomponentType,
-}
+dom = {
+    a(props, ...children): Component,
+    abbr(props, ...children): Component,
+    address(props, ...children): Component,
+    area(props, ...children): Component,
+    article(props, ...children): Component,
+    aside(props, ...children): Component,
+    audio(props, ...children): Component,
+    b(props, ...children): Component,
+    base(props, ...children): Component,
+    bdi(props, ...children): Component,
+    bdo(props, ...children): Component,
+    big(props, ...children): Component,
+    blockquote(props, ...children): Component,
+    body(props, ...children): Component,
+    br(props, ...children): Component,
+    button(props, ...children): Component,
+    canvas(props, ...children): Component,
+    caption(props, ...children): Component,
+    cite(props, ...children): Component,
+    code(props, ...children): Component,
+    col(props, ...children): Component,
+    colgroup(props, ...children): Component,
+    data(props, ...children): Component,
+    datalist(props, ...children): Component,
+    dd(props, ...children): Component,
+    del(props, ...children): Component,
+    details(props, ...children): Component,
+    dfn(props, ...children): Component,
+    dialog(props, ...children): Component,
+    div(props, ...children): Component,
+    dl(props, ...children): Component,
+    dt(props, ...children): Component,
+    em(props, ...children): Component,
+    embed(props, ...children): Component,
+    fieldset(props, ...children): Component,
+    figcaption(props, ...children): Component,
+    figure(props, ...children): Component,
+    footer(props, ...children): Component,
+    form(props, ...children): Component,
+    h1(props, ...children): Component,
+    h2(props, ...children): Component,
+    h3(props, ...children): Component,
+    h4(props, ...children): Component,
+    h5(props, ...children): Component,
+    h6(props, ...children): Component,
+    head(props, ...children): Component,
+    header(props, ...children): Component,
+    hgroup(props, ...children): Component,
+    hr(props, ...children): Component,
+    html(props, ...children): Component,
+    i(props, ...children): Component,
+    iframe(props, ...children): Component,
+    img(props, ...children): Component,
+    input(props, ...children): Component,
+    ins(props, ...children): Component,
+    kbd(props, ...children): Component,
+    keygen(props, ...children): Component,
+    label(props, ...children): Component,
+    legend(props, ...children): Component,
+    li(props, ...children): Component,
+    link(props, ...children): Component,
+    main(props, ...children): Component,
+    map(props, ...children): Component,
+    mark(props, ...children): Component,
+    menu(props, ...children): Component,
+    menuitem(props, ...children): Component,
+    meta(props, ...children): Component,
+    meter(props, ...children): Component,
+    nav(props, ...children): Component,
+    noindex(props, ...children): Component,
+    noscript(props, ...children): Component,
+    object(props, ...children): Component,
+    ol(props, ...children): Component,
+    optgroup(props, ...children): Component,
+    option(props, ...children): Component,
+    output(props, ...children): Component,
+    p(props, ...children): Component,
+    param(props, ...children): Component,
+    picture(props, ...children): Component,
+    pre(props, ...children): Component,
+    progress(props, ...children): Component,
+    q(props, ...children): Component,
+    rp(props, ...children): Component,
+    rt(props, ...children): Component,
+    ruby(props, ...children): Component,
+    s(props, ...children): Component,
+    samp(props, ...children): Component,
+    slot(props, ...children): Component,
+    script(props, ...children): Component,
+    section(props, ...children): Component,
+    select(props, ...children): Component,
+    small(props, ...children): Component,
+    source(props, ...children): Component,
+    span(props, ...children): Component,
+    strong(props, ...children): Component,
+    style(props, ...children): Component,
+    sub(props, ...children): Component,
+    summary(props, ...children): Component,
+    sup(props, ...children): Component,
+    table(props, ...children): Component,
+    template(props, ...children): Component,
+    tbody(props, ...children): Component,
+    td(props, ...children): Component,
+    textarea(props, ...children): Component,
+    tfoot(props, ...children): Component,
+    th(props, ...children): Component,
+    thead(props, ...children): Component,
+    time(props, ...children): Component,
+    tr(props, ...children): Component,
+    track(props, ...children): Component,
+    u(props, ...children): Component,
+    ul(props, ...children): Component,
+    var(props, ...children): Component,
+    video(props, ...children): Component,
+    wbr(props, ...children): Component,
+    webview(props, ...children): Component
+};
 
-// forEach.apply(config): DComponent
-const forEachApplyMethod: MethodSig = {
-  params: [anyType],
-  returns: dcomponentType,
-}
+text = {
+    apply(content): Component
+};
 
-// fc.apply(args): (ctx) => unknown
-const fcApplyMethod: MethodSig = {
-  params: [], // args 数组
-  rest: anyType,
-  returns: dcomponentType,
-}
+html = {
+    apply(content): Component
+};
 
-// storage ref 方法
-const storageRefMethod: MethodSig = {
-  params: [anyType],
-  returns: anyType,
-}
+fc = {
+    apply(...args): Component
+};
 
-// storage ref 对象类型
-const refType: TypeInfo = {
-  kind: 'object',
-  name: 'Ref',
-  methods: new Map([
-    ['get', [{ params: [], returns: anyType } as MethodSig]],
-    ['set', [storageRefMethod]],
-  ]),
-}
+forEach = {
+    apply(config): Component
+};
 
-// storage 类型
-const storageType: TypeInfo = {
-  kind: 'object',
-  name: 'storage',
-  methods: new Map([
-    ['ref', [{ params: [anyType], returns: refType } as MethodSig]],
-  ]),
-}
+config = {
+    globals = {
+        dom = dom,
+        text = text,
+        html = html,
+        fc = fc,
+        forEach = forEach
+    }
+};
 
-// js 类型（简化）
-const jsType: TypeInfo = {
-  kind: 'object',
-  name: 'js',
-  methods: new Map([
-    ['new', [{ params: [], rest: anyType, returns: anyType } as MethodSig]],
-    ['send', [{ params: [anyType, anyType], rest: anyType, returns: anyType } as MethodSig]],
-  ]),
-}
-
-// ObjectValue 类型
-const objectValueType: TypeInfo = {
-  kind: 'object',
-  name: 'ObjectValue',
-  methods: new Map([
-    ['metaOf', [{ params: [anyType], returns: anyType } as MethodSig]],
-  ]),
-}
-
-// createSignal 类型
-const createSignalType: TypeInfo = {
-  kind: 'object',
-  name: 'createSignal',
-  methods: new Map([
-    ['apply', [{ params: [anyType], returns: anyType } as MethodSig]],
-  ]),
-}
-
-// memo 类型
-const memoType: TypeInfo = {
-  kind: 'object',
-  name: 'memo',
-  methods: new Map([
-    ['apply', [{ params: [anyType], returns: anyType } as MethodSig]],
-  ]),
-}
-
-// addEffect 类型
-const addEffectType: TypeInfo = {
-  kind: 'function',
-}
-
-// createContext 类型
-const createContextType: TypeInfo = {
-  kind: 'function',
-}
-
-// dom 类型：每个标签名都是一个方法，签名即 (props?, ...children: DComponent[]) => DComponent
-// 标签名来自 wy-dom-helper 的 domTagNames（此处静态内联，避免拖入带 window 副作用的运行时包）
-const domTagNames = [
-  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big',
-  'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist',
-  'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption',
-  'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup',
-  'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'keygen', 'label', 'legend', 'li',
-  'link', 'main', 'map', 'mark', 'menu', 'menuitem', 'meta', 'meter', 'nav', 'noindex', 'noscript', 'object',
-  'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'pre', 'progress', 'q', 'rp', 'rt',
-  'ruby', 's', 'samp', 'slot', 'script', 'section', 'select', 'small', 'source', 'span', 'strong', 'style',
-  'sub', 'summary', 'sup', 'table', 'template', 'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'time',
-  'tr', 'track', 'u', 'ul', 'var', 'video', 'wbr', 'webview',
-] as const
-
-// dom.<tag> 的共享签名：(props?, ...children[]) => DComponent
-const domMethods = new Map<string, MethodSig[]>()
-for (const tag of domTagNames) {
-  domMethods.set(tag, [
-    { params: [anyType], rest: anyType, returns: dcomponentType },
-  ])
-}
-
-// dom 类型：dom div {...} 等消息调用即对应标签方法
-const domType: TypeInfo = {
-  kind: 'object',
-  name: 'dom',
-  methods: domMethods,
-}
-
-// forEach 类型
-const forEachType: TypeInfo = {
-  kind: 'object',
-  name: 'forEach',
-  methods: new Map([
-    ['apply', [forEachApplyMethod]],
-  ]),
-}
-
-// fc 类型
-const fcType: TypeInfo = {
-  kind: 'object',
-  name: 'fc',
-  methods: new Map([
-    ['apply', [fcApplyMethod]],
-  ]),
-}
-
-// text 类型
-const textType: TypeInfo = {
-  kind: 'object',
-  name: 'text',
-  methods: new Map([
-    ['apply', [textApplyMethod]],
-  ]),
-}
-
-// html 类型
-const htmlType: TypeInfo = {
-  kind: 'object',
-  name: 'html',
-  methods: new Map([
-    ['apply', [textApplyMethod]],
-  ]),
-}
+config
+`
 
 /**
- * 创建桥接对象的类型映射。
- * 返回 Map<string, TypeInfo>，可传给 createObjectOrientedCServices。
+ * 创建桥接对象的类型映射（Route A loader，复用 language 的 collectConfigGlobals 管线）。
+ * 返回 Map<string, TypeInfo>，可传给 createObjectOrientedCServices / createTypeCheckAction。
  */
-export function createBridgeGlobalsTypes(): Map<string, TypeInfo> {
-  const types = new Map<string, TypeInfo>()
-
-  // 基础桥接
-  types.set('storage', storageType)
-  types.set('js', jsType)
-  types.set('ObjectValue', objectValueType)
-  types.set('createSignal', createSignalType)
-  types.set('memo', memoType)
-  types.set('addEffect', addEffectType)
-  types.set('createContext', createContextType)
-
-  // 视图桥接
-  types.set('dom', domType)
-  types.set('text', textType)
-  types.set('html', htmlType)
-  types.set('fc', fcType)
-  types.set('forEach', forEachType)
-
-  // 数组（globalThis.Array）
-  const arrayType: TypeInfo = {
-    kind: 'object',
-    name: 'Array',
-    methods: new Map([
-      ['of', [{ params: [], rest: anyType, returns: anyType } as MethodSig]],
-      ['at', [{ params: [numberType], returns: anyType } as MethodSig]],
-      ['forEach', [{ params: [anyType], returns: anyType } as MethodSig]],
-      ['filter', [{ params: [anyType], returns: anyType } as MethodSig]],
-      ['map', [{ params: [anyType], returns: anyType } as MethodSig]],
-      ['length', [{ params: [], returns: numberType } as MethodSig]],
-      ['toSpliced', [{ params: [numberType, numberType], rest: anyType, returns: anyType } as MethodSig]],
-    ]),
-  }
-  types.set('Array', arrayType)
-
-  // console（简化）
-  const consoleType: TypeInfo = {
-    kind: 'object',
-    name: 'console',
-    methods: new Map([
-      ['log', [{ params: [], rest: anyType, returns: anyType } as MethodSig]],
-    ]),
-  }
-  types.set('console', consoleType)
-
-  // Date
-  const dateType: TypeInfo = {
-    kind: 'object',
-    name: 'Date',
-    methods: new Map([
-      ['now', [{ params: [], returns: numberType } as MethodSig]],
-    ]),
-  }
-  types.set('Date', dateType)
-
-  return types
+export function createBridgeGlobalsTypes(
+  services?: LangiumCoreServices,
+): Map<string, TypeInfo> | undefined {
+  return loadGlobalsTypesFromSource(bridgeTypesSource, services)
 }
-
-/**
- * 常用的全局类型（数字、字符串等内置类型的方法）。
- * 这些已经内置在 TypeEnv 的 getBuiltinMethods 中，这里只是导出供参考。
- */
-export const builtinTypeNames = ['number', 'string', 'boolean', 'nil'] as const

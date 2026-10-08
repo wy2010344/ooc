@@ -4,12 +4,14 @@
 // 运行期 addNode 只收集不挂载，改界面一律走信号。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { ObjectValue, sendMessage } from 'object-oriented-c-language'
 import { createRoot } from 'mve-dom'
 import type { StateHolderWithNode } from 'mve-core'
 import { createEngine, formatValue } from '../src/lib/engine.js'
+import type { LibModules } from '../src/lib/lib-modules.js'
 import { PREVIEW_DEMO, TODO_DEMO } from '../src/demos/index.js'
-import { LOOP_LIB_SOURCE } from '../src/demos/loop-lib.js'
 import { DEMO_NOTES } from '../src/demos/index.js'
 import { runNote } from '../src/lib/run.js'
 import { dom, text, fc } from 'ooc-mve-bridge'
@@ -49,6 +51,27 @@ const notes = () => [
   },
 ]
 
+/**
+ * 基础库模块镜像（对应浏览器端 getLibModules 的 import.meta.glob 结果）：
+ * Node 测试里直接读 base / ooc-mve-bridge 的真实源码，键 = basename 全名（含扩展名）。
+ */
+const baseLib = (): LibModules => {
+  const modules: LibModules = {}
+  for (const dir of [
+    join(import.meta.dirname, '..', '..', '..', 'base', 'src'),
+    join(import.meta.dirname, '..', '..', '..', 'ooc-mve-bridge', 'src'),
+  ]) {
+    for (const file of ['loop.ooc', 'index.ooc', 'config.ooc']) {
+      try {
+        modules[file] = readFileSync(join(dir, file), 'utf-8')
+      } catch {
+        // 目录里没有该文件就跳过
+      }
+    }
+  }
+  return modules
+}
+
 test('createEngine 能解释并类型检查', async () => {
   const engine = createEngine(notes)
   const r = await runNote(
@@ -80,6 +103,36 @@ test('#import 跨笔记可见', async () => {
     "lib = #import 'lib.ooc';\nlib run 2 3\n",
   )
   assert.equal(r.output, '5', `实际输出: ${r.output} 错误: ${r.error}`)
+})
+
+test('Route A：桥接类型注入后 dom/text/storage 类型检查干净', async () => {
+  const engine = createEngine(notes)
+  const r = await runNote(
+    engine,
+    '桥接',
+    // dom 标签带 props + children；text/storage 直发消息
+    "dom div { className: 'box' } (text apply 'hi');\n" +
+      "x = storage ref 1; x / get;\n" +
+      'list = createSignal apply (Array of); list get\n',
+  )
+  assert.equal(r.error, null, r.error ?? '')
+  assert.deepEqual(
+    r.diagnostics,
+    [],
+    `桥接全局应被类型化，实际: ${JSON.stringify(r.diagnostics)}`,
+  )
+})
+
+test('Route A：未知标签宽泛派发（JS Proxy 暴露方法，无需 methodNotFound）', async () => {
+  const engine = createEngine(notes)
+  // 非枚举标签运行时可调（Proxy 动态创建），类型上静默退化为 any
+  const r = await runNote(
+    engine,
+    '宽泛标签',
+    "dom customEl { class: 1 } (text apply 'hi');\n",
+  )
+  assert.equal(r.error, null, r.error ?? '')
+  assert.deepEqual(r.diagnostics, [], `应有 0 类型诊断，实际: ${JSON.stringify(r.diagnostics)}`)
 })
 
 test('类型诊断捕获类型不匹配', async () => {
@@ -379,9 +432,8 @@ test('ObjectValue 反射：OOC 定义值可读元信息', async () => {
 })
 
 test('宿主.ooc demo：storage ref + loop repeat 可跑（loop 从 base 包 #import）', async () => {
-  // 宿主 demo 现在 #import 'loop'，引擎虚拟 FS 需播种标准库 loop.ooc（与 base 一致）
-  const hostNotes = () => [...notes(), { name: 'loop.ooc', source: LOOP_LIB_SOURCE }]
-  const engine = createEngine(hostNotes)
+  // 宿主 demo 现在 #import '@base/loop'，引擎虚拟 FS 用 libModules 提供 base 标准库源码
+  const engine = createEngine(notes, baseLib())
   const r = await runNote(engine, '宿主.ooc', DEMO_NOTES.find((d) => d.name === '宿主.ooc')!.source)
   assert.equal(r.error, null, r.error ?? '')
   // loop repeat 10 [x => n set ((n get) + x)]：从 0 起按索引累加 0..9 = 45
@@ -389,7 +441,7 @@ test('宿主.ooc demo：storage ref + loop repeat 可跑（loop 从 base 包 #im
 })
 
 test('跨笔记导入：工具库.ooc 导出对象被 #import 复用', async () => {
-  const engine = createEngine(() => DEMO_NOTES)
+  const engine = createEngine(() => DEMO_NOTES, baseLib())
   const lib = DEMO_NOTES.find((d) => d.name === '工具库.ooc')!
   assert.ok(lib, '工具库.ooc 应存在于播种列表')
   // 先跑工具库本身确认能导出对象

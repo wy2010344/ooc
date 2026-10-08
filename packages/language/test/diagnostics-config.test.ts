@@ -1,5 +1,5 @@
 import { describe, expect, test } from './compat.js'
-import { URI } from 'langium'
+import { EmptyFileSystem, URI } from 'langium'
 import { parseHelper } from 'langium/test'
 import { DiagnosticSeverity } from 'vscode-languageserver-types'
 import type { OocConfig } from 'object-oriented-c-language'
@@ -11,6 +11,8 @@ import {
   codeOfDiagnostic,
   diagnosticData,
   loadOocConfig,
+  executeConfigOoc,
+  proxyCatchAll,
 } from 'object-oriented-c-language'
 
 describe('parseOocJson', () => {
@@ -104,11 +106,10 @@ describe('toOocConfig（从解释器返回值转换）', () => {
     expect(toOocConfig({})).toEqual({})
   })
 
-  test('withDefault 模式：methodNotFound 转发到默认配置', () => {
-    // 模拟 withDefault 包装对象：有 methodNotFound 方法
-    // 真实 OOC 配置：defaults = { typeMismatch = 'warning', noImplicitAny = 'off' }
-    //   w = delegate withDefault { typeMismatch = 'error' } defaults
-    //   { diagnostics = w }
+  test('withDefault 模式：兜底 handler 转发到默认配置', () => {
+    // 模拟 withDefault 包装对象（diagnostics 层面）：
+    // 解释器不再隐式兜底 methodNotFound，宿主对象必须显式包 Proxy 并传 handler
+    // （真实 OOC 配置里的 withDefault 由宿主端 delegate 包成委托包装）。
     const defaults = {
       typeMismatch: 'warning',
       noImplicitAny: 'off',
@@ -116,14 +117,10 @@ describe('toOocConfig（从解释器返回值转换）', () => {
     const spec = {
       typeMismatch: 'error', // 覆盖默认值
     }
-    // 模拟 withDefault 包装对象（diagnostics 层面）
-    const diagnosticsObj = {
-      ...spec,
-      methodNotFound(name: string) {
-        // 转发给 defaults
-        return (defaults as any)[name]
-      },
-    }
+    const diagnosticsObj = proxyCatchAll(
+      { ...spec } as Record<string, unknown>,
+      (name) => (defaults as any)[name],
+    )
     const config = toOocConfig({ diagnostics: diagnosticsObj })
     // typeMismatch 应该是 error（spec 覆盖），noImplicitAny 应该是 off（来自 defaults）
     expect(config.diagnostics).toEqual({
@@ -460,5 +457,29 @@ describe('ConfigAwareDocumentValidator 升降级（LSP 环境，无解释器）'
       (d) => d.message.includes('隐式 any'),
     )
     expect(implicit?.severity).toBe(DiagnosticSeverity.Error)
+  })
+})
+
+describe('executeConfigOoc 占位注入（globals 只列名）', () => {
+  test('globals 引用外部名字时仍能执行并提取 diagnostics', async () => {
+    const services = createObjectOrientedCServices(EmptyFileSystem)
+      .ObjectOrientedC
+    const text =
+      "config = { diagnostics = { typeMismatch = 'error' }, globals = { dom = dom, text = text } };\nconfig"
+    const result = await executeConfigOoc(text, '/proj/config.ooc', services)
+    const cfg = toOocConfig(result)
+    expect(cfg.diagnostics?.typeMismatch).toBe('error')
+  })
+
+  test('无 globals 时行为不变', async () => {
+    const services = createObjectOrientedCServices(EmptyFileSystem)
+      .ObjectOrientedC
+    const result = await executeConfigOoc(
+      "{ diagnostics = { unknownType = 'off' } }",
+      '/proj/config.ooc',
+      services,
+    )
+    const cfg = toOocConfig(result)
+    expect(cfg.diagnostics?.unknownType).toBe('off')
   })
 })

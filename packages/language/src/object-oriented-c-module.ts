@@ -110,7 +110,7 @@ export function createObjectOrientedCServices(
   shared.ServiceRegistry.register(ObjectOrientedC)
   registerValidationChecks(ObjectOrientedC, config)
   if (globalsTypes) {
-    ObjectOrientedC.validation.ObjectOrientedCValidator.setGlobalsTypes(globalsTypes)
+    ObjectOrientedC.validation.ObjectOrientedCValidator.setRegistry(globalsTypes)
   }
   if (!context.connection) {
     // We don't run inside a language server

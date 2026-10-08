@@ -1,0 +1,6 @@
+{
+    "name": "base",
+    "version": "0.0.1",
+    "description": "OOC 标准库：用语言本身实现的可复用工具（loop 等）。",
+    "entry": "index.ooc"
+}

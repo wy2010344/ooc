@@ -1,6 +1,7 @@
 import {
   createInterpretAction,
   createTypeCheckAction,
+  delegate,
   js,
   ObjectValue,
   storage,
@@ -10,6 +11,7 @@ import type { FileSystemProvider, URI } from 'langium'
 import { addEffect, createSignal, memo } from 'wy-helper'
 import { createContext } from 'mve-core'
 import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
+import { buildEngineGlobals } from './host-types.js'
 
 export interface NotebookEntry {
   name: string
@@ -93,8 +95,8 @@ export function createVirtualFs(
 
 /**
  * 宿主桥接。OOC 源码可以直接按名引用这些对象：
- *   storage / js / ObjectValue  —— 语言包内置（ref / throw / new / 反射）。
- *   循环（loop apply/repeat）是 base 包 OOC 实现（#import 'loop'），不再桥接。
+ *   storage / js / delegate / ObjectValue  —— 语言包内置（ref / throw / new / withDefault / 反射）。
+ *   循环（loop apply/repeat）是 base 包 OOC 实现（#import '@base/loop'），不再桥接。
  *   fc / dom / html / text / createContext / forEach  —— 预览渲染（详见 src/lib/preview/）：
  *     组件包装：fc apply [ctx,...]；元素：dom.div 属性对象 子组件...；
  *     动态文本：text apply <字符串或信号 getter>；HTML 片段：html apply ...；
@@ -114,6 +116,8 @@ export function createGlobals() {
   return {
     storage,
     js,
+    // 委托组合桥：delegate withDefault spec defaults...（spec 优先，未知按链查找）
+    delegate,
     // 反射桥接：ObjectValue metaOf x —— 读 OOC 定义值的元信息（构造时烧录，
     // 语言内消息不可见、不可伪造）；非定义值返回 undefined
     ObjectValue,
@@ -141,9 +145,12 @@ export function createEngine(
     { fileSystemProvider: () => fs },
     createGlobals(),
   )
-  // 全局类型不再静态注入：桥接类型由 ooc-mve-bridge 包的 config.ooc 声明，
-  // 虚拟 fs 预加载后 createTypeCheckAction 会按目录收集注入
-  const typeCheck = createTypeCheckAction({ fileSystemProvider: () => fs })
+  // Route A：全局类型由各宿主包自持的 .ooc 类型源合并注入（见 host-types.ts），
+  // 让类型检查看到 dom/createSignal 等桥接对象的真实形状
+  const typeCheck = createTypeCheckAction(
+    { fileSystemProvider: () => fs },
+    buildEngineGlobals(),
+  )
   return { interpret, typeCheck }
 }
 

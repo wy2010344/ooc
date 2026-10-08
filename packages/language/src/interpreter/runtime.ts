@@ -278,22 +278,16 @@ export function objectValue(methods: Method[], scope: Scope) {
             }
           }
         }
-        // guard 重载组末尾兜底已在前方落入，能走到这是单方法 guard 不通过
-        // 或参数数量不匹配：走通用对象方法 / methodNotFound 兜底。
-        // 无继承，不会沿原型链查找上层同名方法。
-        //通用对象方法
+        // guard 重载组末尾兜底已在前方落入，能走到这是单方法 guard 不通过、
+        // 参数数量不匹配，或对象通用方法也不命中：直接抛结构化错误。
+        // 无继承，不会沿原型链查找上层同名方法。兜底由显式 `js proxy` 包的
+        // Proxy 动态派发，此处分派不再隐式兜底。
+        // 通用对象方法
         const fun = objectDefine[name as '&&']
         if (fun) {
           return fun(this, args[0])
         }
-        if (name == 'methodNotFound') {
-          const [methodName, ...methodArgs] = Array.from(args)
-          if (typeof methodName === 'string') {
-            throw new OocMethodNotFoundError(this, methodName, methodArgs)
-          }
-          throw new OocMethodNotFoundError(this, name, Array.from(args))
-        }
-        return sendMessage(this, 'methodNotFound', [name, ...args])
+        throw new OocMethodNotFoundError(this, name, Array.from(args))
       },
     })
   })
@@ -327,16 +321,6 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     //方法
     return fun.apply(o, args)
   }
-  if (value === 'methodNotFound') {
-    // 此处是未知消息的最终兜底：上一次派发已将原消息名放在第一个实参。
-    // 保留它可让宿主准确判断究竟是哪条 OOC 消息未被处理。
-    const [methodName, ...methodArgs] = args
-    if (typeof methodName === 'string') {
-      throw new OocMethodNotFoundError(o, methodName, methodArgs)
-    }
-    //应该绝对不会到达这里
-    throw new OocMethodNotFoundError(o, value, args)
-  }
   if (value in Object(o)) {
     //属性读取与设置
     if (args.length) {
@@ -352,5 +336,7 @@ export function sendMessage(o: any, value: string, args: any[]): any {
   if (obj) {
     return obj(o, args[0])
   }
-  return sendMessage(o, 'methodNotFound', [value, ...args])
+  // 没有兜底：需要拦截未知消息的对象已用 `js proxy` 显式包成 JS Proxy
+  // （get trap 动态转发），到这里就是真的没有接收方了，直接抛结构化错误。
+  throw new OocMethodNotFoundError(o, value, args)
 }

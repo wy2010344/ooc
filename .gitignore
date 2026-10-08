@@ -12,3 +12,7 @@ syntaxes/
 .agents/
 debug-*.mjs
 test-marker.mjs
+.ooc_modules/
+*.d.ts
+*.d.ts.map
+*.js.map

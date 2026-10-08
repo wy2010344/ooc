@@ -47,6 +47,28 @@ export interface OocConfig {
 const EMPTY_OOC_CONFIG: OocConfig = Object.freeze({})
 
 /**
+ * 把项目 globals（config.ooc 收集）合并到宿主注入的注册表之上，作为本次校验
+ * 的有效全局类型。同名时项目 globals 优先（本地形状可覆盖/补充宿主类型）。
+ * 返回 undefined 表示两者都空。
+ */
+export function mergeGlobalsTypes(
+  base: Map<string, TypeInfo> | undefined,
+  overlay: Map<string, TypeInfo> | undefined,
+): Map<string, TypeInfo> | undefined {
+  if (!overlay) {
+    return base
+  }
+  if (!base) {
+    return overlay
+  }
+  const out = new Map(base)
+  for (const [name, type] of overlay) {
+    out.set(name, type)
+  }
+  return out
+}
+
+/**
  * 从 config.ooc 文本收集「globals」成员对象的全局类型，供 LSP / CLI 注入。
  * 语义见 ObjectOrientedCValidator.collectConfigGlobals：
  * config.ooc 最后一条表达式是配置对象，globals 成员列出项目全局对象。
@@ -162,8 +184,12 @@ function extractOocValue(obj: Record<string, unknown>, key: string): unknown {
 
 /**
  * 从 OOC 对象中提取诊断级别键值对。
- * 遍历所有可能的 diagnostic code，通过消息发送获取值，
- * 支持 withDefault 模式（methodNotFound 转发到默认配置）。
+ * 遍历所有可能的 diagnostic code，通过消息发送获取值。
+ *
+ * 为什么用对象而不是函数：走真实 OOC 对象语义（成员绑定、鸭子类型、this
+ * 指向对象本身），且支持 withDefault 模式——OOC 配置写成 `{ diagnostics = w }`，
+ * 其中 w = js proxy 对象 (name, ...args => 转发)，兜底 handler 把未配置的
+ * 诊断码转发到默认配置对象。
  */
 function extractDiagLevels(
   obj: Record<string, unknown>,
@@ -171,7 +197,7 @@ function extractDiagLevels(
   const result: Record<string, DiagLevel> = {}
 
   // 遍历所有可能的 diagnostic code，通过消息发送获取值
-  // 这样可以触发 methodNotFound 转发，支持 withDefault 模式
+  // 这样可以触发兜底 Proxy 转发（withDefault 包装的 handler）
   for (const code of Object.values(DIAGNOSTIC_CODES)) {
     try {
       const raw = sendMessage(obj, code, [])
@@ -182,7 +208,7 @@ function extractDiagLevels(
         }
       }
     } catch {
-      // 消息发送失败（如 methodNotFound 抛出异常），跳过
+      // 消息发送失败（如兜底 handler 转发时抛异常），跳过
     }
   }
 
@@ -361,9 +387,28 @@ export async function executeConfigOoc(
   }
   const noop: (name: string, basePath?: string) => Promise<any> =
     async () => undefined
+  // 兼容「globals 只列名」的声明式 config.ooc：globals 成员引用的名字在本文件
+  // 没有定义（如 `dom = dom`，类型来自宿主注册表），解释器执行会因找不到定义
+  // 抛错。这里先静态收集 globals 名字，注入占位对象保证能执行出 diagnostics。
+  const placeholders: Record<string, unknown> = {}
+  try {
+    const validator = (
+      services.validation as unknown as {
+        ObjectOrientedCValidator: ObjectOrientedCValidator
+      }
+    ).ObjectOrientedCValidator
+    const globals = validator.collectConfigGlobals(model)
+    if (globals) {
+      for (const name of globals.keys()) {
+        placeholders[name] = {}
+      }
+    }
+  } catch {
+    // 静态收集失败时退化为无占位（保持旧行为）
+  }
   return interpret(
     model,
-    withGlobals(undefined, {}),
+    withGlobals(undefined, placeholders),
     filePath,
     interpretAction ?? noop,
   )
@@ -471,14 +516,14 @@ export class ConfigAwareDocumentValidator extends DefaultDocumentValidator {
     })
   }
 
-  /** 把 config.ooc 收集到的全局类型注入校验器（无 globals 时清空，避免串目录） */
+  /** 把 config.ooc 收集到的全局类型合并到注册表之上作为有效全局（注册表不被覆盖） */
   private applyGlobals(globals: Map<string, TypeInfo> | undefined): void {
     const validator = (
       this.services.validation as unknown as {
         ObjectOrientedCValidator: ObjectOrientedCValidator
       }
     ).ObjectOrientedCValidator
-    validator.setGlobalsTypes(globals)
+    validator.applyGlobals(globals)
   }
 
   /** 从文档目录向上找第一份 config.ooc，收集其 globals 类型（内容 hash 缓存） */

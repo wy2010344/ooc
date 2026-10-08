@@ -1,6 +1,5 @@
-// 委托组合：withDefault（base 包 delegate）——无原型继承下的复用方式
-// spec 自有消息优先，未知消息按 defaults 顺序查找（methodNotFound 转发）。
-delegate = #import 'delegate';
+// 委托组合：withDefault（宿主端 delegate 全局）——无原型继承下的复用方式
+// spec 自有消息优先，未知消息按 defaults 顺序查找（兜底随之转发）。
 
 // 未知消息按 defaults 找：speak/bark 在 defaults 上，fly 是 spec 自有的
 defaults = { speak() => 'voice', bark() => 'wang' };

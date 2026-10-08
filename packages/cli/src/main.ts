@@ -3,13 +3,16 @@ type OOCModel = Model
 import {
   createInterpretAction,
   createObjectOrientedCServices,
+  createPackageAwareFileSystem,
   createTypeCheckAction,
+  createDirPackageResolver,
   ObjectOrientedCLanguageMetaData,
 } from 'object-oriented-c-language'
 import chalk from 'chalk'
 import { Command } from 'commander'
 import { extractAstNode } from './util.js'
 import { generateJavaScript } from './generator.js'
+import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
 import * as url from 'node:url'
 import * as fs from 'node:fs/promises'
@@ -19,6 +22,21 @@ const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 
 const packagePath = path.resolve(__dirname, '..', 'package.json')
 const packageContent = await fs.readFile(packagePath, 'utf-8')
+
+/**
+ * 包感知的 Langium 上下文：把 /ooc-pkg/<name>/<file> 重定向到 <cwd>/.ooc_modules/<name>/<file>，
+ * 让 interpret / type-check 能解析 @name 包引用，其余文件仍走 NodeFileSystem。
+ */
+function pkgContext() {
+  const modulesDir = path.resolve(process.cwd(), MODULES_DIR_NAME)
+  return {
+    fileSystemProvider: () =>
+      createPackageAwareFileSystem(
+        NodeFileSystem.fileSystemProvider(),
+        createDirPackageResolver(modulesDir),
+      ),
+  }
+}
 
 const DEFAULT_CONFIG = `// config.ooc — OOC 项目配置文件
 // 这是一个真正的 OOC 文件，由解释器执行，最后一条表达式返回配置对象。
@@ -74,11 +92,11 @@ export type GenerateOptions = {
   destination?: string
 }
 
-export const interpretAction =
-  createInterpretAction(NodeFileSystem).interpretPath
+export const interpretAction = (fileName: string) =>
+  createInterpretAction(pkgContext()).interpretPath(fileName)
 
 export const typeCheckAction = async (fileName: string): Promise<void> => {
-  const diagnostics = await createTypeCheckAction(NodeFileSystem).checkPath(
+  const diagnostics = await createTypeCheckAction(pkgContext()).checkPath(
     fileName,
   )
   if (diagnostics.length === 0) {
@@ -115,6 +133,18 @@ export async function initAction(): Promise<void> {
   console.log(chalk.green(`Created config.ooc at ${target}`))
   console.log('Edit it to configure diagnostic levels for your project.')
 }
+
+export async function installAction(source: string): Promise<void> {
+  const modulesRoot = path.resolve(process.cwd(), MODULES_DIR_NAME)
+  const result = await installPackage(source, modulesRoot)
+  console.log(
+    chalk.green(
+      `Installed package '${result.name}' (${result.fileCount} files) → ${path.relative(process.cwd(), result.destDir)}`,
+    ),
+  )
+}
+
+export { installPackage, readPackageManifest } from './install.js'
 
 export default function (): void {
   const program = new Command()
@@ -157,6 +187,14 @@ export default function (): void {
     .command('init')
     .description('create a config.ooc file in the current directory')
     .action(initAction)
+
+  program
+    .command('install')
+    .argument('<source>', 'local package root directory or git repository URL')
+    .description(
+      `install an OOC package into ${MODULES_DIR_NAME}/<name>/ (resolvable via #import '@name')`,
+    )
+    .action(installAction)
 
   program.parse(process.argv)
 }

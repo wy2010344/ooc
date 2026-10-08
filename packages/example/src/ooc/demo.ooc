@@ -1,5 +1,5 @@
 // OOC 综合示例：覆盖所有语言特性
-// 类型、对象、泛型、lambda、guard、typedef 继承、导入、JS 桥接等
+// 类型、对象、泛型、lambda、guard、导入、JS 桥接等
 
 // ===== 1. 可区分联合 + guard 收窄 =====
 Circle #type { kind(): 'circle', radius: number };
@@ -26,25 +26,13 @@ intBox: Box<number> = { get() { 42 }, set(x) { x } };
 // 实例化类型不符会告警（取消注释看波浪线）
 // bad: Box<number> = { get() { 'not a number' } }
 
-// ===== 3. typedef 继承 =====
+// ===== 3. typedef 组合（无继承：类型交集 & 合并形状） =====
 Animal #type { speak(): string };
-Dog #type { ...Animal, bark(): string };
+Dog #type { speak(): string, bark(): string };
 
-// 联合父类型继承
-Labeled #type { ...Circle | Square, label(): string };
-describe = {
-    calc(s: Labeled) {
-        #guard (s kind) == 'circle';
-        'circle ' + (s label) + ' r=' + (s radius)
-    },
-    calc(s: Labeled) {
-        #guard (s kind) == 'square';
-        'square ' + (s label) + ' s=' + (s side)
-    },
-    calc(s: Labeled) {
-        nil
-    }
-};
+// 类型交集：同一值同时满足两个形状
+Named #type { label(): string };
+tagged: Animal & Named = { speak() { 'wang' }, label() { 'round' } };
 
 // ===== 4. 对象方法与 lambda =====
 hello = { greet(name) { 'Hello, ' + name + '!' } };
@@ -76,7 +64,7 @@ result = 'hello' slice 0 4 | s -> s + ' world';
     doubledByModule = (math double 21),
     counter = (counter get),
     dog = ({ speak() { 'wang' }, bark() { 'bow' } }),
-    labeledCircle = (describe calc { kind() { 'circle' }, radius() { 3 }, label() { 'round' } }),
+    labeledTag = (tagged label),
     year = year,
     piped = result
 }

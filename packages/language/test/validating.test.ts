@@ -190,20 +190,6 @@ describe('Validating', () => {
       ''
     expect(output).toContain('相邻')
   })
-
-  test('类/实例方法相邻重载合法', async () => {
-    document = await parse(`
-            C = #classDef {} {
-                fun(a) { a },
-                fun(a, b) { a }
-            };
-        `)
-
-    expect(
-      checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).toHaveLength(0)
-  })
 })
 
 function checkDocumentValid(document: LangiumDocument): string | undefined {

@@ -22,6 +22,21 @@ math run 2 3    // 5
 
 `#import` 使用相对路径。运行含模块的文件请用 `interpretPath` 配合 `NodeFileSystem`。
 
+## 包引用（`@name`）
+
+已安装的包通过 `.ooc_modules/<name>/` 目录解析（CLI `ooc install <目录|git-url>` 安装到该项目 `.ooc_modules/`）。引用时用 `@包名` 前缀：
+
+```ooc
+// base 是内置标准库包：'@base' → index.ooc 聚合导出；'@base/loop' → 子模块
+loop = #import '@base/loop';
+strings = #import '@base';
+```
+
+- `'@base'` 解析到包的入口（`ooc.json` 的 `entry` 字段，默认 `index.ooc`）
+- `'@base/loop'` 解析到包的子模块 `loop.ooc`
+- 包引用解析为虚拟路径 `/ooc-pkg/<name>/<file>`，由包感知的 FileSystemProvider 重定向到真实 `.ooc_modules` 目录
+- 相对路径（`#import './loop'`、`#import 'loop'`）仍是默认风格，优先级低于 `/ooc-pkg` 包路径
+
 ## 类型的导入与导出
 
 模块里声明的 `#type` 自动导出，导入方可以选择性地引入需要的类型。

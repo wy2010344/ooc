@@ -1,5 +1,5 @@
 import './style.css'
-import { createInterpretAction, js, storage, sendMessage } from 'object-oriented-c-language'
+import { createInterpretAction, delegate, js, storage, sendMessage } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
 import { createContext } from 'mve-core'
 import { createSignal, memo, addEffect } from 'wy-helper'
@@ -8,7 +8,9 @@ import { createRoot } from 'mve-dom'
 
 // #import 模块：vite 的 `?raw` eager 预加载所有 .ooc 源码进内存，
 // 供解释器在浏览器里按路径递归解析执行。
-// 同时加载 base 包源码（delegate/loop 等语言标准库），#import 可直接引用。
+// 同时加载 base 包源码（loop 等语言标准库），#import '@base/loop' 包引用
+// 会解析到 /ooc-pkg/base/loop.ooc，其 basename 与内存键一致，自动命中。
+// 委托组合由宿主端 delegate 全局提供（withDefault 需宿主原语）。
 const rawModules = import.meta.glob(
   ['./ooc/*.ooc', '../../base/src/*.ooc'],
   {
@@ -66,12 +68,13 @@ const fileSystemProvider: FileSystemProvider = {
   },
 }
 
-// 宿主桥接对象：storage/js、视图组件（dom/text/fc/forEach）、响应式信号（createSignal/memo/addEffect）
+// 宿主桥接对象：storage/js/delegate、视图组件（dom/text/fc/forEach）、响应式信号（createSignal/memo/addEffect）
 const interpret = createInterpretAction(
   { fileSystemProvider: () => fileSystemProvider },
   {
     storage,
     js,
+    delegate,
     fc,
     createContext,
     dom,

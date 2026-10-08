@@ -12,13 +12,22 @@
         "out",
         "src"
     ],
+    "main": "./out/main.js",
+    "module": "./out/main.js",
+    "exports": {
+        ".": {
+            "types": "./out/main.d.ts",
+            "default": "./out/main.js"
+        }
+    },
     "bin": {
         "ooc": "./bin/cli.js"
     },
     "scripts": {
         "clean": "shx rm -fr *.tsbuildinfo out",
         "build": "echo 'No build step'",
-        "build:clean": "npm run clean && npm run build"
+        "build:clean": "npm run clean && npm run build",
+        "test": "tsc -b tsconfig.test.json && node --import ./test/preload-batch.mjs --test \"out/**/*.test.js\""
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
