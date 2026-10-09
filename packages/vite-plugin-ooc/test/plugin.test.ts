@@ -6,10 +6,11 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { oocPlugin, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
-import { modelToTs } from 'object-oriented-c-cli'
-import { createObjectOrientedCServices } from 'object-oriented-c-language'
+import { modelToTs, OOC_RUNTIME_MODULE } from 'object-oriented-c-cli'
+import { ObjectValue, createObjectOrientedCServices } from 'object-oriented-c-language'
 import { URI } from 'langium'
 import { NodeFileSystem } from 'langium/node'
+import * as ts from 'typescript'
 
 const plugin = oocPlugin()
 const RESOLVED_RUNTIME = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
@@ -131,5 +132,33 @@ test('非 .ooc/.runtime id 不打扰：resolveId/load 返回 undefined', () => {
   }
   if (load.call(ctx, helperPath) !== undefined) {
     throw new Error('.ts 文件不应被本插件 load')
+  }
+})
+
+test('反射契约：编译产物 __createObject 的对象可被 ObjectValue.metaOf 读取（call=事件、bind=常量）', async () => {
+  // 把共享 runtime 模板转成 JS（同 vite-plugin 的做法），run 一次 __createObject
+  const js = ts
+    .transpileModule(OOC_RUNTIME_MODULE, {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+    })
+    .outputText
+  const mod: any = await import(
+    'data:text/javascript;base64,' + Buffer.from(js).toString('base64')
+  )
+  const obj = mod.__createObject([
+    { type: 'call', name: 'onClick', fn: (e: any) => e + 1, arity: 1, rest: false },
+    { type: 'bind', name: 'className', value: 'btn' },
+  ])
+  const meta = ObjectValue.metaOf(obj)
+  if (!meta || Object.prototype.toString.call(meta) !== '[object Map]') {
+    throw new Error(`编译产物对象应携带可读元信息，实际 ${meta}`)
+  }
+  const onClick = meta.get('onClick')?.[0]
+  const className = meta.get('className')?.[0]
+  if (onClick?.type !== 'call') throw new Error('onClick 应反射为 call（事件回调）')
+  if (className?.type !== 'bind') throw new Error('className 应反射为 bind（常量）')
+  // 空对象也识别为 OOC 定义值（{} 有元信息）
+  if (!ObjectValue.metaOf(mod.__createObject([]))) {
+    throw new Error('空对象 {} 也应带元信息')
   }
 })

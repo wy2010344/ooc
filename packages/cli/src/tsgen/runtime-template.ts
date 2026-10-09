@@ -41,7 +41,12 @@ export type OOCEntry = {
   arity?: number
   rest?: boolean
 }
+// 反射元信息键：与解释器（object-oriented-c-language 的 OOC_META）同源——
+// 全局符号注册表 Symbol.for 让编译产物与宿主桥接层（如 ObjectValue.metaOf）
+// 读到同一份元信息，宿主据此区分事件回调（call）与常量绑定（bind）。
+export const OOC_META: unique symbol = Symbol.for('ooc:meta')
 export const OOC_EMPTY_OBJECT = {}
+Object.defineProperty(OOC_EMPTY_OBJECT, OOC_META, { enumerable: false, value: new Map() })
 export function __send(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
   const fun = o?.[value]
@@ -65,6 +70,9 @@ export function __createObject(entries: OOCEntry[]): any {
     if (!list) groups.set(e.name, (list = []))
     list.push(e)
   }
+  // 与解释器 objectValue 一致：把定义表当作反射元信息烧录（不可枚举），
+  // 宿主/桥接层可经 ObjectValue.metaOf 判断类型（call=事件回调、bind=常量）
+  Object.defineProperty(obj, OOC_META, { enumerable: false, value: groups })
   groups.forEach((methods, name) => {
     Object.defineProperty(obj, name, {
       enumerable: true,

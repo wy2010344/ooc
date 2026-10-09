@@ -28,7 +28,7 @@ const EMPTY_OBJECT: Record<string, unknown> = {}
  * OOC 定义对象并读取反射信息。Symbol 键不进 Object.keys/for...in，消息查找按
  * 字符串消息名也不会命中它——元信息对语言内发消息不可见，只能经桥接显式读取。
  */
-export const OOC_META = Symbol('ooc:meta')
+export const OOC_META = Symbol.for('ooc:meta')
 
 /** 对象元信息：只含本层定义，无继承。
  *  Map 键是消息名，值是同名定义（bind/mutable/call，含 guard 重载）的完整列表——
