@@ -17,6 +17,7 @@
     "exports": {
         ".": {
             "types": "./out/main.d.ts",
+            "development": "./src/main.ts",
             "default": "./out/main.js"
         }
     },

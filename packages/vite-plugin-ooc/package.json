@@ -3,11 +3,16 @@
     "description": "OOC 一等源码模块的 vite 插件：直接 import '*.ooc'，.ooc 内可导入 .ts/.ooc —— 像 .vue SFC 一样由打包器在内存 transform，无磁盘中间产物",
     "version": "0.0.1",
     "type": "module",
+    "files": [
+        "out",
+        "src"
+    ],
     "main": "./out/index.js",
     "module": "./out/index.js",
     "exports": {
         ".": {
             "types": "./out/index.d.ts",
+            "development": "./src/index.ts",
             "default": "./out/index.js"
         }
     },
