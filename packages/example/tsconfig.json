@@ -15,8 +15,8 @@
     "noEmit": true,
 
     /* Linting */
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    // noUnusedLocals/noUnusedParameters 对 ooc build 生成的 .ts 产物误报
+    // （OOC 方法可合法忽略参数，如 calc(s) { nil }），生成代码由编译器保证严格正确。
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },

@@ -6,15 +6,15 @@
     "type": "module",
     "scripts": {
         "ooc:install": "node ../cli/bin/cli.js install ../base/src",
-        "predev": "npm run ooc:install",
-        "prebuild": "npm run ooc:install",
+        "ooc:build": "node ../cli/bin/cli.js build src/ooc/app.ooc -o src/ooc-gen",
+        "predev": "npm run ooc:install && npm run ooc:build",
+        "prebuild": "npm run ooc:install && npm run ooc:build",
         "dev": "vite",
         "build": "tsc && vite build",
         "preview": "vite preview"
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
-        "langium": "~4.2.1",
         "mve-core": "*",
         "mve-dom": "*",
         "ooc-mve-bridge": "*",

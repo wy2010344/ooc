@@ -3,8 +3,11 @@
 // 宿主无关（storage/js/dom 等 globals 由 run 入参注入），产物自包含可被 tsc 检查。
 
 // 注意：本模板是字符串，内部不能出现未转义的反引号与模板插值 ${。
-export const OOC_RUNTIME_SNIPPET = String.raw`// ---- OOC 运行时辅助（与解释器语义对齐，宿主无关）----
-const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
+
+// 共享 runtime 模块源码：给定义加 export，作为项目构建（ooc build）的 _ooc_runtime.ts。
+// 函数体与内联版同一处维护，避免复制两份漂移。
+export const OOC_RUNTIME_MODULE = String.raw`// ---- OOC 运行时辅助（与解释器语义对齐，宿主无关）----
+export const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
   '+': (a, b) => a + b,
   '-': (a, b) => a - b,
   '*': (a, b) => a * b,
@@ -15,7 +18,7 @@ const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
   '>=': (a, b) => a >= b,
   '<=': (a, b) => a <= b,
 }
-const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
+export const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
   '==': (a: any, v: any) => a == v,
   '!=': (a: any, v: any) => a != v,
   '!!': (a: any) => Boolean(a),
@@ -29,7 +32,7 @@ const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
     : a && typeof a.has == 'function' ? a.has(v)
     : a === v,
 }
-type OOCEntry = {
+export type OOCEntry = {
   type: 'bind' | 'mutable' | 'call'
   name: string
   value?: any
@@ -38,8 +41,8 @@ type OOCEntry = {
   arity?: number
   rest?: boolean
 }
-const OOC_EMPTY_OBJECT = {}
-function __send(o: any, value: string, args: any[]): any {
+export const OOC_EMPTY_OBJECT = {}
+export function __send(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
   const fun = o?.[value]
   if (typeof fun == 'function') return fun.apply(o, args)
@@ -53,7 +56,7 @@ function __send(o: any, value: string, args: any[]): any {
   if (obj) return obj(o, args[0])
   throw new Error('OOC 方法未找到: ' + String(o) + ' . ' + value + '(' + args.map((a) => String(a)).join(', ') + ')')
 }
-function __createObject(entries: OOCEntry[]): any {
+export function __createObject(entries: OOCEntry[]): any {
   if (entries.length === 0) return OOC_EMPTY_OBJECT
   const obj: Record<string, unknown> = {}
   const groups = new Map<string, OOCEntry[]>()
@@ -66,7 +69,7 @@ function __createObject(entries: OOCEntry[]): any {
     Object.defineProperty(obj, name, {
       enumerable: true,
       value() {
-        const args = arguments
+        const args = Array.from(arguments)
         let lastCallIndex = -1
         let hasGuardBranch = false
         let callCount = 0
@@ -115,3 +118,9 @@ function __createObject(entries: OOCEntry[]): any {
   return obj
 }
 `
+
+// 内联模板：同一份定义的去 export 版本（单文件 compile 自包含产物用）。
+export const OOC_RUNTIME_SNIPPET = OOC_RUNTIME_MODULE
+  .replace(/^export const /gm, 'const ')
+  .replace(/^export type /gm, 'type ')
+  .replace(/^export function /gm, 'function ')

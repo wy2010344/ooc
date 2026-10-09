@@ -16,6 +16,7 @@ import { Command } from 'commander'
 import { extractAstNode } from './util.js'
 import { compileToTs } from './generator.js'
 import type { CompileOptions } from './generator.js'
+import { buildProject, RUNTIME_FILE } from './build.js'
 import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
 import * as url from 'node:url'
@@ -71,6 +72,20 @@ export const compileAction = async (
   const model = await extractAstNode<OOCModel>(fileName, services)
   const generatedFilePath = compileToTs(model, fileName, opts)
   console.log(chalk.green(`TypeScript code generated successfully: ${generatedFilePath}`))
+}
+
+/** 项目级编译：从入口 BFS 依赖图，全部 .ooc → .ts（共享 _ooc_runtime.ts + ES import 模块树）。 */
+export const buildAction = async (
+  entry: string,
+  opts: { out: string | undefined },
+): Promise<void> => {
+  const result = await buildProject({ entry, outDir: opts.out })
+  console.log(
+    chalk.green(
+      `Built ${result.files.length} module(s) → ${path.relative(process.cwd(), result.entryOut)}`,
+    ),
+  )
+  console.log(chalk.green(`Runtime: ${RUNTIME_FILE} (shared)`))
 }
 
 export const interpretAction = (fileName: string) => {
@@ -130,6 +145,7 @@ export async function installAction(source: string): Promise<void> {
   )
 }
 
+export { buildProject } from './build.js'
 export { installPackage, readPackageManifest } from './install.js'
 
 export default function (): void {
@@ -150,6 +166,18 @@ export default function (): void {
       'compiles the source file to a self-contained TypeScript module (semantic-faithful dispatch, keeps type annotations)',
     )
     .action(compileAction)
+
+  program
+    .command('build')
+    .argument(
+      '<entry>',
+      `entry source file (possible file extensions: ${fileExtensions})`,
+    )
+    .option('-o, --out <dir>', 'output directory (default: ./generated)')
+    .description(
+      `compiles the whole dependency tree from an entry to TypeScript modules sharing ${RUNTIME_FILE} — the browser/runtime loads ordinary ES imports, no interpreter needed`,
+    )
+    .action(buildAction)
 
   program
     .command('interpret')

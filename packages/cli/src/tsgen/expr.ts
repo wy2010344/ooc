@@ -1,7 +1,7 @@
 // 表达式 → TS 代码生成。语义复刻解释器 evaluate.ts：MessageOrChain 求值 primary + 发消息，
 // PiplingExpression 按 right 类型分派（级联 '/'、管道 '|'、中缀）。所有消息统一走 __send。
 import type { Expression, Message, Primary } from 'object-oriented-c-language'
-import { isRef, isTypeRef } from './util.js'
+import { isTypeRef } from './util.js'
 
 function primaryCode(p: Primary): string {
   switch (p.$type) {
@@ -90,7 +90,7 @@ function piplingCode(e: any): string {
 }
 
 function paramList(node: { params: Array<{ name: string; typeAnnotation?: unknown }>; restParam?: { name: string } }): string {
-  const params = (node.params || []).map((p) => `${p.name}${typeAnnot(p.typeAnnotation)}`)
+  const params = (node.params || []).map((p) => `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
   if (node.restParam) {
     params.push(`...${node.restParam.name}`)
   }
@@ -115,7 +115,23 @@ export function typeCode(t: any): string {
 
 function typeNameCode(tn: any): string {
   if (typeof tn === 'string') return tn
-  const name = tn.name?.$type ? (isRef(tn.name) ? tn.name.value : tn.name.value) : tn.name
+  // 字面量/内建类型名节点（Str/Bool/Num/Nil/ID/Ref）：转成对应 TS 类型
+  const n = tn.name
+  if (n && typeof n.$type === 'string') {
+    switch (n.$type) {
+      case 'Str':
+        return JSON.stringify(n.value)
+      case 'Bool':
+        return 'boolean'
+      case 'Num':
+        return 'number'
+      case 'Nil':
+        return 'nil'
+      default:
+        return n.value
+    }
+  }
+  const name = n
   const args = (tn.typeArgs || []).map((a: any) => typeCode(a)).join(', ')
   return `${name}${args ? `<${args}>` : ''}`
 }
@@ -174,7 +190,7 @@ function bodyCode(body: any): string {
 /** lambda [x => body]：等价 { apply(...) {...} }，编译成真正的 JS 函数（解释器语义：既是值又是函数）。 */
 function lambdaDefCode(e: any): string {
   if (!e || e.$type !== 'LambdaDef') return expressionCode(e)
-  const params = (e.params || []).map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation)}`)
+  const params = (e.params || []).map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
   if (e.restParam) params.push(`...${e.restParam.name}`)
   const bodyLines: string[] = ['let __last = null;']
   for (const st of e.expressions || []) {

@@ -1,21 +1,43 @@
 // Model → TS 模块代码生成。顶层语句按解释器 interpret 语义：
 // import 解包赋值给命名作用域、Assignment 绑定、其余表达式求值、最后一条是模块导出值。
-// 产物形态：内联运行时辅助 + export function run(globals)，传入宿主 globals。
+// 两种产物形态：
+//  - 单文件 compile（默认）：内联运行时辅助 + export function run(globals)，import 走 __import loader。
+//  - 项目 build（ctx 提供 runtimeImport/deps）：共享 _ooc_runtime.ts + 依赖模块 ES import，import 编译为 await 依赖模块的 run(globals)。
 import type { Model } from 'object-oriented-c-language'
 import { OOC_RUNTIME_SNIPPET } from './runtime-template.js'
 import { expressionCode, typeCode } from './expr.js'
 
-export function modelToTs(model: Model): string {
+/** 项目 build 的依赖：path 是 AST 里的 #import 原值，specifier 是 ES import 目标（相对本产物）。 */
+export type ModuleDep = { path: string; specifier: string }
+
+export type ReuseContext = {
+  runtimeImport: string
+  deps: ModuleDep[]
+}
+
+export function modelToTs(model: Model, ctx?: ReuseContext): string {
   const topLines: string[] = []
+  const typeLines: string[] = []
   const bound = new Set<string>()
+  // 依赖 import 绑定名：_m0/_m1... 在文件顶部由 ES import 声明
+  const depIndex = new Map<string, number>()
+  if (ctx) {
+    ctx.deps.forEach((d, i) => depIndex.set(d.path, i))
+  }
   for (const st of model.expressions) {
     // Langium 子类型推断：带 ImportList（选择性导入）的语句 $type 为 'ImportList'，仍继承 name/path
     const maybeImport = st as any
     if (maybeImport.$type === 'ImportStatement' || maybeImport.$type === 'ImportList') {
-      // import 解析异步（宿主 loader 可加载字节码/网络模块），产物 await 后再用
+      const depI = depIndex.get(maybeImport.path)
       const kw = bound.has(maybeImport.name) ? '' : 'let '
       bound.add(maybeImport.name)
-      topLines.push(`${kw}${maybeImport.name} = await __import(${JSON.stringify(maybeImport.path)});`)
+      if (ctx && depI != null) {
+        // 项目 build：依赖模块已由 ES import 预加载，这里 await 其 run(globals) 拿模块值
+        topLines.push(`${kw}${maybeImport.name} = await _m${depI}(globals);`)
+      } else {
+        // 单文件 compile：交给宿主 __import loader 解析（异步，可加载字节码/网络模块）
+        topLines.push(`${kw}${maybeImport.name} = await __import(${JSON.stringify(maybeImport.path)});`)
+      }
       continue
     }
     switch (st.$type) {
@@ -29,8 +51,8 @@ export function modelToTs(model: Model): string {
         break
       }
       case 'TypeDef':
-        // 类型定义：纯编译期形状，运行时无副作用；顶层仅保留 type 声明（可导出供 TS 使用）
-        topLines.push(typeDefCode(st))
+        // 类型定义：纯编译期形状，运行时无副作用；提升到模块顶层作 type 声明（可导出供 TS 使用）
+        typeLines.push(typeDefCode(st))
         break
       default:
         topLines.push(`__last = ${expressionCode(st as any)};`)
@@ -46,7 +68,37 @@ export function modelToTs(model: Model): string {
     .join('\n')
 
   const body = topLines.join('\n  ')
+  const typeMount = typeLines.join('\n')
+
+  // 项目 build：外置共享 runtime + 依赖模块 ES import（模块图交付 vite/tsc）
+  if (ctx) {
+    // 只 import 本模块真正用到的 runtime 辅助（不触发 example 的 noUnusedLocals）
+    const usedRuntime = ['__send', '__createObject']
+      .map((name) => (new RegExp(`\\b${name}\\(`).test(body) ? name : null))
+      .filter((n): n is string => n != null)
+    const runtimeImport = usedRuntime.length > 0
+      ? `import { ${usedRuntime.join(', ')} } from '${ctx.runtimeImport}';`
+      : ''
+    const depImports = ctx.deps
+      .map((d, i) => `import _m${i} from '${d.specifier}';`)
+      .join('\n')
+    return `${runtimeImport}
+${depImports}
+${typeMount}
+// ---- 编译产物 ----
+export async function run(globals: Record<string, any> = {}): Promise<any> {
+  let __last: any = null
+${hostDecls}
+  ${body}
+  return __last
+}
+export default run
+`
+  }
+
+  // 单文件 compile：内联运行时 + 宿主 __import loader（自包含）
   return `${OOC_RUNTIME_SNIPPET}
+${typeMount}
 // ---- 编译产物 ----
 declare function __import(path: string): any
 export async function run(globals: Record<string, any> = {}, onImport?: (path: string) => any): Promise<any> {
@@ -81,7 +133,7 @@ function typeDefCode(td: any): string {
         .map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation)}`)
         .join(', ')
       const ret = typeAnnot(m.typeAnnotation)
-      return `  ${mname}${typeArgs ? `<${typeArgs}>` : ''}(${mparams}): ${ret || 'any'}`
+      return `  ${mname}${typeArgs ? `<${typeArgs}>` : ''}(${mparams})${ret || ': any'}`
     })
     .join(';\n')
   return `export type ${name}${params ? `<${params}>` : ''} = {\n${members}\n};`
