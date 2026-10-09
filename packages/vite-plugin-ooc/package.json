@@ -1,0 +1,26 @@
+{
+    "name": "vite-plugin-ooc",
+    "description": "OOC 一等源码模块的 vite 插件：直接 import '*.ooc'，.ooc 内可导入 .ts/.ooc —— 像 .vue SFC 一样由打包器在内存 transform，无磁盘中间产物",
+    "version": "0.0.1",
+    "type": "module",
+    "main": "./out/index.js",
+    "module": "./out/index.js",
+    "exports": {
+        ".": {
+            "types": "./out/index.d.ts",
+            "default": "./out/index.js"
+        }
+    },
+    "scripts": {
+        "test": "tsc -b tsconfig.test.json && node --import ./test/preload-batch.mjs --test \"out/**/*.test.js\""
+    },
+    "dependencies": {
+        "object-oriented-c-language": "0.0.1",
+        "object-oriented-c-cli": "0.0.1",
+        "typescript": "~6.0.2"
+    },
+    "devDependencies": {
+        "vite": "^8.2.0",
+        "@types/node": "~20.19.0"
+    }
+}

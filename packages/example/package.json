@@ -6,9 +6,8 @@
     "type": "module",
     "scripts": {
         "ooc:install": "node ../cli/bin/cli.js install ../base/src",
-        "ooc:build": "node ../cli/bin/cli.js build src/ooc/app.ooc -o src/ooc-gen",
-        "predev": "npm run ooc:install && npm run ooc:build",
-        "prebuild": "npm run ooc:install && npm run ooc:build",
+        "predev": "npm run ooc:install",
+        "prebuild": "npm run ooc:install",
         "dev": "vite",
         "build": "tsc && vite build",
         "preview": "vite preview"
@@ -23,6 +22,7 @@
     },
     "devDependencies": {
         "typescript": "~6.0.2",
-        "vite": "^8.2.0"
+        "vite": "^8.2.0",
+        "vite-plugin-ooc": "0.0.1"
     }
 }

@@ -46,7 +46,7 @@ export type BuildOptions = {
  * - '@pkg'/sub：经 module-path 虚拟路径 /ooc-pkg/<pkg>/<file> → modulesDir/<pkg>/<file>
  * - 相对路径：相对 fromFile 目录；无扩展名补 .ooc
  */
-function resolveImportSource(
+export function resolveImportSource(
   raw: string,
   fromFile: string,
   modulesDir: string,
@@ -93,7 +93,7 @@ function importSpecifier(srcOut: string, dstOut: string): string {
 }
 
 /** 收集模型里的 #import 原值（ImportStatement/ImportList 均是导入语句）。 */
-function collectImports(model: Model): string[] {
+export function collectImports(model: Model): string[] {
   const out: string[] = []
   for (const st of model.expressions) {
     const maybeImport = st as any

@@ -12,9 +12,6 @@ dist
 dist-ssr
 *.local
 
-# OOC 编译产物（ooc build 生成）
-src/ooc-gen
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
