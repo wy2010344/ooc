@@ -14,7 +14,8 @@ import {
 import chalk from 'chalk'
 import { Command } from 'commander'
 import { extractAstNode } from './util.js'
-import { generateJavaScript } from './generator.js'
+import { compileToTs } from './generator.js'
+import type { CompileOptions } from './generator.js'
 import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
 import * as url from 'node:url'
@@ -62,24 +63,14 @@ config = {
 config
 `
 
-export const generateAction = async (
+export const compileAction = async (
   fileName: string,
-  opts: GenerateOptions,
+  opts: CompileOptions,
 ): Promise<void> => {
   const services = createObjectOrientedCServices(NodeFileSystem).ObjectOrientedC
   const model = await extractAstNode<OOCModel>(fileName, services)
-  const generatedFilePath = generateJavaScript(
-    model,
-    fileName,
-    opts.destination,
-  )
-  console.log(
-    chalk.green(`JavaScript code generated successfully: ${generatedFilePath}`),
-  )
-}
-
-export type GenerateOptions = {
-  destination?: string
+  const generatedFilePath = compileToTs(model, fileName, opts)
+  console.log(chalk.green(`TypeScript code generated successfully: ${generatedFilePath}`))
 }
 
 export const interpretAction = (fileName: string) => {
@@ -149,16 +140,16 @@ export default function (): void {
   const fileExtensions =
     ObjectOrientedCLanguageMetaData.fileExtensions.join(', ')
   program
-    .command('generate')
+    .command('compile')
     .argument(
       '<file>',
       `source file (possible file extensions: ${fileExtensions})`,
     )
-    .option('-d, --destination <dir>', 'destination directory of generating')
+    .option('-d, --destination <dir>', 'destination directory of compiling')
     .description(
-      'generates JavaScript code that prints "Hello, {name}!" for each greeting in a source file',
+      'compiles the source file to a self-contained TypeScript module (semantic-faithful dispatch, keeps type annotations)',
     )
-    .action(generateAction)
+    .action(compileAction)
 
   program
     .command('interpret')

@@ -1,0 +1,117 @@
+// OOC 编译产物的运行时辅助头部模板（内联进生成的 .ts 文件顶部）。
+// 语义与解释器 1:1 对齐：runtime.ts（sendMessage/objectValue）+ num.ts + object.ts。
+// 宿主无关（storage/js/dom 等 globals 由 run 入参注入），产物自包含可被 tsc 检查。
+
+// 注意：本模板是字符串，内部不能出现未转义的反引号与模板插值 ${。
+export const OOC_RUNTIME_SNIPPET = String.raw`// ---- OOC 运行时辅助（与解释器语义对齐，宿主无关）----
+const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
+  '+': (a, b) => a + b,
+  '-': (a, b) => a - b,
+  '*': (a, b) => a * b,
+  div: (a, b) => a / b,
+  '%': (a, b) => a % b,
+  '>': (a, b) => a > b,
+  '<': (a, b) => a < b,
+  '>=': (a, b) => a >= b,
+  '<=': (a, b) => a <= b,
+}
+const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
+  '==': (a: any, v: any) => a == v,
+  '!=': (a: any, v: any) => a != v,
+  '!!': (a: any) => Boolean(a),
+  '~!': (a: any) => !Boolean(a),
+  '&&': (a: any, v: any) => a && v,
+  '||': (a: any, v: any) => a || v,
+  not: (a: any) => !Boolean(a),
+  include: (a: any, v: any) =>
+    typeof a == 'function' ? v instanceof a
+    : a && typeof a.includes == 'function' ? a.includes(v)
+    : a && typeof a.has == 'function' ? a.has(v)
+    : a === v,
+}
+type OOCEntry = {
+  type: 'bind' | 'mutable' | 'call'
+  name: string
+  value?: any
+  fn?: (...args: any[]) => any
+  guard?: (...args: any[]) => any
+  arity?: number
+  rest?: boolean
+}
+const OOC_EMPTY_OBJECT = {}
+function __send(o: any, value: string, args: any[]): any {
+  if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
+  const fun = o?.[value]
+  if (typeof fun == 'function') return fun.apply(o, args)
+  if (value in Object(o)) {
+    if (args.length) o[value] = args[0]
+    return o[value]
+  }
+  const num = OOC_NUM_DEF[value]
+  if (num) return num(o, args[0])
+  const obj = OOC_OBJ_DEF[value]
+  if (obj) return obj(o, args[0])
+  throw new Error('OOC 方法未找到: ' + String(o) + ' . ' + value + '(' + args.map((a) => String(a)).join(', ') + ')')
+}
+function __createObject(entries: OOCEntry[]): any {
+  if (entries.length === 0) return OOC_EMPTY_OBJECT
+  const obj: Record<string, unknown> = {}
+  const groups = new Map<string, OOCEntry[]>()
+  for (const e of entries) {
+    let list = groups.get(e.name)
+    if (!list) groups.set(e.name, (list = []))
+    list.push(e)
+  }
+  groups.forEach((methods, name) => {
+    Object.defineProperty(obj, name, {
+      enumerable: true,
+      value() {
+        const args = arguments
+        let lastCallIndex = -1
+        let hasGuardBranch = false
+        let callCount = 0
+        for (let i = 0; i < methods.length; i++) {
+          if (methods[i].type === 'call') {
+            callCount++
+            lastCallIndex = i
+            if (methods[i].guard) hasGuardBranch = true
+          }
+        }
+        const isGuardOverload = hasGuardBranch && callCount >= 2
+        for (let i = 0; i < methods.length; i++) {
+          const pair = methods[i]
+          switch (pair.type) {
+            case 'bind':
+              if (args.length === 0) return pair.value
+              continue
+            case 'mutable':
+              return __send(pair.value, 'apply', Array.from(args))
+            case 'call': {
+              if (isGuardOverload) {
+                if (i === lastCallIndex) return pair.fn!.apply(this, args)
+                if (!pair.guard) continue
+                if (pair.guard.apply(this, args)) return pair.fn!.apply(this, args)
+                continue
+              }
+              const arity = pair.arity ?? pair.fn!.length
+              const rest = !!pair.rest
+              const minArgs = arity
+              if (!pair.guard) {
+                const match = rest ? args.length >= minArgs : args.length === minArgs
+                if (!match) continue
+              }
+              if (!pair.guard || pair.guard.apply(this, args)) {
+                return pair.fn!.apply(this, args)
+              }
+            }
+          }
+        }
+        const objFun = OOC_OBJ_DEF[name]
+        if (objFun) return objFun(this, args[0])
+        throw new Error('OOC 方法未找到: ' + String(this) + ' . ' + name + '(' + Array.from(args).map((a) => String(a)).join(', ') + ')')
+      },
+    })
+  })
+  return obj
+}
+`

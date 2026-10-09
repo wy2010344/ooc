@@ -1,9 +1,7 @@
 import './style.css'
-import { createInterpretAction, delegate, js, storage, sendMessage } from 'object-oriented-c-language'
+import { createInterpretAction, sendMessage } from 'object-oriented-c-language'
 import type { FileSystemProvider } from 'langium'
-import { createContext } from 'mve-core'
-import { createSignal, memo, addEffect } from 'wy-helper'
-import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
+import { createBridgeGlobals } from 'ooc-mve-bridge'
 import { createRoot } from 'mve-dom'
 
 // OOC 项目（本目录）：源码 src/ooc/ + 项目配置 config.ooc（顶层）。
@@ -90,23 +88,12 @@ const fileSystemProvider: FileSystemProvider = {
   },
 }
 
-// 宿主桥接对象：storage/js、视图组件（dom/text/fc/forEach）、响应式信号（createSignal/memo/addEffect）
+// 宿主桥接 globals：一行注入 language 原生原语（storage/js/delegate）、
+// 视图组件（dom/text/html/fc/forEach）与响应式信号（createSignal/memo/addEffect），
+// 形状与 config.ooc 里 globals 类型清单一一对应（类型侧走 createBridgeGlobalsTypes）。
 const interpret = createInterpretAction(
   { fileSystemProvider: () => fileSystemProvider },
-  {
-    storage,
-    js,
-    delegate,
-    fc,
-    createContext,
-    dom,
-    html,
-    text,
-    createSignal,
-    memo,
-    addEffect,
-    forEach,
-  },
+  createBridgeGlobals(),
 )
 
 // 运行 OOC 入口（虚拟路径 /ooc/app.ooc 对应 src/ooc/app.ooc）→ 挂载 preview 到容器
