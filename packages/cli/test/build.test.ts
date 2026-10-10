@@ -75,7 +75,7 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
     outDir: gen,
   })
 
-  // 产物：入口 + math + 包 loop + 共享 runtime
+  // 产物：入口 + math + 包 loop + 共享 runtime + 共享 globals
   const outs = result.files.map((f) => path.relative(gen, f.out).replace(/\\/g, '/'))
   for (const expected of ['src/main.ts', 'src/math.ts', 'ooc-pkg/base/loop.ts']) {
     if (!outs.includes(expected)) {
@@ -85,17 +85,33 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
   if (path.basename(result.runtimeOut) !== '_ooc_runtime.ts') {
     throw new Error(`共享运行时文件名应为 _ooc_runtime.ts，实际 ${result.runtimeOut}`)
   }
+  if (path.basename(result.globalsOut) !== '_ooc_globals.ts') {
+    throw new Error(`共享 globals 文件名应为 _ooc_globals.ts，实际 ${result.globalsOut}`)
+  }
   if (path.relative(gen, result.entryOut).replace(/\\/g, '/') !== 'src/main.ts') {
     throw new Error(`入口产物应为 src/main.ts，实际 ${result.entryOut}`)
   }
 
-  // Node ≥23.6 原生类型剥离：直接 import 生成的 .ts 树
+  // Node ≥23.6 原生类型剥离：直接 import 生成的 .ts 树（纯 ES，import 即执行）
   if (Number(process.versions.node.split('.')[0]) < 23) {
     return
   }
   const rt = await import(pathToFileURL(result.runtimeOut).href)
-  const mod = await import(pathToFileURL(result.entryOut).href)
-  const value = await mod.run({ storage: storageHost() })
+  // 宿主 globals 走 _ooc_globals.ts：测试项目自带一份并让产物转出去
+  const globalsSrc = path.join(root, 'host-globals.ts')
+  await fs.writeFile(
+    globalsSrc,
+    `export default { storage: { ref: (v: number) => { let _v = v; return { get: () => _v, set: (x: number) => { _v = x } } } } }`,
+    'utf-8',
+  )
+  await buildProject({
+    entry: path.join(root, 'src', 'main.ooc'),
+    rootDir: root,
+    outDir: gen,
+    globalsModule: globalsSrc,
+  })
+  const mod = await import(pathToFileURL(result.entryOut).href + '?v=2')
+  const value = mod.default
 
   const sum = rt.__send(value, 'sum', [])
   if (sum !== 5) throw new Error(`math add 2 3 应为 5，实际 ${sum}`)
@@ -104,16 +120,3 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
   const double = rt.__send(value, 'double', [])
   if (double !== 8) throw new Error(`math double 4 应为 8，实际 ${double}`)
 })
-
-/** 与解释器 storage 桥语义一致：ref 可变单元 */
-function storageHost() {
-  return {
-    ref(v: number) {
-      let _v = v
-      return {
-        get: () => _v,
-        set: (x: number) => { _v = x },
-      }
-    },
-  }
-}

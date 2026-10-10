@@ -16,3 +16,5 @@ test-marker.mjs
 *.d.ts
 *.d.ts.map
 *.js.map
+generated/
+

@@ -1,11 +1,14 @@
 // OOC vite 插件：让 '.ooc' 成为一等源码模块，像 .vue SFC 一样被打包器直接识别——
-//   - TS/JS 可直接 `import app from './app.ooc'`（插件 transform 成 JS，默认导出 run(globals)）
-//   - .ooc 内 `#import './math.ooc'` / `#import './helper.ts'` 编译成真 ES import（进 vite 模块图）
+//   - TS/JS 可直接 `import app from './app.ooc'`（插件 transform 成纯 ES 模块：默认导出 =
+//     模块最后一条表达式，所有顶层声明都是 export）
+//   - .ooc 内 `#import './math.ooc'` / `#import './helper.ts'` 编译成与 TS import 等价的
+//     真 ES import（进 vite 模块图），模块按依赖顺序自动执行
 // 实现要点：
 //   - dev 与 build 都走 插件 resolveId（归一化为真实绝对路径）+ load（读磁盘 transform）。
 //     （不能只靠 transform 钩子：vite dev 只对 JS 系扩展名调用它，.ooc 会被当静态文件原样返回）
 //   - .ooc 用真实路径做模块 id：vite 的模块图 key、文件监听/HMR、URL 映射全部原生可用。
-//   - 共享 runtime 走虚拟模块（virtual:ooc-runtime），bundle 只留一份，无磁盘中间产物、无 prebuild。
+//   - 共享 runtime / 宿主 globals 走虚拟模块（virtual:ooc-runtime / virtual:ooc-globals），
+//     bundle 各只留一份，无磁盘中间产物、无 prebuild。宿主 globals 用 options.globals 指定。
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as ts from 'typescript'
@@ -26,6 +29,11 @@ import { NodeFileSystem } from 'langium/node'
 export const OOC_RUNTIME_VIRTUAL_ID = 'virtual:ooc-runtime'
 const RESOLVED_RUNTIME_ID = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
 
+/** 共享宿主 globals 虚拟模块 id：各 .ooc 产物静态 import 它拿 storage/dom 等宿主对象。 */
+export const OOC_GLOBALS_VIRTUAL_ID = 'virtual:ooc-globals'
+const RESOLVED_GLOBALS_ID = '\u0000' + OOC_GLOBALS_VIRTUAL_ID
+const EMPTY_GLOBALS_JS = 'export default {}'
+
 // runtime 模板本身带 TS 类型，转成 JS 给虚拟模块（typescript.transpileModule 纯 JS，Termux 可用）
 const RUNTIME_JS = ts
   .transpileModule(OOC_RUNTIME_MODULE, {
@@ -36,6 +44,9 @@ const RUNTIME_JS = ts
 export type OocPluginOptions = {
   /** 包安装目录（默认 <vite root>/.ooc_modules） */
   modulesDir?: string
+  /** 宿主 globals 模块（默认导出 globals 对象的 TS/JS 文件，相对 root 或模块 id）。
+   *  各 .ooc 产物静态 import 它；不配则 globals 为空对象（用到宿主名的模块运行时报错）。 */
+  globals?: string
 }
 
 /** 创建 OOC 一等模块 vite 插件。 */
@@ -44,6 +55,8 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
   const services = createObjectOrientedCServices(NodeFileSystem)
   let root = process.cwd()
   let modulesDir: string | undefined
+  // 宿主 globals 模块 id：虚拟 globals 模块转出去的目标（未配置则为空对象桩）
+  let globalsModuleId = options.globals
 
   /** 把磁盘读到的当前源码 parse 成 Model（同步、不走文档缓存，天然响应热更新）。 */
   function parseModel(code: string, id: string): Model {
@@ -93,24 +106,28 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
     return names
   }
 
-  /** .ooc 源码 → JS 模块（modelToTs ctx 模式 + transpileModule 剥类型，保留真 ES import）。 */
+  /** .ooc 源码 → JS 模块（modelToTs 纯 ES 形态 + transpileModule 剥类型，保留真 ES import）。 */
   function compile(oocSource: string, realAbs: string): { code: string } {
     const model = parseModel(oocSource, realAbs)
     const deps = collectImports(model).map((raw) => ({
       path: raw,
       specifier: specifierFor(realAbs, raw),
       typeNames: depTypeNames(realAbs, raw),
-      // .ooc 依赖顶层声明经 __oocNamed 包导出；.ts 依赖用原生 ES 导出
-      ooc: resolveImportSource(raw, realAbs, modulesDir ?? path.join(root, '.ooc_modules'))
-        .endsWith('.ooc'),
     }))
-    const tsCode = modelToTs(model, { runtimeImport: OOC_RUNTIME_VIRTUAL_ID, deps })
+    const tsCode = modelToTs(model, {
+      runtimeImport: OOC_RUNTIME_VIRTUAL_ID,
+      globalsImport: OOC_GLOBALS_VIRTUAL_ID,
+      deps,
+    })
     const js = ts
       .transpileModule(tsCode, {
         compilerOptions: {
           module: ts.ModuleKind.ESNext,
           target: ts.ScriptTarget.ES2022,
           isolatedModules: true,
+          // 逐字保留 import：OOC 模块导入即有执行语义（顶层副作用），
+          // 不许 TS 把「绑定了但没用」的 import 摇掉。类型导入已由发射器显式标 import type。
+          verbatimModuleSyntax: true,
         },
       })
       .outputText
@@ -125,9 +142,12 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
       root = config.root
     },
 
-resolveId(source, importer) {
+    resolveId(source, importer) {
       if (source === OOC_RUNTIME_VIRTUAL_ID) {
         return RESOLVED_RUNTIME_ID
+      }
+      if (source === OOC_GLOBALS_VIRTUAL_ID) {
+        return RESOLVED_GLOBALS_ID
       }
       // 相对/绝对 .ooc 引用（来自用户 TS 或编译产物的真 ES import）归一化为真实绝对路径，
       // 交给 load 钩子 transform 成 JS（.ooc 不在 vite 的 JS 扩展名列表里）
@@ -152,6 +172,13 @@ resolveId(source, importer) {
     load(id) {
       if (id === RESOLVED_RUNTIME_ID) {
         return { code: RUNTIME_JS }
+      }
+      if (id === RESOLVED_GLOBALS_ID) {
+        // 配了 globals 模块就转出去，否则空对象桩
+        if (globalsModuleId) {
+          return { code: `export { default } from '${globalsModuleId}';` }
+        }
+        return { code: EMPTY_GLOBALS_JS }
       }
       if (id.endsWith('.ooc')) {
         // 每次 load 都从磁盘重读；vite 文件监听该真实路径，改动自动失效并重新加载（热更新）

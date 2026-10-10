@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { oocPlugin, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
+import { oocPlugin, OOC_GLOBALS_VIRTUAL_ID, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
 import { modelToTs, OOC_RUNTIME_MODULE } from 'object-oriented-c-cli'
 import { ObjectValue, createObjectOrientedCServices } from 'object-oriented-c-language'
 import { URI } from 'langium'
@@ -14,6 +14,7 @@ import * as ts from 'typescript'
 
 const plugin = oocPlugin()
 const RESOLVED_RUNTIME = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
+const RESOLVED_GLOBALS = '\u0000' + OOC_GLOBALS_VIRTUAL_ID
 
 /** vite 的插件 hook 类型是 ObjectHook（函数或 {handler,...}），这里统一取可调用形态。 */
 function hookOf<T extends (...args: any[]) => any>(h: any): T {
@@ -25,11 +26,11 @@ const load = hookOf(plugin.load)!
 const ctx = {} as any
 
 /** 与插件同一路径解析单个 .ooc（langium 同步 fromString）。 */
-function parseFrom(code: string) {
+function parseFrom(code: string, uri = 'C:/demo/x.ooc') {
   const services = createObjectOrientedCServices(NodeFileSystem)
   return services.shared.workspace.LangiumDocumentFactory.fromString(
     code,
-    URI.file('C:/demo/x.ooc'),
+    URI.file(uri),
   ).parseResult.value as any
 }
 
@@ -47,7 +48,7 @@ helper = #import './helper.ts';
 `,
 )
 fs.writeFileSync(mathPath, `{ double(x) { x * 2 } }`)
-fs.writeFileSync(helperPath, `export default function run(globals: any) { return Promise.resolve(10) }`)
+fs.writeFileSync(helperPath, `export default 10`)
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 test('.ooc resolveId：相对引用归一化为真实绝对路径 id，dev/build 共用同一路径', () => {
@@ -71,6 +72,9 @@ test('.ooc resolveId：相对引用归一化为真实绝对路径 id，dev/build
   if (resolveId.call(ctx, OOC_RUNTIME_VIRTUAL_ID) !== RESOLVED_RUNTIME) {
     throw new Error('runtime 虚拟 id 归一化失败')
   }
+  if (resolveId.call(ctx, OOC_GLOBALS_VIRTUAL_ID) !== RESOLVED_GLOBALS) {
+    throw new Error('globals 虚拟 id 归一化失败')
+  }
   // .ts 不接管，交给 vite 原生解析
   if (resolveId.call(ctx, './helper.ts', path.normalize(appPath)) !== undefined) {
     throw new Error('.ts 不应被本插件接管')
@@ -80,23 +84,77 @@ test('.ooc resolveId：相对引用归一化为真实绝对路径 id，dev/build
 test('.ooc load：读磁盘 transform 成纯 JS，import 编译成真 ES import', async () => {
   const result: any = load.call(ctx, path.normalize(appPath))
   const code = result.code as string
-  if (!/import _m0 from '.\/math.ooc'/.test(code)) {
-    throw new Error(`相对 .ooc import 应编译为真 ES import，实际:\n${code}`)
+  if (!/import math from '.\/math.ooc'/.test(code)) {
+    throw new Error(`默认导入应编译成 ES default import，实际:\n${code}`)
   }
-  if (!/import _m1 from '.\/helper.ts'/.test(code)) {
+  if (!/import helper from '.\/helper.ts'/.test(code)) {
     throw new Error(`相对 .ts import 应原样进模块图，实际:\n${code}`)
   }
-  if (!/const _m0v = await _m0\(globals\)/.test(code)) {
-    throw new Error(`#import 应 await 依赖模块 run(globals)，实际:\n${code}`)
-  }
-  if (!/let math = _m0v/.test(code)) {
-    throw new Error(`#import 默认导出应绑定为 run 结果，实际:\n${code}`)
+  if (/export default function run|__oocNamed|_m0\(globals\)/.test(code)) {
+    throw new Error(`纯 ES 产物不应再有 run/bag 模板，实际:\n${code}`)
   }
   if (/export type /m.test(code) || /: number|: string|: boolean/.test(code)) {
     throw new Error(`产物应无 TS 类型语法（应为 JS）：\n${code}`)
   }
   if (!/from 'virtual:ooc-runtime'/.test(code)) {
     throw new Error(`runtime 应走虚拟模块：\n${code}`)
+  }
+})
+
+test('.ooc load：命名/类型导入按类型与值分类发射（真 ES named import + import type）', () => {
+  const namedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-named-'))
+  test.after(() => fs.rmSync(namedDir, { recursive: true, force: true }))
+  fs.writeFileSync(
+    path.join(namedDir, 'lib.ooc'),
+    `Point #type { x(): number };
+scale = 2;
+factory = { p() { { x() { 42 } } } };
+factory
+`,
+  )
+  const appSrc = `#import { scale, factory, Point } 'lib' { Point as P };
+factory p
+`
+  const namedApp = path.join(namedDir, 'app.ooc')
+  fs.writeFileSync(namedApp, appSrc)
+  const tsCode = modelToTs(parseFrom(appSrc, namedApp), {
+    runtimeImport: 'virtual:ooc-runtime',
+    globalsImport: 'virtual:ooc-globals',
+    deps: [{ path: 'lib', specifier: './lib.ooc', typeNames: ['Point'] }],
+  })
+  // 类型（Point / P）走 import type；值（scale/factory）走真 ES named import
+  if (!/import type \{ Point, Point as P \} from '\.\/lib\.ooc'/.test(tsCode)) {
+    throw new Error(`类型导入应合并成 import type，实际:\n${tsCode}`)
+  }
+  if (!/import \{ scale, factory \} from '\.\/lib\.ooc'/.test(tsCode)) {
+    throw new Error(`命名值导入应合并成 ES named import，实际:\n${tsCode}`)
+  }
+  if (/__oocNamed|run\(globals/.test(tsCode)) {
+    throw new Error(`不应再有 bag/run 模板，实际:\n${tsCode}`)
+  }
+})
+
+test('.ooc load：用到宿主 globals 时静态 import globals 虚拟模块', () => {
+  const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-host-'))
+  test.after(() => fs.rmSync(hostDir, { recursive: true, force: true }))
+  const src = `counter = storage ref 0;
+{ bump() { counter set ((counter get) + 1) } }
+`
+  const hostApp = path.join(hostDir, 'host.ooc')
+  fs.writeFileSync(hostApp, src)
+  const tsCode = modelToTs(parseFrom(src, hostApp), {
+    runtimeImport: 'virtual:ooc-runtime',
+    globalsImport: 'virtual:ooc-globals',
+    deps: [],
+  })
+  if (!/import __globals from 'virtual:ooc-globals'/.test(tsCode)) {
+    throw new Error(`宿主 globals 应静态 import 虚拟模块，实际:\n${tsCode}`)
+  }
+  if (!/const storage = __globals\["storage"\]/.test(tsCode)) {
+    throw new Error(`宿主名应从 __globals 取，实际:\n${tsCode}`)
+  }
+  if (!/export const counter/.test(tsCode)) {
+    throw new Error(`顶层声明应 export const，实际:\n${tsCode}`)
   }
 })
 
@@ -110,7 +168,11 @@ Circle #type { kind(): 'circle', radius: number };
   if (/export type /.test(result.code)) {
     throw new Error(`JS 产物不应含类型别名（transpileModule 剥掉）：\n${result.code}`)
   }
-  const tsCode = modelToTs(parseFrom(src), { runtimeImport: 'virtual:ooc-runtime', deps: [] })
+  const tsCode = modelToTs(parseFrom(src, path.join(dir, 'shape.ooc')), {
+    runtimeImport: 'virtual:ooc-runtime',
+    globalsImport: 'virtual:ooc-globals',
+    deps: [],
+  })
   const typeAt = tsCode.indexOf('export type Circle')
   const markerAt = tsCode.indexOf('// ---- 编译产物 ----')
   if (typeAt < 0 || markerAt < 0 || typeAt > markerAt) {
@@ -126,6 +188,23 @@ test('虚拟 runtime 模块：resolveId 归一化、load 返回去掉类型的 J
   }
   if (/Record<string|: any/.test(js)) {
     throw new Error(`runtime 虚拟模块应为纯 JS（无类型注解），实际:\n${js}`)
+  }
+})
+
+test('虚拟 globals 模块：默认空桩，配置后转出去', () => {
+  const def: any = load.call(ctx, RESOLVED_GLOBALS)
+  if (!/export default \{\}/.test(def.code)) {
+    throw new Error(`未配置 globals 时应给空对象桩，实际:\n${def.code}`)
+  }
+  const withGlobals = oocPlugin({ globals: '/src/bridge-globals.ts' })
+  const resolveId2 = hookOf(withGlobals.resolveId)!
+  const load2 = hookOf(withGlobals.load)!
+  if (resolveId2.call(ctx, OOC_GLOBALS_VIRTUAL_ID) !== RESOLVED_GLOBALS) {
+    throw new Error('globals 虚拟 id 归一化失败')
+  }
+  const out: any = load2.call(ctx, RESOLVED_GLOBALS)
+  if (!/export \{ default \} from '\/src\/bridge-globals\.ts'/.test(out.code)) {
+    throw new Error(`配置后应转出去，实际:\n${out.code}`)
   }
 })
 

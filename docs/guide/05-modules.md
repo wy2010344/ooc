@@ -104,4 +104,49 @@ c: C = factory make;
 - 命名导入（`named`）在 path 前，类型导入（`types`）在 path 后，二者互不排斥
 - 导入不存在的导出/类型会产生 `typeNotFound` 诊断
 - `as` 别名对命名导入、类型导入都生效
-- 命名导入的值（顶层赋值等）在运行时从目标模块的导出包读取（会执行目标模块）；类型导入则完全不执行
+- 命名导入的值（顶层赋值等）直接取目标模块的对应导出（会执行目标模块）；类型导入则完全不执行
+
+## 交给打包器：编译成纯 ES 模块
+
+`ooc build <入口> -o <目录>` 把整棵 `.ooc` 依赖图编译成 TypeScript 模块（vite 项目则由
+`vite-plugin-ooc` 在内存里做同一件事，无需中间产物）。产物与 TS import **完全等价**——
+所有顶层声明都是 `export`，`#import` 编译成真 ES import，模块在导入时按依赖顺序自动执行：
+
+```ooc
+// lib.ooc
+Point #type { x(): number };
+scale = 2;
+factory = { make() { { x() { 1 } } } };
+factory
+```
+
+```ooc
+// app.ooc
+geom = #import './lib';
+#import { scale, factory } './lib';
+{ demo() { 0 } }
+```
+
+```ts
+// lib.ts（生成）
+export type Point = { x(): number }
+export const scale = 2
+export const factory = __createObject([...])
+export default factory
+```
+
+```ts
+// app.ts（生成）
+import geom from './lib.ts'                       // 默认导入
+import { scale, factory } from './lib.ts'          // 命名导入（值）
+// 类型导入会合并成 import type { ... }
+export default __createObject([...])               // 最后一条表达式
+```
+
+- 产物另有共享 `_ooc_runtime.ts`（`__send` / `__createObject`）与 `_ooc_globals.ts`
+- **宿主 globals 是静态注入**：用到 `storage`/`dom` 等宿主名的模块会
+  `import __globals from '_ooc_globals.ts'` 再从中取名，不再需要入口 `run(globals)` 传递。
+  默认给空对象，`ooc build --globals <文件>`（或 `oocPlugin({ globals: '/src/bridge-globals.ts' })`）
+  指向一个**默认导出 globals 对象**的模块即可
+- 纯副作用导入（`#import './mod';` 不绑定任何名字）编译成 `import './mod.ts';`，模块必被执行
+- `ooc compile <单文件>` 是另一套形态：自包含模块（内联运行时 + `__import` loader），适合单文件交付

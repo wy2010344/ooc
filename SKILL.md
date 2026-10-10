@@ -70,6 +70,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 - **加诊断规则** → `type-checker.ts` 中 `accept('warning', ..., data: diagnosticData(code))`，code 注册进 `diagnostics-config.ts` 的 `DIAGNOSTIC_CODES`
 - **跑类型检查** → IDE 里由 LSP 实时校验；命令行用 `ooc type-check <file>`（返回诊断，有 error 级则 exit 1）
 - **浏览器运行** → 用 `EmptyFileSystem`；Node 读文件/`#import` 用 `NodeFileSystem`。宿主桥接对象 `storage`（可变 cell）、`js`（`throw` 抛错 / `new` 实例化 JS 类 / `fn` 把 OOC lambda 包装成真 JS 函数）由语言包导出（`interpreter/bridges.ts`），浏览器 demo（`main.ts`）与 `test/examples.test.ts` 共用同一份；`loop`（`apply`=遵守真值的 while、`repeat`=恰好 n 次）是 base 包 OOC 实现（`#import '@base/loop'`），不再桥接。`console`、`Math` 等 JS 全局走 `globalThis` 回退，无需注入。宿主侧调用 lambda 用语言包公开的 `invoke`（lambda 是带 apply 方法的 ObjectValue，不是裸 JS 函数）。
+- **编译给打包器** → `ooc build <entry> -o <dir> [--globals <file>]` 把整棵 `.ooc` 依赖图编译成**纯 ES 模块**（`cli/src/tsgen/esm.ts`）：所有顶层声明都 `export`，`#import` 编译成与 TS import 等价的真 ES import，模块在 ES 导入时按依赖顺序自动执行；产物另有共享 `_ooc_runtime.ts`（`__send`/`__createObject`）与 `_ooc_globals.ts`（宿主 globals，默认空对象，`--globals` 指向一个默认导出 globals 对象的模块）。vite 走 `vite-plugin-ooc`：`oocPlugin({ globals: '/src/bridge-globals.ts' })`，globals 经虚拟模块 `virtual:ooc-globals` 静态注入（不再 `run(globals)` 线程传递）。`ooc compile <file>` 是单文件自包含产物（内联运行时 + `__import` loader），与 build/vite 两套形态，改 tsgen 时两边都要看。
 
 ## 注意
 

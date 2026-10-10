@@ -16,7 +16,7 @@ import { Command } from 'commander'
 import { extractAstNode } from './util.js'
 import { compileToTs } from './generator.js'
 import type { CompileOptions } from './generator.js'
-import { buildProject, RUNTIME_FILE } from './build.js'
+import { buildProject, GLOBALS_FILE, RUNTIME_FILE } from './build.js'
 import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
 import * as url from 'node:url'
@@ -77,15 +77,20 @@ export const compileAction = async (
 /** 项目级编译：从入口 BFS 依赖图，全部 .ooc → .ts（共享 _ooc_runtime.ts + ES import 模块树）。 */
 export const buildAction = async (
   entry: string,
-  opts: { out: string | undefined },
+  opts: { out: string | undefined; globals?: string | undefined },
 ): Promise<void> => {
-  const result = await buildProject({ entry, outDir: opts.out })
+  const result = await buildProject({
+    entry,
+    outDir: opts.out,
+    globalsModule: opts.globals,
+  })
   console.log(
     chalk.green(
       `Built ${result.files.length} module(s) → ${path.relative(process.cwd(), result.entryOut)}`,
     ),
   )
   console.log(chalk.green(`Runtime: ${RUNTIME_FILE} (shared)`))
+  console.log(chalk.green(`Globals: ${GLOBALS_FILE} (shared)`))
 }
 
 export const interpretAction = (fileName: string) => {
@@ -176,8 +181,12 @@ export default function (): void {
       `entry source file (possible file extensions: ${fileExtensions})`,
     )
     .option('-o, --out <dir>', 'output directory (default: ./generated)')
+    .option(
+      '-g, --globals <file>',
+      `host globals module (default-exports the globals object), re-exported by ${GLOBALS_FILE}`,
+    )
     .description(
-      `compiles the whole dependency tree from an entry to TypeScript modules sharing ${RUNTIME_FILE} — the browser/runtime loads ordinary ES imports, no interpreter needed`,
+      `compiles the whole dependency tree from an entry to TypeScript modules sharing ${RUNTIME_FILE} + ${GLOBALS_FILE} — the browser/runtime loads ordinary ES imports, no interpreter needed`,
     )
     .action(buildAction)
 
