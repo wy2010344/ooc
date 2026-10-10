@@ -15,6 +15,7 @@ import * as path from 'node:path'
 import { NodeFileSystem } from 'langium/node'
 import { extractAstNode } from './util.js'
 import { modelToTs } from './tsgen/model.js'
+import { modelToDeclaration } from './tsgen/declaration.js'
 import { OOC_RUNTIME_MODULE } from './tsgen/runtime-template.js'
 import { MODULES_DIR_NAME } from './install.js'
 
@@ -208,11 +209,18 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
     }))
     const runtimeImport = importSpecifier(out, runtimeOut)
     const globalsImport = importSpecifier(out, globalsOut)
+    const model = models.get(source)!
     const sourceText =
       `// Generated from ${path.relative(rootDir, source).replace(/\\/g, '/')} (ooc → ts)\n` +
-      modelToTs(models.get(source)!, { runtimeImport, globalsImport, deps })
+      modelToTs(model, { runtimeImport, globalsImport, deps })
     fs.mkdirSync(path.dirname(out), { recursive: true })
     fs.writeFileSync(out, sourceText)
+    // 同名 .d.ts：TS 侧 import 该模块时拿到真实类型（而非 any）
+    fs.writeFileSync(
+      out.replace(/\.ts$/, '.d.ts'),
+      path.relative(rootDir, source).replace(/\\/g, '/') + '\n' +
+        modelToDeclaration(model),
+    )
     files.push({ source, out })
   }
 

@@ -152,4 +152,6 @@ export default __createObject([...])               // 最后一条表达式
 - `ooc compile <文件>` 与 `ooc build <入口>` 出同一套产物：compile 会把该文件的 `#import` 依赖图
   一起编译、平铺进 `-d` 目录（入口 `.ts` + 依赖 `.ts` + 共享 runtime/globals），所以编译产物不再有
   `run()` 包装和内联运行时——**源码和产物几乎一一对应**
+- 每个 `.ts` 产物旁边还有同名 `.d.ts`：TS 侧 `import x, { T } from './lib.ts'` 能直接拿到
+  OOC 的类型（`#type` 原样、顶层声明按类型推断、泛型 typedef 同样支持），不必退回 `any`
 - 宿主 globals 未注入时回退 `globalThis`（与解释器一致，浏览器里的 `document`/`window` 可直接用）

@@ -174,3 +174,31 @@ factory
     throw new Error(`产物不应再有自包含模板，实际:\n${code}`)
   }
 })
+
+test('同名 .d.ts：TS 侧 import 编译产物拿到真实类型（含泛型 typedef）', async () => {
+  const { dir } = await compileSource('typed', `
+Point #type { x(): number, y(): number };
+Box #type <T> { value(): T };
+origin = { x() { 0 }, y() { 0 } };
+scale = 2;
+origin
+`)
+  const dts = await fs.readFile(path.join(dir, 'typed.d.ts'), 'utf8')
+  // typedef 原样声明（含泛型）
+  if (!/export type Point = \{\s*x\(\): number;\s*y\(\): number\s*\}/.test(dts)) {
+    throw new Error(`d.ts 应含 Point 形状，实际:\n${dts}`)
+  }
+  if (!/export type Box<T> = \{\s*value\(\): T\s*\}/.test(dts)) {
+    throw new Error(`d.ts 应含泛型 Box<T>，实际:\n${dts}`)
+  }
+  // 顶层值：字面量放宽成基础类型，方法签名里保持精确
+  if (!/export declare const scale: number;/.test(dts)) {
+    throw new Error(`顶层字面量应放宽为 number，实际:\n${dts}`)
+  }
+  if (!/export declare const origin: \{ x\(\): 0; y\(\): 0 \};/.test(dts)) {
+    throw new Error(`对象形状应从方法签名推断，实际:\n${dts}`)
+  }
+  if (!/export default \{ x\(\): 0; y\(\): 0 \};/.test(dts)) {
+    throw new Error(`默认导出应有类型，实际:\n${dts}`)
+  }
+})

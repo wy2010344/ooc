@@ -17,6 +17,9 @@
         }
     },
     "scripts": {
+        "build": "tsc -b tsconfig.json",
+        "clean": "shx rm -fr *.tsbuildinfo out",
+        "build:clean": "npm run clean && npm run build",
         "test": "tsc -b tsconfig.test.json && node --import ./test/preload-batch.mjs --test \"out/**/*.test.js\""
     },
     "dependencies": {

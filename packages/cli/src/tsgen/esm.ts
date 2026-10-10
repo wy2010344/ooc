@@ -25,6 +25,14 @@ export type EsmContext = {
 }
 
 export function emitEsmModule(model: Model, ctx: EsmContext): string {
+  // fail-fast：ctx 不全会静默产出 `import ... from 'undefined'` 这种坏代码。
+  // 最常见成因是编译产物新旧混搭（如 vite-plugin-ooc 的 out/ 还是旧版），
+  // 根因一般是漏跑 `npm run build`（out/ 不入库，git pull 不会更新它）。
+  if (!ctx.runtimeImport || !ctx.globalsImport) {
+    throw new Error(
+      'ooc codegen 缺少 runtimeImport/globalsImport 上下文；请在工作区根目录执行 npm run build 重新编译各包 out/（out/ 被 gitignore，git pull 不会更新）',
+    )
+  }
   const depIndex = new Map<string, number>()
   ctx.deps.forEach((d, i) => depIndex.set(d.path, i))
   const specFor = (path: string) =>

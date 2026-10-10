@@ -66,6 +66,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 ## 常用任务
 
 - **改语法** → 编辑 `.langium` → `npm run langium:generate` → `npm run build` → `npm run test`
+- **拉代码后第一件事** → `npm install`（根 `prepare` 脚本会自动跑 `npm run build`）。**`out/` 被 gitignore，`git pull` 不会更新编译产物**：CLI 的 `ooc` 二进制走 `packages/cli/out/main.js`，vite 插件在 vite.config 里由 Node 加载、也走 `packages/vite-plugin-ooc/out/index.js`。新旧混搭时最典型症状是产物里出现 `import __globals from 'undefined'`（codegen 现在会 fail-fast 报错并提示重建）。手动补构建：`npx tsc -b tsconfig.build.json --force`（删过 out/ 必须 --force，否则 tsbuildinfo 会让 tsc -b 跳过发射）。各包源码改动 dev 下即刻生效是因为 exports 有 `development` 条件指向 `src/*.ts`——只有 CLI/插件这两类"由 Node 直接加载"的入口例外。
 - **加内置运算符** → `library/num.ts` 或 `library/object.ts` 加方法，同步 `type-system.ts` 的 `builtinMethods` 签名
 - **加诊断规则** → `type-checker.ts` 中 `accept('warning', ..., data: diagnosticData(code))`，code 注册进 `diagnostics-config.ts` 的 `DIAGNOSTIC_CODES`
 - **跑类型检查** → IDE 里由 LSP 实时校验；命令行用 `ooc type-check <file>`（返回诊断，有 error 级则 exit 1）
