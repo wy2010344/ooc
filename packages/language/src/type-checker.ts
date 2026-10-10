@@ -6,7 +6,6 @@ import {
   isBool,
   isCastExpression,
   isComplexPrimary,
-  isImportList,
   isImportStatement,
   isLambdaDef,
   isMessageChainExt,
@@ -30,8 +29,6 @@ import {
   type Assignment,
   type ComplexPrimary,
   type Expression,
-  type ImportItem,
-  type ImportList,
   type ImportStatement,
   type Message,
   type Method,
@@ -74,15 +71,24 @@ import {
 
 const objectDesc = '对象'
 
+/** 模块顶层声明的命名导出：typedef（类型）或赋值/导入绑定（值）。 */
+export type NamedExport = {
+  type: TypeInfo
+  params: string[]
+  kind: 'type' | 'value'
+}
+
 /**
  * 被导入模块的静态信息：result 是模块最后一条表达式的结果类型
  * （与运行时 interpret 返回 last 一致）；typeMembers 是该模块及其导入链里
  * 声明的全部类型别名，作为模块导出对象的类型成员（math#Circle），
  * 同时为兼容也平铺合并进导入方文档（直接按名引用）。
+ * namedExports 是全部顶层声明（命名导入取项用）。
  */
 export interface ImportedModuleType {
   result: TypeInfo
   typeMembers: Map<string, { type: TypeInfo; params: string[] }>
+  namedExports: Map<string, NamedExport>
 }
 
 /**
@@ -177,7 +183,8 @@ export class ObjectOrientedCTypeChecker {
       return this.inferExpression(node, env, accept)
     }
     if (isImportStatement(node)) {
-      return env.lookup(node.name) ?? anyType
+      // 有 name 绑定则返回模块绑定类型；否则（仅命名/类型导入）返回 anyType
+      return node.name ? (env.lookup(node.name) ?? anyType) : anyType
     }
     if (isPrimary(node)) {
       return this.inferPrimary(node, env, accept)
@@ -194,18 +201,60 @@ export class ObjectOrientedCTypeChecker {
     this.typedefParams.clear()
     const env = new TypeEnv()
     const accept: ValidationAcceptor = () => undefined
+    const namedExports = new Map<string, NamedExport>()
     let last: TypeInfo = nilType
     for (const stmt of model.expressions) {
       if (isImportStatement(stmt)) {
         this.applyImport(stmt, env)
+        // 导入语句绑定的名字也是本模块的命名导出
+        if (stmt.name) {
+          namedExports.set(stmt.name, {
+            type: env.lookup(stmt.name) ?? anyType,
+            params: [],
+            kind: 'value',
+          })
+        }
+        if (stmt.named) {
+          for (const item of stmt.named.items) {
+            const alias = item.alias ?? item.name
+            namedExports.set(alias, {
+              type: env.lookup(alias) ?? this.typedefs.get(alias) ?? anyType,
+              params: this.typedefParams.get(alias) ?? [],
+              kind: this.typedefs.has(alias) ? 'type' : 'value',
+            })
+          }
+        }
+        // 类型导入：选中的类型别名也算本模块的命名导出（类型）
+        if (stmt.types) {
+          for (const item of stmt.types.items) {
+            const alias = item.alias ?? item.name
+            if (this.typedefs.has(alias)) {
+              namedExports.set(alias, {
+                type: this.typedefs.get(alias) ?? anyType,
+                params: this.typedefParams.get(alias) ?? [],
+                kind: 'type',
+              })
+            }
+          }
+        }
         continue
       }
       if (isTypeDef(stmt)) {
         this.checkTypeDef(stmt, env, accept)
+        namedExports.set(stmt.name, {
+          type: env.lookup(stmt.name) ?? anyType,
+          params: stmt.typeParams.map((p) => p.name),
+          kind: 'type',
+        })
         continue
       }
       if (isAssignment(stmt)) {
         this.checkAssignment(stmt, env, accept)
+        namedExports.set(stmt.name, {
+          type: env.lookup(stmt.name) ?? anyType,
+          params: [],
+          kind: 'value',
+        })
         continue
       }
       last = this.inferExpression(stmt, env, accept)
@@ -214,6 +263,7 @@ export class ObjectOrientedCTypeChecker {
     return {
       result: this.withExportedTypeMembers(last, members),
       typeMembers: members,
+      namedExports,
     }
   }
 
@@ -248,10 +298,11 @@ export class ObjectOrientedCTypeChecker {
   }
 
   /**
-   * 处理 #import：绑定名类型 = 模块结果类型（对象时挂上模块的类型成员，
-   * 支持 math#Circle 命名空间访问）；同时为兼容把模块 typedef 平铺合并进当前文档。
-   * 文档不可见时回退 anyType。
-   * 支持选择性类型导入：#import 'path' { Circle as C, Box }
+   * 处理 #import（三种成分可共存，同属一个 ImportStatement）：
+   *   - name 默认导入（x = #import 'p'）：绑定模块结果类型，并平铺全部类型成员
+   *   - named 命名导入（#import { a as b } 'p'）：绑定模块对应顶层声明（类型或值）
+   *   - types 类型导入（#import 'p' { T as U }）：把选中的类型注册进当前文档
+   * 三者都可同时出现（默认/命名在 path 前，类型在 path 后）。
    */
   private applyImport(stmt: ImportStatement, env: TypeEnv): void {
     let imported: ImportedModuleType | undefined
@@ -261,74 +312,58 @@ export class ObjectOrientedCTypeChecker {
         imported = this.importResolver(stmt.path, fromPath)
       }
     }
-    if (!imported) {
-      env.define(stmt.name, anyType)
-      return
-    }
 
-    // 选择性类型导入：只导入指定的类型
-    if (isImportList(stmt)) {
-      const importList = stmt as ImportList
-      for (const item of importList.items) {
-        const originalName = item.name
-        const alias = item.alias ?? originalName
-        const member = imported.typeMembers.get(originalName)
+    // 类型导入（path 之后）：只把选中类型注册进当前文档，不产生运行时绑定
+    if (stmt.types && imported) {
+      for (const item of stmt.types.items) {
+        const member = imported.typeMembers.get(item.name)
         if (!member) {
-          // 类型不存在的告警
-          // 在 inferModuleResult 阶段，accept 是 no-op；在 validate 阶段重新报错
-          // 这里只处理类型成员注册，验证在 checkTopStatement 的 accept 中完成
-          continue
+          continue // 不存在：validateTypeImport 报错
         }
+        const alias = item.alias ?? item.name
         if (!this.typedefs.has(alias)) {
           this.typedefs.set(alias, member.type)
           this.typedefParams.set(alias, member.params)
         }
       }
-    } else {
-      // 全量导入：把所有类型成员平铺合并
-      for (const [name, member] of imported.typeMembers) {
-        if (!this.typedefs.has(name)) {
-          this.typedefs.set(name, member.type)
-          this.typedefParams.set(name, member.params)
+    }
+
+    // 命名导入（path 之前）：绑定模块对应顶层声明（类型或值）
+    if (stmt.named && imported) {
+      for (const item of stmt.named.items) {
+        const found = imported.namedExports.get(item.name)
+        if (!found) {
+          continue // 不存在：validateNamedImport 报错
         }
+        const alias = item.alias ?? item.name
+        if (found.kind === 'type' && !this.typedefs.has(alias)) {
+          this.typedefs.set(alias, found.type)
+          this.typedefParams.set(alias, found.params)
+        }
+        env.define(alias, found.type)
       }
     }
 
-    // 导出侧已把类型成员挂在对象上（withExportedTypeMembers），直接用；
-    // 只有 result 非对象时才兜底包装
-    // 选择性导入时，只保留指定的类型成员
-    const typeMembersForObject = isImportList(stmt)
-      ? this.filterTypeMembersForObject(imported.typeMembers, (stmt as ImportList).items)
-      : imported.typeMembers
+    // 默认导入：绑定模块结果类型，全量平铺模块类型成员
+    if (!stmt.name) {
+      return
+    }
+    if (!imported) {
+      env.define(stmt.name, anyType)
+      return
+    }
+    for (const [name, member] of imported.typeMembers) {
+      if (!this.typedefs.has(name)) {
+        this.typedefs.set(name, member.type)
+        this.typedefParams.set(name, member.params)
+      }
+    }
     env.define(
       stmt.name,
       imported.result.kind === 'object' && imported.result.typeMembers
-        ? isImportList(stmt)
-          ? this.withTypeMembers(imported.result, typeMembersForObject, stmt.name)
-          : imported.result
-        : this.withTypeMembers(
-            imported.result,
-            typeMembersForObject,
-            stmt.name,
-          ),
+        ? imported.result
+        : this.withTypeMembers(imported.result, imported.typeMembers, stmt.name),
     )
-  }
-
-  /** 选择性导入时，过滤出现在导入对象上的类型成员 */
-  private filterTypeMembersForObject(
-    allMembers: Map<string, { type: TypeInfo; params: string[] }>,
-    items: ImportItem[],
-  ): Map<string, { type: TypeInfo; params: string[] }> {
-    const filtered = new Map<string, { type: TypeInfo; params: string[] }>()
-    for (const item of items) {
-      const originalName = item.name
-      const alias = item.alias ?? originalName
-      const member = allMembers.get(originalName)
-      if (member) {
-        filtered.set(alias, member)
-      }
-    }
-    return filtered
   }
 
   /** 兜底：result 非对象时，把类型成员包成仅含类型成员的对象 */
@@ -418,9 +453,13 @@ export class ObjectOrientedCTypeChecker {
   ): void {
     if (isImportStatement(stmt)) {
       this.applyImport(stmt, env)
-      // 选择性导入：验证每个导入项是否存在
-      if (isImportList(stmt)) {
-        this.validateSelectiveImport(stmt as ImportList, accept)
+      // 命名导入：验证每个导入项是否存在于目标模块顶层声明
+      if (stmt.named) {
+        this.validateNamedImport(stmt, accept)
+      }
+      // 类型导入：验证每个类型是否存在于目标模块
+      if (stmt.types) {
+        this.validateTypeImport(stmt, accept)
       }
       return
     }
@@ -435,11 +474,14 @@ export class ObjectOrientedCTypeChecker {
     this.inferExpression(stmt, env, accept)
   }
 
-  /** 验证选择性导入的类型是否存在于目标模块 */
-  private validateSelectiveImport(
-    stmt: ImportList,
+  /** 验证命名导入的项是否存在于目标模块的顶层声明（类型或值均可） */
+  private validateNamedImport(
+    stmt: ImportStatement,
     accept: ValidationAcceptor,
   ): void {
+    if (!stmt.named) {
+      return
+    }
     let imported: ImportedModuleType | undefined
     if (this.importResolver) {
       const fromPath = AstUtils.getDocument(stmt)?.uri.path
@@ -450,14 +492,41 @@ export class ObjectOrientedCTypeChecker {
     if (!imported) {
       return
     }
-    for (const item of stmt.items) {
-      const member = imported.typeMembers.get(item.name)
-      if (!member) {
+    for (const item of stmt.named.items) {
+      if (!imported.namedExports.has(item.name)) {
         accept(
           'warning',
-          `类型 '${item.name}' 在模块 '${stmt.path}' 中不存在`,
+          `导出 '${item.name}' 在模块 '${stmt.path}' 中不存在`,
           { node: item, data: diagnosticData('typeNotFound') },
         )
+      }
+    }
+  }
+
+  /** 验证类型导入（path 之后的 { T }）的类型是否存在于目标模块 */
+  private validateTypeImport(
+    stmt: ImportStatement,
+    accept: ValidationAcceptor,
+  ): void {
+    if (!stmt.types) {
+      return
+    }
+    let imported: ImportedModuleType | undefined
+    if (this.importResolver) {
+      const fromPath = AstUtils.getDocument(stmt)?.uri.path
+      if (fromPath) {
+        imported = this.importResolver(stmt.path, fromPath)
+      }
+    }
+    if (!imported) {
+      return
+    }
+    for (const item of stmt.types.items) {
+      if (!imported.typeMembers.has(item.name)) {
+        accept('warning', `类型 '${item.name}' 在模块 '${stmt.path}' 中不存在`, {
+          node: item,
+          data: diagnosticData('typeNotFound'),
+        })
       }
     }
   }

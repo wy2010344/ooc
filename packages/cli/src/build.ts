@@ -92,13 +92,30 @@ function importSpecifier(srcOut: string, dstOut: string): string {
   return rel.startsWith('.') ? rel : `./${rel}`
 }
 
-/** 收集模型里的 #import 原值（ImportStatement/ImportList 均是导入语句）。 */
+/** 收集模型里的 #import 原值（ImportStatement 的两种形态：默认导入与命名导入）。 */
 export function collectImports(model: Model): string[] {
   const out: string[] = []
   for (const st of model.expressions) {
     const maybeImport = st as any
-    if (maybeImport.$type === 'ImportStatement' || maybeImport.$type === 'ImportList') {
+    if (maybeImport.$type === 'ImportStatement') {
       out.push(maybeImport.path)
+    }
+  }
+  return out
+}
+
+/**
+ * 提取模型里全部顶层 typedef（#type）名：命名导入用它区分「类型」与「值」导出。
+ * 文档不可见（undefined）时返回空数组（按值处理）。
+ */
+export function typeExportNames(model?: Model): string[] {
+  if (!model) {
+    return []
+  }
+  const out: string[] = []
+  for (const st of model.expressions) {
+    if (st.$type === 'TypeDef') {
+      out.push((st as any).name)
     }
   }
   return out
@@ -146,13 +163,18 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
   const files: BuildResult['files'] = []
   for (const source of models.keys()) {
     const out = outPathFor(source, rootDir, modulesDir, outDir)
-    // 该模块的依赖（按 AST 里 #import 出现顺序）：<原值, 目标产物说明符>
+    // 该模块的依赖（按 AST 里 #import 出现顺序）：<原值, 目标产物说明符, 类型导出名>
     const deps = collectImports(models.get(source)!).map((raw) => ({
       path: raw,
       specifier: importSpecifier(
         out,
         outPathFor(resolveImportSource(raw, source, modulesDir), rootDir, modulesDir, outDir),
       ),
+      typeNames: typeExportNames(
+        models.get(resolveImportSource(raw, source, modulesDir)),
+      ),
+      // CLI build 的依赖全部是 .ooc 模块（顶层声明经 __oocNamed 包导出）
+      ooc: true,
     }))
     const runtimeImport = importSpecifier(out, runtimeOut)
     const sourceText =

@@ -13,8 +13,15 @@ TopStatement:
     ImportStatement | TypeDef | Statement
 ;
 
+// #import 的多种写法共用同一个 ImportStatement：
+//   x = #import 'p'                  —— 默认导入（x = 模块最后一条表达式结果）
+//   x = #import 'p' { T as U }       —— 默认导入 + 类型导入（类型导入在 path 之后）
+//   #import { a as b, c } 'p'        —— 命名导入（命名导入在 path 之前，类型或值皆可）
+//   #import { a } 'p' { T }          —— 命名导入与类型导入可同时存在，分列 path 两侧
+// 命名导入 named 在 path 前；类型导入 types 在 path 后。
 ImportStatement:
-    name=ID '=' '#import' path=STRING (ImportList)?;
+    (name=ID '=')? '#import' named=ImportList? path=STRING types=ImportList?
+;
 
 ImportList:
     '{' (items+=ImportItem (',' items+=ImportItem)*)? '}';

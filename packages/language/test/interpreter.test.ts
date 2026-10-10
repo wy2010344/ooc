@@ -682,6 +682,72 @@ describe('OOC #import 模块', () => {
     expect(result).toBe(1)
   })
 
+  test('命名导入：绑定模块顶层声明的值', async () => {
+    const fs = memoryFs({
+      'greet.ooc': `greeting = 'hello';\nname = 'world';\n{ hi() { greeting + ' ' + name } }`,
+      'ooc.json': JSON.stringify({}),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(
+      `#import { greeting, name } 'greet';
+       greeting + ' ' + name`,
+      'demo.ooc',
+    )
+    expect(result).toBe('hello world')
+  })
+
+  test('命名导入：顶层赋值别名 as', async () => {
+    const fs = memoryFs({
+      'greet2.ooc': `greeting = 'hi';\ngreeting`,
+      'ooc.json': JSON.stringify({}),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(
+      `#import { greeting as hi } 'greet2';\nhi`,
+      'demo.ooc',
+    )
+    expect(result).toBe('hi')
+  })
+
+  test('命名导入值 + 类型导入可同时存在（path 两侧）', async () => {
+    const fs = memoryFs({
+      'mix.ooc': `factory = { make() { 7 } };\nPoint #type { x: number };\n{ note() { 'mod' } }`,
+      'ooc.json': JSON.stringify({}),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    const result = await interpret(
+      `#import { factory } 'mix' { Point };
+       p: Point = { x() { factory make } };
+       p x`,
+      'demo.ooc',
+    )
+    expect(result).toBe(7)
+  })
+
+  test('纯类型导入不执行目标模块（无副作用）', async () => {
+    const fs = memoryFs({
+      'side.ooc': `Point #type { x: number, y: number };\nboom = currentDoesNotExist`,
+      'ooc.json': JSON.stringify({}),
+    })
+    const { interpret } = createInterpretAction({
+      fileSystemProvider: () => fs.provider,
+    })
+    // 若类型导入会执行 side.ooc，则 boom 求值会抛错
+    const result = await interpret(
+      `#import 'side' { Point };
+       p: Point = { x() { 1 }, y() { 2 } };
+       p x`,
+      'demo.ooc',
+    )
+    expect(result).toBe(1)
+  })
+
   test('循环模块导入立即抛出结构化错误', async () => {
     const fs = memoryFs({
       'a.ooc': `b = #import 'b'; b`,

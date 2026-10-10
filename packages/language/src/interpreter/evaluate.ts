@@ -1,6 +1,7 @@
 import { dirnameOf } from '../module-path.js'
 import {
   Expression,
+  ImportStatement,
   LambdaDef,
   Model,
   Primary,
@@ -19,7 +20,16 @@ import {
 } from './runtime.js'
 import { addScope, getScope, type Scope } from './scope.js'
 
-export type InterpretAction = (name: string, basePath?: string) => Promise<any>
+export type InterpretAction = (name: string, basePath?: string) => Promise<ModuleRun>
+
+/**
+ * 模块执行记录：last 是默认导出（最后一条表达式的结果），named 是所有顶层声明
+ * （赋值/导入绑定/类型名占位）。#import 默认导入取 last、命名导入取 named[name]。
+ */
+export interface ModuleRun {
+  last: any
+  named: Record<string, unknown>
+}
 
 /**
  * 最近一次求值的表达式所在位置（0 基行/列，来自 CST）。解释器在每一步
@@ -60,44 +70,65 @@ export async function interpret(
   scope: Scope,
   rootPath: string,
   interpretAction: InterpretAction,
-) {
+): Promise<ModuleRun> {
   clearErrorPosition()
-  // 收集导入语句（ImportStatement 与 ImportList 均为导入）
+  // 收集导入语句（默认/命名/类型导入共用 ImportStatement 类型）
   const imports = model.expressions.filter(
-    (x) => x.$type === 'ImportStatement' || x.$type === 'ImportList',
-  ) as Array<{ path: string; name: string; $type: string }>
-  // 处理导入：传原始路径和基准目录，由 interpretAction 统一解析（避免双重解析）
-  const out = await Promise.all(
-    imports.map((importStmt) =>
+    (x) => x.$type === 'ImportStatement',
+  ) as ImportStatement[]
+  // 只有需要模块运行时值时才执行目标模块：
+  // 默认导入（有 name）与命名导入（named，可能是值）需要；纯类型导入（仅 types）不需要
+  const needRun = imports.filter(
+    (s) => s.name !== undefined || s.named !== undefined,
+  )
+  const runs = await Promise.all(
+    needRun.map((importStmt) =>
       interpretAction(importStmt.path, dirnameOf(rootPath)),
     ),
   )
+  // 语句 → 运行结果；纯类型导入（只有 types）不在表里，绑定处按 undefined 处理
+  const recordByStmt = new Map<ImportStatement, ModuleRun>()
+  needRun.forEach((s, i) => recordByStmt.set(s, runs[i]))
+  const named: Record<string, unknown> = {}
   let last: any = null
-  let importIndex = 0
   model.expressions.forEach((e) => {
     switch (e.$type) {
       case 'Assignment':
-        scope = addScope(
-          scope,
-          e.name,
-          interpretExpression(e.expression, scope),
-        )
+        // 顶层赋值也是模块命名导出（语义：所有顶层声明都是导出）
+        const assignmentValue = interpretExpression(e.expression, scope)
+        named[e.name] = assignmentValue
+        scope = addScope(scope, e.name, assignmentValue)
         return
-      case 'ImportStatement':
-      case 'ImportList':
-        const value = out[importIndex]
-        scope = addScope(scope, e.name, value)
-        importIndex++
+      case 'ImportStatement': {
+        const record = recordByStmt.get(e)
+        if (e.name) {
+          // 默认导入：模块默认导出 = 最后一条表达式的结果
+          const value = record ? record.last : undefined
+          named[e.name] = value
+          scope = addScope(scope, e.name, value)
+        }
+        if (e.named) {
+          // 命名导入：绑定模块对应的顶层声明；类型声明运行时无值，占位 undefined
+          for (const item of e.named.items) {
+            const key = item.alias ?? item.name
+            const value = record ? record.named[item.name] : undefined
+            named[key] = value
+            scope = addScope(scope, key, value)
+          }
+        }
+        // types 类型导入运行时无值：忽略
         return
+      }
       case 'TypeDef':
-        //类型声明只是装饰，运行时无副作用
+        // 类型声明只是装饰，运行时无副作用；名字仍作为模块命名导出占位
+        named[e.name] = undefined
         return
       default:
         last = interpretExpression(e, scope)
         return
     }
   })
-  return last
+  return { last, named }
 }
 
 export function interpretExpression(e: Expression, scope: Scope): any {

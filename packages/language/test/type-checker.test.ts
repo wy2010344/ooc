@@ -857,7 +857,7 @@ describe('跨模块 #import 类型', () => {
   })
 })
 
-describe('类型选择性导入', () => {
+describe('命名 #import', () => {
   async function loadImport(
     name: string,
     source: string,
@@ -876,98 +876,169 @@ describe('类型选择性导入', () => {
     return doc.diagnostics ?? []
   }
 
-  test('选择性导入：语法解析不报错', async () => {
-    const doc = await parse(`
-        math = #import 'math' { Circle }
-    `)
+  test('命名导入：语法解析不报错', async () => {
+    const doc = await parse(`#import { Circle as C, Box } 'math'`)
     expect(doc.parseResult.parserErrors).toHaveLength(0)
   })
 
-  test('选择性导入：只导入指定类型', async () => {
+  test('命名导入：只导入指定类型', async () => {
     await loadImport('shapes', `
         Circle #type { radius(): number };
         Square #type { side(): number };
         { make(): Circle { { radius() { 1 } } } }
     `)
     const diags = await checkModule(
-      'sel-import1.ooc',
-      `shapes = #import 'shapes' { Circle };
-       c: shapes#Circle = shapes make;
+      'named-import1.ooc',
+      `#import { Circle } 'shapes';
+       c: Circle = { radius() { 1 } };
        c`,
     )
     expect(messages(diags)).toEqual([])
   })
 
-  test('选择性导入：未导入的类型不可见', async () => {
+  test('命名导入：未导入的类型不可见', async () => {
     await loadImport('shapes2', `
         Circle #type { radius(): number };
         Square #type { side(): number };
         { make(): Circle { { radius() { 1 } } } }
     `)
     const diags = await checkModule(
-      'sel-import2.ooc',
-      `shapes = #import 'shapes2' { Circle };
+      'named-import2.ooc',
+      `#import { Circle } 'shapes2';
        s: Square = { side() { 4 } }`,
     )
     expect(messages(diags).join('\n')).toContain('未知类型')
   })
 
-  test('选择性导入：带别名导入', async () => {
+  test('命名导入：类型别名导入', async () => {
     await loadImport('shapes3', `
         Circle #type { radius(): number };
         { make(): Circle { { radius() { 1 } } } }
     `)
     const diags = await checkModule(
-      'sel-import3.ooc',
-      `shapes = #import 'shapes3' { Circle as Circle2D };
-       c: shapes#Circle2D = shapes make;
+      'named-import3.ooc',
+      `#import { Circle as Circle2D } 'shapes3';
+       c: Circle2D = { radius() { 1 } };
        c`,
     )
     expect(messages(diags)).toEqual([])
   })
 
-  test('选择性导入：混合导入运行时对象 + 类型', async () => {
+  test('命名导入：顶层赋值按值绑定', async () => {
     await loadImport('m5', `
         Circle #type { radius(): number };
+        scale = 2;
         { make(): Circle { { radius() { 1 } } } }
     `)
     const diags = await checkModule(
-      'sel-import4.ooc',
-      `m = #import 'm5' { Circle };
-       c: m#Circle = m make;
-       c`,
+      'named-import4.ooc',
+      `#import { Circle, scale } 'm5';
+       c: Circle = { radius() { 1 } };
+       (c radius) * scale`,
     )
     expect(messages(diags)).toEqual([])
   })
 
-  test('选择性导入：导入多个类型', async () => {
+  test('命名导入：导入多个类型', async () => {
     await loadImport('shapes4', `
         Circle #type { radius(): number };
         Square #type { side(): number };
         { circle(): Circle { { radius() { 1 } } }, square(): Square { { side() { 2 } } } }
     `)
     const diags = await checkModule(
-      'sel-import5.ooc',
-      `shapes = #import 'shapes4' { Circle, Square };
-       c: shapes#Circle = shapes circle;
-       s: shapes#Square = shapes square;
+      'named-import5.ooc',
+      `#import { Circle, Square } 'shapes4';
+       c: Circle = { radius() { 1 } };
+       s: Square = { side() { 2 } };
        c`,
     )
     expect(messages(diags)).toEqual([])
   })
 
-  test('选择性导入：导入不存在的类型告警', async () => {
+  test('命名导入：导入不存在的导出告警', async () => {
     await loadImport('shapes5', `
         Circle #type { radius(): number };
         { make(): Circle { { radius() { 1 } } } }
     `)
     const diags = await checkModule(
-      'sel-import6.ooc',
-      `shapes = #import 'shapes5' { Square };
-       c: shapes#Circle = shapes make;
+      'named-import6.ooc',
+      `#import { Square } 'shapes5';
+       c: Circle = { radius() { 1 } };
        c`,
     )
     expect(messages(diags).join('\n')).toContain('不存在')
+  })
+})
+
+describe('类型导入与命名导入共存', () => {
+  async function loadImport(name: string, source: string): Promise<void> {
+    await parse(source, { documentUri: URI.file(`${name}.ooc`).toString() })
+  }
+
+  async function checkModule(uri: string, source: string): Promise<Diagnostic[]> {
+    const doc = await parse(source, {
+      documentUri: URI.file(uri).toString(),
+      validation: true,
+    })
+    return doc.diagnostics ?? []
+  }
+
+  test('类型导入（path 之后）：只导入指定类型', async () => {
+    await loadImport('tShapes', `
+        Circle #type { radius(): number };
+        Square #type { side(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'type-import1.ooc',
+      `shapes = #import 'tShapes' { Circle };
+       c: Circle = { radius() { 1 } };
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('类型导入：类型别名', async () => {
+    await loadImport('tShapes2', `
+        Circle #type { radius(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'type-import2.ooc',
+      `shapes = #import 'tShapes2' { Circle as C };
+       c: C = { radius() { 1 } };
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('类型导入：不存在的类型告警', async () => {
+    await loadImport('tShapes3', `
+        Circle #type { radius(): number };
+        { make(): Circle { { radius() { 1 } } } }
+    `)
+    const diags = await checkModule(
+      'type-import3.ooc',
+      `shapes = #import 'tShapes3' { Square };
+       c: Circle = { radius() { 1 } };
+       c`,
+    )
+    expect(messages(diags).join('\n')).toContain('不存在')
+  })
+
+  test('命名导入与类型导入可同时存在（分列 path 两侧）', async () => {
+    await loadImport('tBoth', `
+        Circle #type { radius(): number };
+        factory = { make(): Circle { { radius() { 1 } } } };
+        factory
+    `)
+    const diags = await checkModule(
+      'type-import4.ooc',
+      `#import { factory } 'tBoth' { Circle as C };
+       c: C = factory make;
+       c`,
+    )
+    expect(messages(diags)).toEqual([])
   })
 })
 

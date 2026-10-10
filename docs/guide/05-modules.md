@@ -39,11 +39,12 @@ strings = #import '@base';
 
 ## 类型的导入与导出
 
-模块里声明的 `#type` 自动导出，导入方可以选择性地引入需要的类型。
+模块里声明的 `#type`、顶层赋值、导入绑定都是**命名导出**（`#import { ... }` 取用）；
+模块**最后一条表达式是默认导出**（`x = #import '...'` 取用）。
 
-### 全量导入（向后兼容）
+### 默认导入（模块整体）
 
-不加花括号时，导入模块的所有类型和值：
+不加花括号时，导入模块的默认导出（最后一条表达式的结果）与全部类型：
 
 ```ooc
 // geometry.ooc
@@ -62,23 +63,45 @@ b: geom#Box = { width() { 10 }, height() { 20 } };
 - `模块名#方法名` 在类型位置取该方法的返回类型（用于注解）
 - 类型也会平铺进当前文档（直接写 `Circle` 也能引用），但推荐用命名空间形式
 
-### 选择性导入
+### 命名导入（path 之前）
 
-使用花括号 `{}` 显式指定要导入的类型，支持别名和多类型：
-
-```ooc
-// main.ooc
-geom = #import 'geometry.ooc' { Circle };
-c: geom#Circle = geom make;
-// Box 不可见，会产生诊断告警
-```
+用 `#import { ... } '模块'` 显式导入目标模块的顶层声明，支持别名与多项目，
+类型（`#type`）和值（顶层赋值、导入绑定）都可以导入：
 
 ```ooc
+// geometry.ooc
+Circle #type { kind(): 'circle', radius: number };
+Box #type { width() : number, height(): number };
+factory = { make(): Circle { { kind() { 'circle' }, radius() { 3 } } } };
+
+// main.ooc：只导入需要的类型和值
+#import { Circle, factory } 'geometry.ooc';
+c: Circle = factory make;
+
 // 多类型 + 别名
-geom = #import 'geometry.ooc' { Circle as C, Box };
-c: geom#C = geom make;
-b: geom#Box = { width() { 10 }, height() { 20 } };
+#import { Circle as C, Box } 'geometry.ooc';
+c: C = factory make;
+b: Box = { width() { 10 }, height() { 20 } };
 ```
 
-- 花括号内的类型名不可用会产生 `typeNotFound` 诊断
-- 选择性导入只影响**类型成员**，运行时仍导入整个模块的值
+### 类型导入（path 之后）
+
+花括号放在 path 之后表示**只导入类型**（编译期 `import type`，**不加载、不执行**目标模块）：
+
+```ooc
+// 默认导入 + 类型导入
+geom = #import 'geometry.ooc' { Circle as C };
+c: C = geom make;
+```
+
+### 命名导入与类型导入可同时存在（分列 path 两侧）
+
+```ooc
+#import { factory } 'geometry.ooc' { Circle as C };
+c: C = factory make;
+```
+
+- 命名导入（`named`）在 path 前，类型导入（`types`）在 path 后，二者互不排斥
+- 导入不存在的导出/类型会产生 `typeNotFound` 诊断
+- `as` 别名对命名导入、类型导入都生效
+- 命名导入的值（顶层赋值等）在运行时从目标模块的导出包读取（会执行目标模块）；类型导入则完全不执行

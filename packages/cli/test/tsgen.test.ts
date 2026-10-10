@@ -112,6 +112,39 @@ calc = 2;
   if (!/[^=]calc = 2;/.test(code)) throw new Error('第二次绑定应生成重赋 calc = 2')
 })
 
+test('命名导入：跨模块绑定顶层声明的值（单文件 compile 的 {last,named} 契约）', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
+  await fs.writeFile(
+    path.join(dir, 'lib.ooc'),
+    `Point #type { x(): number };
+make = { p() { { x() { 42 } } } };
+make
+`,
+    'utf-8',
+  )
+  await fs.writeFile(
+    path.join(dir, 'use.ooc'),
+    `#import { make } 'lib';
+m = make p;
+m x
+`,
+    'utf-8',
+  )
+  await compileAction(path.join(dir, 'lib.ooc'), { destination: dir })
+  await compileAction(path.join(dir, 'use.ooc'), { destination: dir })
+  const libMod = loadModule(path.join(dir, 'lib.ts'))
+  const useMod = loadModule(path.join(dir, 'use.ts'))
+  // 单文件 run 导出 __oocNamed 包；loader 组装 {last, named} 传给命名导入
+  const result = await useMod.run(
+    {},
+    async () => {
+      const last = await libMod.run()
+      return { last, named: libMod.__oocNamed }
+    },
+  )
+  if (result !== 42) throw new Error(`命名导入取值应为 42，实际 ${result}`)
+})
+
 /** 与解释器 storage 桥语义一致：ref 可变单元 */
 function storageHost() {
   return {

@@ -86,8 +86,11 @@ test('.ooc load：读磁盘 transform 成纯 JS，import 编译成真 ES import'
   if (!/import _m1 from '.\/helper.ts'/.test(code)) {
     throw new Error(`相对 .ts import 应原样进模块图，实际:\n${code}`)
   }
-  if (!/let math = await _m0\(globals\)/.test(code)) {
-    throw new Error(`#import 绑定应 await 依赖模块 run(globals)，实际:\n${code}`)
+  if (!/const _m0v = await _m0\(globals\)/.test(code)) {
+    throw new Error(`#import 应 await 依赖模块 run(globals)，实际:\n${code}`)
+  }
+  if (!/let math = _m0v/.test(code)) {
+    throw new Error(`#import 默认导出应绑定为 run 结果，实际:\n${code}`)
   }
   if (/export type /m.test(code) || /: number|: string|: boolean/.test(code)) {
     throw new Error(`产物应无 TS 类型语法（应为 JS）：\n${code}`)

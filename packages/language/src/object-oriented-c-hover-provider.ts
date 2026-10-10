@@ -224,7 +224,17 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     }
 
     if (isImportStatement(node)) {
-      return this.buildHoverContent(`导入 ${node.name}`, comment)
+      const named = node.named
+        ? `命名导入 ${node.named.items.map((i) => i.alias ?? i.name).join(', ')}`
+        : ''
+      const types = node.types
+        ? `类型导入 ${node.types.items.map((i) => i.alias ?? i.name).join(', ')}`
+        : ''
+      const parts = [named, types].filter(Boolean).join('；')
+      return this.buildHoverContent(
+        parts ? parts : `导入 ${node.name ?? node.path}`,
+        comment,
+      )
     }
 
     if (isMethodAll(node)) {

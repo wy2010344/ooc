@@ -190,7 +190,15 @@ const model = document.parseResult.value as Model
   }
 
   return {
-    interpretPath,
+    // 公共 API 返回模块默认导出（= 最后一条表达式结果，历史契约）；
+    // 模块内部 #import 走内部 interpretPath 拿完整 { last, named } 记录
+    async interpretPath(
+      rawName: string,
+      basePath?: string,
+      importChain?: readonly string[],
+    ) {
+      return (await interpretPath(rawName, basePath, importChain)).last
+    },
     async interpret(txt: string, fileName = '') {
       // 用真实文件名作为文档 URI，让 #import 等按文件目录解析相对路径
       const resolved = fileName
@@ -201,7 +209,8 @@ const model = document.parseResult.value as Model
         txt,
         resolved ? URI.file(resolved).toString() : undefined,
       )
-      return execDocument(document, resolved)
+      const record = await execDocument(document, resolved)
+      return record.last
     },
   }
 }
@@ -237,7 +246,7 @@ export function createTypeCheckAction(
     }
     const extensions = services.LanguageMetaData.fileExtensions
     for (const stmt of model.expressions) {
-      if (stmt.$type !== 'ImportStatement' && stmt.$type !== 'ImportList') {
+      if (stmt.$type !== 'ImportStatement') {
         continue
       }
       const importStmt = stmt as ImportStatement

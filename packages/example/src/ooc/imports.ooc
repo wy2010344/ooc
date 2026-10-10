@@ -7,8 +7,8 @@ math = #import 'math';
 sum = math add 2 3;
 doubled = math double sum;
 
-// ===== 2. 选择性导入类型 =====
-// 从 typedef.ooc 导入 Point 类型用于类型注解
+// ===== 2. 类型导入（path 之后的 {} 只选类型） =====
+// 从 typedef.ooc 导入 Point/Dog 类型用于类型注解
 typedefs = #import 'typedef' { Point, Dog };
 
 // 使用导入的类型定义变量

@@ -16,6 +16,7 @@ import {
   OOC_RUNTIME_MODULE,
   resolveImportSource,
   collectImports,
+  typeExportNames,
 } from 'object-oriented-c-cli'
 import type { Model } from 'object-oriented-c-language'
 import { createObjectOrientedCServices } from 'object-oriented-c-language'
@@ -64,12 +65,44 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
     return rel
   }
 
+  // 依赖模块解析缓存：命名导入需区分类型/值导出（.ooc 解析 AST、.ts 扫声明）
+  const depModelCache = new Map<string, Model>()
+  const depTypeNameCache = new Map<string, string[]>()
+  function depTypeNames(fromId: string, raw: string): string[] {
+    const target = resolveImportSource(raw, fromId, modulesDir ?? path.join(root, '.ooc_modules'))
+    if (target.endsWith('.ts') || target.endsWith('.js') || target.endsWith('.mjs')) {
+      // .ts/.js 依赖：粗略扫 export type/interface 名当类型导出（命名值导出走真 ESM named import）
+      const names: string[] = []
+      for (const m of fs.readFileSync(target, 'utf8').matchAll(
+        /export\s+(?:type\s+([A-Za-z_$][\w$]*)|interface\s+([A-Za-z_$][\w$]*))/g,
+      )) {
+        names.push(m[1] ?? m[2])
+      }
+      return names
+    }
+    let names = depTypeNameCache.get(target)
+    if (!names) {
+      let model = depModelCache.get(target)
+      if (!model) {
+        model = parseModel(fs.readFileSync(target, 'utf8'), target)
+        depModelCache.set(target, model)
+      }
+      names = typeExportNames(model)
+      depTypeNameCache.set(target, names)
+    }
+    return names
+  }
+
   /** .ooc 源码 → JS 模块（modelToTs ctx 模式 + transpileModule 剥类型，保留真 ES import）。 */
   function compile(oocSource: string, realAbs: string): { code: string } {
     const model = parseModel(oocSource, realAbs)
     const deps = collectImports(model).map((raw) => ({
       path: raw,
       specifier: specifierFor(realAbs, raw),
+      typeNames: depTypeNames(realAbs, raw),
+      // .ooc 依赖顶层声明经 __oocNamed 包导出；.ts 依赖用原生 ES 导出
+      ooc: resolveImportSource(raw, realAbs, modulesDir ?? path.join(root, '.ooc_modules'))
+        .endsWith('.ooc'),
     }))
     const tsCode = modelToTs(model, { runtimeImport: OOC_RUNTIME_VIRTUAL_ID, deps })
     const js = ts

@@ -147,7 +147,7 @@ export async function installAction(source: string): Promise<void> {
 
 export { modelToTs } from './tsgen/model.js'
 export { OOC_RUNTIME_MODULE } from './tsgen/runtime-template.js'
-export { buildProject, resolveImportSource, collectImports } from './build.js'
+export { buildProject, resolveImportSource, collectImports, typeExportNames } from './build.js'
 export { installPackage, readPackageManifest } from './install.js'
 
 export default function (): void {

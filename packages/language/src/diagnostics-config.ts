@@ -406,12 +406,13 @@ export async function executeConfigOoc(
   } catch {
     // 静态收集失败时退化为无占位（保持旧行为）
   }
-  return interpret(
+  const run = await interpret(
     model,
     withGlobals(undefined, placeholders),
     filePath,
     interpretAction ?? noop,
   )
+  return run.last
 }
 
 /** LRU 配置缓存：带最大容量限制，防止内存泄漏 */
