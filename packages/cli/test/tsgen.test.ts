@@ -1,34 +1,43 @@
-// tsgen 端到端测试：.ooc → 编译 .ts → transpile CJS → 运行断言（语义与解释器一致）。
-// 覆盖：guard 重载循环、lambda、宿主 globals 注入、跨模块 import、顶层重复绑定。
+// tsgen 端到端测试：.ooc → 编译成纯 ES .ts 产物（Node ≥23.6 原生类型剥离直接 import）→
+// 运行断言（语义与解释器一致）。覆盖：guard 重载循环、宿主 globals 注入、跨模块 import、
+// 顶层重复绑定、命名导入绑定值。
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { createRequire } from 'node:module'
-import * as ts from 'typescript'
+import { pathToFileURL } from 'node:url'
 import { compileAction } from 'object-oriented-c-cli'
 
-const require_ = createRequire(import.meta.url)
+const CAN_RUN = Number(process.versions.node.split('.')[0]) >= 23
 
-/** 把 .ooc 源编译到临时目录，返回生成的 .ts 路径 */
-async function compileSource(name: string, source: string): Promise<{ ts: string; dir: string }> {
+/** 把 .ooc 源编译到临时目录，返回入口产物路径 */
+async function compileSource(
+  name: string,
+  source: string,
+  opts: { globals?: string } = {},
+): Promise<{ ts: string; dir: string }> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   const srcPath = path.join(dir, `${name}.ooc`)
   await fs.writeFile(srcPath, source, 'utf-8')
-  await compileAction(srcPath, { destination: dir })
+  await compileAction(srcPath, { destination: dir, globals: opts.globals })
   return { ts: path.join(dir, `${name}.ts`), dir }
 }
 
-/** TS 产物 → CommonJS 并 require 执行（typescript.transpileModule 纯 JS，Termux 可用） */
-function loadModule(tsPath: string): any {
-  const src = require_('node:fs').readFileSync(tsPath, 'utf-8')
-  const out = ts.transpileModule(src, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  })
-  const cjsPath = tsPath.replace(/\.ts$/, '.cjs')
-  require_('node:fs').writeFileSync(cjsPath, out.outputText)
-  return require_(cjsPath)
+/** 共享 runtime：产物从它 import __send/__createObject */
+async function loadRuntime(dir: string): Promise<any> {
+  return import(pathToFileURL(path.join(dir, '_ooc_runtime.ts')).href)
 }
+
+/** 与解释器 storage 桥语义一致：ref 可变单元 */
+const STORAGE_GLOBALS = `export default {
+  storage: {
+    ref(v) {
+      let _v = v
+      return { get: () => _v, set: (x) => { _v = x } }
+    },
+  },
+}
+`
 
 // 精简 loop fixture：guard 重载（递归 apply + nil 兜底）+ repeat（JS 字符串生态 forEach）
 const LOOP_SRC = `
@@ -46,73 +55,79 @@ loop = {
 loop
 `
 
-test('guard 重载循环：apply 至少一次并按真值递归，repeat 恰好 n 次', async () => {
-  const { ts: tsPath } = await compileSource('loop', LOOP_SRC)
-  const mod = loadModule(tsPath)
-  const loop = await mod.run()
+test('guard 重载循环：apply 至少一次并按真值递归，repeat 恰好 n 次', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('loop', LOOP_SRC)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+
+  const mod = await import(pathToFileURL(tsPath).href)
+  const loop = mod.default
+  const rt = await loadRuntime(dir)
 
   let count = 0
-  const res = loop.apply ? mod.runtime.__send(loop, 'apply', [() => ++count < 3]) : null
+  rt.__send(loop, 'apply', [() => ++count < 3])
   if (count !== 3) throw new Error(`apply 循环应跑 3 次，实际 ${count}`)
-  if (res !== null) throw new Error(`apply 假值分支应返回 nil，实际 ${res}`)
 
   let sum = 0
-  mod.runtime.__send(loop, 'repeat', [4, (i: number) => { sum += i }])
+  rt.__send(loop, 'repeat', [4, (i: number) => { sum += i }])
   if (sum !== 6) throw new Error(`repeat 4 次应累加 0..3=6，实际 ${sum}`)
 })
 
-test('跨模块 import + 宿主 globals：storage ref 与 loop 组合', async () => {
+test('跨模块 import + 宿主 globals：storage ref 与 loop 组合', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(path.join(dir, 'loop.ooc'), LOOP_SRC, 'utf-8')
-  const demoSrc = `
-loop = #import './loop';
+  const globalsFile = path.join(dir, 'globals-host.ts')
+  await fs.writeFile(globalsFile, STORAGE_GLOBALS, 'utf-8')
+  await fs.writeFile(
+    path.join(dir, 'demo.ooc'),
+    `loop = #import './loop';
 n = storage ref 0;
 loop apply [n set ((n get) + 1); (n get) < 5];
 { iterations = (n get) }
-`
-  await fs.writeFile(path.join(dir, 'demo.ooc'), demoSrc, 'utf-8')
-  await compileAction(path.join(dir, 'loop.ooc'), { destination: dir })
-  await compileAction(path.join(dir, 'demo.ooc'), { destination: dir })
+`,
+    'utf-8',
+  )
+  await compileAction(path.join(dir, 'demo.ooc'), { destination: dir, globals: globalsFile })
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
 
-  const loopMod = loadModule(path.join(dir, 'loop.ts'))
-  const demoMod = loadModule(path.join(dir, 'demo.ts'))
-  const result = await demoMod.run({ storage: storageHost() }, () => loopMod.run())
-  const value = demoMod.runtime.__send(result, 'iterations', [])
+  const mod = await import(pathToFileURL(path.join(dir, 'demo.ts')).href)
+  const rt = await loadRuntime(dir)
+  const value = rt.__send(mod.default, 'iterations', [])
   if (value !== 5) throw new Error(`iterations 应为 5，实际 ${value}`)
 })
 
 test('宿主 globals 注入：只注入未绑定的外部名，消息名不注入', async () => {
-  const src = `
+  const { dir } = await compileSource('globalsdemo', `
 n = storage ref 0;
 [ n set ((n get) + 1); (n get) < 5 ];
 { ok = 1 }
-`
-  const { ts: tsPath } = await compileSource('globalsdemo', src)
-  const code = await fs.readFile(tsPath, 'utf-8')
-  if (!/const storage = globals\["storage"\]/.test(code)) {
+`)
+  const code = await fs.readFile(path.join(dir, 'globalsdemo.ts'), 'utf8')
+  if (!/const storage = __globalsOf\(__globals, "storage"\)/.test(code)) {
     throw new Error('应注入 storage 宿主 globals')
   }
+  if (!/import __globals from '\.\/_ooc_globals\.ts'/.test(code)) {
+    throw new Error('宿主 globals 应静态 import _ooc_globals.ts')
+  }
   // 消息名 set/get 与已绑定名 n 不得被注入
-  const injected = [...code.matchAll(/const (\w+) = globals\[/g)].map((m) => m[1])
+  const injected = [...code.matchAll(/__globalsOf\(__globals, "(\w+)"\)/g)].map((m) => m[1])
   for (const name of ['set', 'get', 'n']) {
     if (injected.includes(name)) throw new Error(`消息名/绑定名 ${name} 不应注入 globals`)
   }
 })
 
 test('顶层重复绑定编译为重赋，不产生重复 let', async () => {
-  const src = `
+  const { dir } = await compileSource('rebind', `
 calc = 1;
 calc = 2;
 { done = calc }
-`
-  const { ts: tsPath } = await compileSource('rebind', src)
-  const code = await fs.readFile(tsPath, 'utf-8')
+`)
+  const code = await fs.readFile(path.join(dir, 'rebind.ts'), 'utf8')
   const lets = code.match(/let calc = /g) ?? []
   if (lets.length !== 1) throw new Error(`let calc 应只声明 1 次，实际 ${lets.length}`)
   if (!/[^=]calc = 2;/.test(code)) throw new Error('第二次绑定应生成重赋 calc = 2')
 })
 
-test('命名导入：跨模块绑定顶层声明的值（单文件 compile 的 {last,named} 契约）', async () => {
+test('命名导入：跨模块绑定顶层声明的值', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(
     path.join(dir, 'lib.ooc'),
@@ -130,30 +145,32 @@ m x
 `,
     'utf-8',
   )
-  await compileAction(path.join(dir, 'lib.ooc'), { destination: dir })
   await compileAction(path.join(dir, 'use.ooc'), { destination: dir })
-  const libMod = loadModule(path.join(dir, 'lib.ts'))
-  const useMod = loadModule(path.join(dir, 'use.ts'))
-  // 单文件 run 导出 __oocNamed 包；loader 组装 {last, named} 传给命名导入
-  const result = await useMod.run(
-    {},
-    async () => {
-      const last = await libMod.run()
-      return { last, named: libMod.__oocNamed }
-    },
-  )
-  if (result !== 42) throw new Error(`命名导入取值应为 42，实际 ${result}`)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+
+  const mod = await import(pathToFileURL(path.join(dir, 'use.ts')).href)
+  if (mod.default !== 42) throw new Error(`命名导入取值应为 42，实际 ${mod.default}`)
 })
 
-/** 与解释器 storage 桥语义一致：ref 可变单元 */
-function storageHost() {
-  return {
-    ref(v: number) {
-      let _v = v
-      return {
-        get: () => _v,
-        set: (x: number) => { _v = x },
-      }
-    },
+test('纯 ES 产物形态：顶层声明 export、默认导出 = 最后一条表达式、运行时外部导入', async () => {
+  const { dir } = await compileSource('shape', `
+Point #type { x(): number };
+scale = 2;
+factory = { make() { { x() { 1 } } } };
+factory
+`)
+  const code = await fs.readFile(path.join(dir, 'shape.ts'), 'utf8')
+  for (const expect of [
+    'export type Point =',
+    'export const scale = 2;',
+    'export const factory =',
+    'export default factory;',
+    "import { __createObject } from './_ooc_runtime.ts';",
+  ]) {
+    if (!code.includes(expect)) throw new Error(`产物应含 ${expect}，实际:\n${code}`)
   }
-}
+  // 不再有 run()/bag/内联运行时那套模板
+  if (/export const __oocNamed|export async function run\(|OOC_NUM_DEF/.test(code)) {
+    throw new Error(`产物不应再有自包含模板，实际:\n${code}`)
+  }
+})

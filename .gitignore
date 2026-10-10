@@ -17,4 +17,7 @@ test-marker.mjs
 *.d.ts.map
 *.js.map
 generated/
+# tsc 误把产物吐到 src 的散落 .js（源码统一 .ts/.tsx；残留 .js 会被 vite/tsc 优先解析，挡住源码）
+packages/**/src/**/*.js
+packages/playground/test/**/*.js
 

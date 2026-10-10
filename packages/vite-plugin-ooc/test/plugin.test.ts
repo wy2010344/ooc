@@ -150,8 +150,8 @@ test('.ooc load：用到宿主 globals 时静态 import globals 虚拟模块', (
   if (!/import __globals from 'virtual:ooc-globals'/.test(tsCode)) {
     throw new Error(`宿主 globals 应静态 import 虚拟模块，实际:\n${tsCode}`)
   }
-  if (!/const storage = __globals\["storage"\]/.test(tsCode)) {
-    throw new Error(`宿主名应从 __globals 取，实际:\n${tsCode}`)
+  if (!/const storage = __globalsOf\(__globals, "storage"\)/.test(tsCode)) {
+    throw new Error(`宿主名应经 __globalsOf 取，实际:\n${tsCode}`)
   }
   if (!/export const counter/.test(tsCode)) {
     throw new Error(`顶层声明应 export const，实际:\n${tsCode}`)

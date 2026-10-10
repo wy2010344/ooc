@@ -174,15 +174,20 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
   const hostRefs = collectHostRefs(model, valueTaken)
   const body = [...bridges, ...bodyLines].join('\n')
   // 只 import 本模块真正用到的 runtime 辅助（不触发 example 的 noUnusedLocals）
-  const usedRuntime = ['__send', '__createObject']
-    .map((name) => (new RegExp(`\\b${name}\\(`).test(bodyLines.join('\n')) ? name : null))
+  const usedRuntime = ['__send', '__createObject', '__globalsOf']
+    .map((name) =>
+      new RegExp(`\\b${name}\\(`).test(bodyLines.join('\n')) ||
+      (name === '__globalsOf' && hostRefs.length > 0)
+        ? name
+        : null,
+    )
     .filter((n): n is string => n != null)
   const header = [
     usedRuntime.length > 0
       ? `import { ${usedRuntime.join(', ')} } from '${ctx.runtimeImport}';`
       : '',
     hostRefs.length > 0 ? `import __globals from '${ctx.globalsImport}';` : '',
-    ...hostRefs.map((n) => `const ${n} = __globals[${JSON.stringify(n)}];`),
+    ...hostRefs.map((n) => `const ${n} = __globalsOf(__globals, ${JSON.stringify(n)});`),
     ...[...sideEffectImports].map((spec) => `import '${spec}';`),
     ...[...typeImports].map(
       ([spec, clauses]) => `import type { ${clauses.join(', ')} } from '${spec}';`,

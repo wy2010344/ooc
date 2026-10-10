@@ -149,4 +149,7 @@ export default __createObject([...])               // 最后一条表达式
   默认给空对象，`ooc build --globals <文件>`（或 `oocPlugin({ globals: '/src/bridge-globals.ts' })`）
   指向一个**默认导出 globals 对象**的模块即可
 - 纯副作用导入（`#import './mod';` 不绑定任何名字）编译成 `import './mod.ts';`，模块必被执行
-- `ooc compile <单文件>` 是另一套形态：自包含模块（内联运行时 + `__import` loader），适合单文件交付
+- `ooc compile <文件>` 与 `ooc build <入口>` 出同一套产物：compile 会把该文件的 `#import` 依赖图
+  一起编译、平铺进 `-d` 目录（入口 `.ts` + 依赖 `.ts` + 共享 runtime/globals），所以编译产物不再有
+  `run()` 包装和内联运行时——**源码和产物几乎一一对应**
+- 宿主 globals 未注入时回退 `globalThis`（与解释器一致，浏览器里的 `document`/`window` 可直接用）

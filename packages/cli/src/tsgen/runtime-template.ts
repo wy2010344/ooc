@@ -47,6 +47,12 @@ export type OOCEntry = {
 export const OOC_META: unique symbol = Symbol.for('ooc:meta')
 export const OOC_EMPTY_OBJECT = {}
 Object.defineProperty(OOC_EMPTY_OBJECT, OOC_META, { enumerable: false, value: new Map() })
+
+/** 取宿主全局对象：先看宿主注入的 globals，未注入再回退 globalThis
+ *  （与解释器「未定义标识符回退 globalThis」一致，浏览器里的 document/window 才能用）。 */
+export function __globalsOf(globals: Record<string, any>, name: string): any {
+  return name in globals ? globals[name] : (globalThis as any)[name]
+}
 export function __send(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
   const fun = o?.[value]
@@ -126,9 +132,3 @@ export function __createObject(entries: OOCEntry[]): any {
   return obj
 }
 `
-
-// 内联模板：同一份定义的去 export 版本（单文件 compile 自包含产物用）。
-export const OOC_RUNTIME_SNIPPET = OOC_RUNTIME_MODULE
-  .replace(/^export const /gm, 'const ')
-  .replace(/^export type /gm, 'type ')
-  .replace(/^export function /gm, 'function ')

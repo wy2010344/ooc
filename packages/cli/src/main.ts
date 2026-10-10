@@ -1,10 +1,7 @@
-import type { Model } from 'object-oriented-c-language'
-type OOCModel = Model
 import {
   createInterpretAction,
-  createObjectOrientedCServices,
-  createPackageAwareFileSystem,
   createTypeCheckAction,
+  createPackageAwareFileSystem,
   createDirPackageResolver,
   delegate,
   js,
@@ -13,9 +10,6 @@ import {
 } from 'object-oriented-c-language'
 import chalk from 'chalk'
 import { Command } from 'commander'
-import { extractAstNode } from './util.js'
-import { compileToTs } from './generator.js'
-import type { CompileOptions } from './generator.js'
 import { buildProject, GLOBALS_FILE, RUNTIME_FILE } from './build.js'
 import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
@@ -66,12 +60,22 @@ config
 
 export const compileAction = async (
   fileName: string,
-  opts: CompileOptions,
+  opts: { destination?: string | undefined; globals?: string | undefined },
 ): Promise<void> => {
-  const services = createObjectOrientedCServices(NodeFileSystem).ObjectOrientedC
-  const model = await extractAstNode<OOCModel>(fileName, services)
-  const generatedFilePath = compileToTs(model, fileName, opts)
-  console.log(chalk.green(`TypeScript code generated successfully: ${generatedFilePath}`))
+  const srcDir = path.dirname(path.resolve(fileName))
+  const outDir = opts.destination ?? path.join(srcDir, 'generated')
+  // 与 build 同一套纯 ES 产物：入口 + 依赖图 + 共享 runtime/globals，平铺进 destination
+  const result = await buildProject({
+    entry: path.resolve(fileName),
+    rootDir: srcDir,
+    outDir,
+    // CLI 传入的 globals 路径相对命令执行目录，先解析成绝对路径（buildProject 内部按 rootDir 解析）
+    globalsModule: opts.globals ? path.resolve(opts.globals) : undefined,
+  })
+  console.log(
+    chalk.green(`TypeScript code generated successfully: ${result.entryOut}`),
+  )
+  console.log(chalk.green(`Shared: ${RUNTIME_FILE} / ${GLOBALS_FILE} (${result.files.length} module(s))`))
 }
 
 /** 项目级编译：从入口 BFS 依赖图，全部 .ooc → .ts（共享 _ooc_runtime.ts + ES import 模块树）。 */
@@ -82,7 +86,7 @@ export const buildAction = async (
   const result = await buildProject({
     entry,
     outDir: opts.out,
-    globalsModule: opts.globals,
+    globalsModule: opts.globals ? path.resolve(opts.globals) : undefined,
   })
   console.log(
     chalk.green(
@@ -169,8 +173,12 @@ export default function (): void {
       `source file (possible file extensions: ${fileExtensions})`,
     )
     .option('-d, --destination <dir>', 'destination directory of compiling')
+    .option(
+      '-g, --globals <file>',
+      `host globals module (default-exports the globals object), re-exported by ${GLOBALS_FILE}`,
+    )
     .description(
-      'compiles the source file to a self-contained TypeScript module (semantic-faithful dispatch, keeps type annotations)',
+      `compiles the source file and its #import dependency graph to plain ES TypeScript modules (all top-level declarations are exports; #import compiles to real ES imports), sharing ${RUNTIME_FILE} + ${GLOBALS_FILE}`,
     )
     .action(compileAction)
 
