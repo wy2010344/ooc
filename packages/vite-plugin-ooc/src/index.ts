@@ -29,11 +29,6 @@ import { NodeFileSystem } from 'langium/node'
 export const OOC_RUNTIME_VIRTUAL_ID = 'virtual:ooc-runtime'
 const RESOLVED_RUNTIME_ID = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
 
-/** 共享宿主 globals 虚拟模块 id：各 .ooc 产物静态 import 它拿 storage/dom 等宿主对象。 */
-export const OOC_GLOBALS_VIRTUAL_ID = 'virtual:ooc-globals'
-const RESOLVED_GLOBALS_ID = '\u0000' + OOC_GLOBALS_VIRTUAL_ID
-const EMPTY_GLOBALS_JS = 'export default {}'
-
 // runtime 模板本身带 TS 类型，转成 JS 给虚拟模块（typescript.transpileModule 纯 JS，Termux 可用）
 const RUNTIME_JS = ts
   .transpileModule(OOC_RUNTIME_MODULE, {
@@ -44,9 +39,6 @@ const RUNTIME_JS = ts
 export type OocPluginOptions = {
   /** 包安装目录（默认 <vite root>/.ooc_modules） */
   modulesDir?: string
-  /** 宿主 globals 模块（默认导出 globals 对象的 TS/JS 文件，相对 root 或模块 id）。
-   *  各 .ooc 产物静态 import 它；不配则 globals 为空对象（用到宿主名的模块运行时报错）。 */
-  globals?: string
 }
 
 /** 创建 OOC 一等模块 vite 插件。 */
@@ -55,8 +47,6 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
   const services = createObjectOrientedCServices(NodeFileSystem)
   let root = process.cwd()
   let modulesDir: string | undefined
-  // 宿主 globals 模块 id：虚拟 globals 模块转出去的目标（未配置则为空对象桩）
-  let globalsModuleId = options.globals
 
   /** 把磁盘读到的当前源码 parse 成 Model（同步、不走文档缓存，天然响应热更新）。 */
   function parseModel(code: string, id: string): Model {
@@ -116,7 +106,6 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
     }))
     const tsCode = modelToTs(model, {
       runtimeImport: OOC_RUNTIME_VIRTUAL_ID,
-      globalsImport: OOC_GLOBALS_VIRTUAL_ID,
       deps,
     })
     const js = ts
@@ -146,9 +135,6 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
       if (source === OOC_RUNTIME_VIRTUAL_ID) {
         return RESOLVED_RUNTIME_ID
       }
-      if (source === OOC_GLOBALS_VIRTUAL_ID) {
-        return RESOLVED_GLOBALS_ID
-      }
       // 相对/绝对 .ooc 引用（来自用户 TS 或编译产物的真 ES import）归一化为真实绝对路径，
       // 交给 load 钩子 transform 成 JS（.ooc 不在 vite 的 JS 扩展名列表里）
       if (source.endsWith('.ooc')) {
@@ -172,13 +158,6 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
     load(id) {
       if (id === RESOLVED_RUNTIME_ID) {
         return { code: RUNTIME_JS }
-      }
-      if (id === RESOLVED_GLOBALS_ID) {
-        // 配了 globals 模块就转出去，否则空对象桩
-        if (globalsModuleId) {
-          return { code: `export { default } from '${globalsModuleId}';` }
-        }
-        return { code: EMPTY_GLOBALS_JS }
       }
       if (id.endsWith('.ooc')) {
         // 每次 load 都从磁盘重读；vite 文件监听该真实路径，改动自动失效并重新加载（热更新）

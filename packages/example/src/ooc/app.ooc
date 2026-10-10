@@ -25,6 +25,9 @@ area = {
 math = #import 'math';
 hello = { greet(name) { 'Hello, ' + name + '!' } };
 
+// 宿主依赖：从 TS 模块导入（视图组件 / 响应式信号 / storage）
+#import { dom, text, fc, createSignal, storage } './bridge.ts';
+
 // storage 引用
 counter = storage ref 0;
 

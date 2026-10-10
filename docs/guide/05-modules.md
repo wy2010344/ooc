@@ -149,9 +149,10 @@ export default __createObject([...])               // 最后一条表达式
   默认给空对象，`ooc build --globals <文件>`（或 `oocPlugin({ globals: '/src/bridge-globals.ts' })`）
   指向一个**默认导出 globals 对象**的模块即可
 - 纯副作用导入（`#import './mod';` 不绑定任何名字）编译成 `import './mod.ts';`，模块必被执行
+- **宿主依赖就是普通 TS 模块**：视图组件 / 响应式信号 / storage 等一律 `#import` 进来，
+  产物里是普通 ES import，没有全局注入；浏览器全局（`window`/`document`/`console`）本来就是自由标识符
 - `ooc compile <文件>` 与 `ooc build <入口>` 出同一套产物：compile 会把该文件的 `#import` 依赖图
-  一起编译、平铺进 `-d` 目录（入口 `.ts` + 依赖 `.ts` + 共享 runtime/globals），所以编译产物不再有
+  一起编译、平铺进 `-d` 目录（入口 `.ts` + 依赖 `.ts` + 共享 runtime），所以编译产物不再有
   `run()` 包装和内联运行时——**源码和产物几乎一一对应**
 - 每个 `.ts` 产物旁边还有同名 `.d.ts`：TS 侧 `import x, { T } from './lib.ts'` 能直接拿到
   OOC 的类型（`#type` 原样、顶层声明按类型推断、泛型 typedef 同样支持），不必退回 `any`
-- 宿主 globals 未注入时回退 `globalThis`（与解释器一致，浏览器里的 `document`/`window` 可直接用）

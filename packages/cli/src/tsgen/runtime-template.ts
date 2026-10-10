@@ -5,7 +5,7 @@
 // 注意：本模板是字符串，内部不能出现未转义的反引号与模板插值 ${。
 
 // 共享 runtime 模块源码：给定义加 export，作为项目构建（ooc build）的 _ooc_runtime.ts。
-// 函数体与内联版同一处维护，避免复制两份漂移。
+// 宿主无关：视图/信号/storage 等依赖由 OOC 侧 #import 进来，这里只提供消息派发与对象构造。
 export const OOC_RUNTIME_MODULE = String.raw`// ---- OOC 运行时辅助（与解释器语义对齐，宿主无关）----
 export const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
   '+': (a, b) => a + b,
@@ -47,12 +47,6 @@ export type OOCEntry = {
 export const OOC_META: unique symbol = Symbol.for('ooc:meta')
 export const OOC_EMPTY_OBJECT = {}
 Object.defineProperty(OOC_EMPTY_OBJECT, OOC_META, { enumerable: false, value: new Map() })
-
-/** 取宿主全局对象：先看宿主注入的 globals，未注入再回退 globalThis
- *  （与解释器「未定义标识符回退 globalThis」一致，浏览器里的 document/window 才能用）。 */
-export function __globalsOf(globals: Record<string, any>, name: string): any {
-  return name in globals ? globals[name] : (globalThis as any)[name]
-}
 export function __send(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
   const fun = o?.[value]

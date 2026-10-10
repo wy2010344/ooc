@@ -5,10 +5,13 @@
 //   x = #import 'm'              → import x from '<m>'
 //   #import { a as b, c } 'm'    → import { a as b, c } from '<m>'（类型项走 import type）
 //   #import 'm' { T as U }       → import type { T as U } from '<m>'
-// 模块在 ES 导入时按其依赖顺序自动执行（解释器也是先执行全部 #import 再跑模块体），
-// 宿主 globals 改成静态 import（import __globals from '<globals>'），不再逐层线程传递。
+//   #import 'm';                 → import '<m>';（纯副作用导入，模块必执行）
+// 模块在 ES 导入时按其依赖顺序自动执行（解释器也是先执行全部 #import 再跑模块体）。
+// 宿主依赖（视图/信号/存储等）没有特殊待遇：和其它 TS 模块一样 `#import` 进来，
+// 产物里就是普通 import；浏览器全局（document/window/console）本来就是自由标识符。
+// 重复的底层辅助（__send/__createObject）从共享 runtime 外部导入。
 import type { Model } from 'object-oriented-c-language'
-import { collectHostRefs, expressionCode, typeAnnot, typeDefCode } from './helpers.js'
+import { expressionCode, typeAnnot, typeDefCode } from './helpers.js'
 
 /** 项目 build 的依赖：path 是 AST 里的 #import 原值，specifier 是 ES import 目标（相对本产物）。 */
 export type ModuleDep = {
@@ -20,7 +23,6 @@ export type ModuleDep = {
 
 export type EsmContext = {
   runtimeImport: string
-  globalsImport: string
   deps: ModuleDep[]
 }
 
@@ -28,9 +30,9 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
   // fail-fast：ctx 不全会静默产出 `import ... from 'undefined'` 这种坏代码。
   // 最常见成因是编译产物新旧混搭（如 vite-plugin-ooc 的 out/ 还是旧版），
   // 根因一般是漏跑 `npm run build`（out/ 不入库，git pull 不会更新它）。
-  if (!ctx.runtimeImport || !ctx.globalsImport) {
+  if (!ctx.runtimeImport) {
     throw new Error(
-      'ooc codegen 缺少 runtimeImport/globalsImport 上下文；请在工作区根目录执行 npm run build 重新编译各包 out/（out/ 被 gitignore，git pull 不会更新）',
+      'ooc codegen 缺少 runtimeImport 上下文；请在工作区根目录执行 npm run build 重新编译各包 out/（out/ 被 gitignore，git pull 不会更新）',
     )
   }
   const depIndex = new Map<string, number>()
@@ -179,23 +181,17 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
     bodyLines.push(`export { ${reExports.join(', ')} };`)
   }
 
-  const hostRefs = collectHostRefs(model, valueTaken)
   const body = [...bridges, ...bodyLines].join('\n')
   // 只 import 本模块真正用到的 runtime 辅助（不触发 example 的 noUnusedLocals）
-  const usedRuntime = ['__send', '__createObject', '__globalsOf']
+  const usedRuntime = ['__send', '__createObject']
     .map((name) =>
-      new RegExp(`\\b${name}\\(`).test(bodyLines.join('\n')) ||
-      (name === '__globalsOf' && hostRefs.length > 0)
-        ? name
-        : null,
+      new RegExp(`\\b${name}\\(`).test(bodyLines.join('\n')) ? name : null,
     )
     .filter((n): n is string => n != null)
   const header = [
     usedRuntime.length > 0
       ? `import { ${usedRuntime.join(', ')} } from '${ctx.runtimeImport}';`
       : '',
-    hostRefs.length > 0 ? `import __globals from '${ctx.globalsImport}';` : '',
-    ...hostRefs.map((n) => `const ${n} = __globalsOf(__globals, ${JSON.stringify(n)});`),
     ...[...sideEffectImports].map((spec) => `import '${spec}';`),
     ...[...typeImports].map(
       ([spec, clauses]) => `import type { ${clauses.join(', ')} } from '${spec}';`,

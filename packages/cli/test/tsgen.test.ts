@@ -1,6 +1,6 @@
 // tsgen 端到端测试：.ooc → 编译成纯 ES .ts 产物（Node ≥23.6 原生类型剥离直接 import）→
-// 运行断言（语义与解释器一致）。覆盖：guard 重载循环、宿主 globals 注入、跨模块 import、
-// 顶层重复绑定、命名导入绑定值。
+// 运行断言（语义与解释器一致）。覆盖：guard 重载循环、宿主依赖按 import 导入、跨模块 import、
+// 顶层重复绑定、命名导入、同名 .d.ts。
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -11,15 +11,11 @@ import { compileAction } from 'object-oriented-c-cli'
 const CAN_RUN = Number(process.versions.node.split('.')[0]) >= 23
 
 /** 把 .ooc 源编译到临时目录，返回入口产物路径 */
-async function compileSource(
-  name: string,
-  source: string,
-  opts: { globals?: string } = {},
-): Promise<{ ts: string; dir: string }> {
+async function compileSource(name: string, source: string): Promise<{ ts: string; dir: string }> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   const srcPath = path.join(dir, `${name}.ooc`)
   await fs.writeFile(srcPath, source, 'utf-8')
-  await compileAction(srcPath, { destination: dir, globals: opts.globals })
+  await compileAction(srcPath, { destination: dir })
   return { ts: path.join(dir, `${name}.ts`), dir }
 }
 
@@ -27,17 +23,6 @@ async function compileSource(
 async function loadRuntime(dir: string): Promise<any> {
   return import(pathToFileURL(path.join(dir, '_ooc_runtime.ts')).href)
 }
-
-/** 与解释器 storage 桥语义一致：ref 可变单元 */
-const STORAGE_GLOBALS = `export default {
-  storage: {
-    ref(v) {
-      let _v = v
-      return { get: () => _v, set: (x) => { _v = x } }
-    },
-  },
-}
-`
 
 // 精简 loop fixture：guard 重载（递归 apply + nil 兜底）+ repeat（JS 字符串生态 forEach）
 const LOOP_SRC = `
@@ -72,21 +57,34 @@ test('guard 重载循环：apply 至少一次并按真值递归，repeat 恰好 
   if (sum !== 6) throw new Error(`repeat 4 次应累加 0..3=6，实际 ${sum}`)
 })
 
-test('跨模块 import + 宿主 globals：storage ref 与 loop 组合', async (t) => {
+test('跨模块 import + 宿主模块 import：storage ref 与 loop 组合', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(path.join(dir, 'loop.ooc'), LOOP_SRC, 'utf-8')
-  const globalsFile = path.join(dir, 'globals-host.ts')
-  await fs.writeFile(globalsFile, STORAGE_GLOBALS, 'utf-8')
+  // 宿主依赖就是普通 TS 模块，按名字 import（不再有 globals 注入）
+  await fs.writeFile(
+    path.join(dir, 'host.ts'),
+    `export default {
+  storage: {
+    ref(v: number) {
+      let _v = v
+      return { get: () => _v, set: (x: number) => { _v = x } }
+    },
+  },
+}
+`,
+    'utf-8',
+  )
   await fs.writeFile(
     path.join(dir, 'demo.ooc'),
     `loop = #import './loop';
-n = storage ref 0;
+host = #import './host.ts';
+n = (host storage) ref 0;
 loop apply [n set ((n get) + 1); (n get) < 5];
 { iterations = (n get) }
 `,
     'utf-8',
   )
-  await compileAction(path.join(dir, 'demo.ooc'), { destination: dir, globals: globalsFile })
+  await compileAction(path.join(dir, 'demo.ooc'), { destination: dir })
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
 
   const mod = await import(pathToFileURL(path.join(dir, 'demo.ts')).href)
@@ -95,23 +93,33 @@ loop apply [n set ((n get) + 1); (n get) < 5];
   if (value !== 5) throw new Error(`iterations 应为 5，实际 ${value}`)
 })
 
-test('宿主 globals 注入：只注入未绑定的外部名，消息名不注入', async () => {
-  const { dir } = await compileSource('globalsdemo', `
+test('宿主依赖是普通 import：产物没有 __globals/__globalsOf，也没有 _ooc_globals.ts', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
+  await fs.writeFile(
+    path.join(dir, 'host.ts'),
+    `export const storage = { ref: (v: unknown) => ({ value: v }) }\n`,
+    'utf-8',
+  )
+  await fs.writeFile(
+    path.join(dir, 'uses-host.ooc'),
+    `#import { storage } './host.ts';
 n = storage ref 0;
-[ n set ((n get) + 1); (n get) < 5 ];
-{ ok = 1 }
-`)
-  const code = await fs.readFile(path.join(dir, 'globalsdemo.ts'), 'utf8')
-  if (!/const storage = __globalsOf\(__globals, "storage"\)/.test(code)) {
-    throw new Error('应注入 storage 宿主 globals')
+{ ok = (n value) }
+`,
+    'utf-8',
+  )
+  await compileAction(path.join(dir, 'uses-host.ooc'), { destination: dir })
+  const code = await fs.readFile(path.join(dir, 'uses-host.ts'), 'utf8')
+  if (!/import \{ storage \} from '\.\/host\.ts'/.test(code)) {
+    throw new Error(`宿主依赖应编译成普通 ES import，实际:\n${code}`)
   }
-  if (!/import __globals from '\.\/_ooc_globals\.ts'/.test(code)) {
-    throw new Error('宿主 globals 应静态 import _ooc_globals.ts')
+  if (/__globals|__globalsOf|_ooc_globals/.test(code)) {
+    throw new Error(`产物不应再有任何 globals 注入痕迹，实际:\n${code}`)
   }
-  // 消息名 set/get 与已绑定名 n 不得被注入
-  const injected = [...code.matchAll(/__globalsOf\(__globals, "(\w+)"\)/g)].map((m) => m[1])
-  for (const name of ['set', 'get', 'n']) {
-    if (injected.includes(name)) throw new Error(`消息名/绑定名 ${name} 不应注入 globals`)
+  // 产物目录里也不该再有 _ooc_globals.ts
+  const outs = await fs.readdir(dir)
+  if (outs.includes('_ooc_globals.ts')) {
+    throw new Error(`不应再生成 _ooc_globals.ts，实际产物 ${outs.join(', ')}`)
   }
 })
 

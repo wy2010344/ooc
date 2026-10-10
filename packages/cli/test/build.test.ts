@@ -49,11 +49,38 @@ loop
   )
 
   await fs.writeFile(
+    path.join(root, 'src', 'host.ts'),
+    `export default {
+  storage: {
+    ref(v: number) {
+      let _v = v
+      return { get: () => _v, set: (x: number) => { _v = x } }
+    },
+  },
+}
+`,
+    'utf-8',
+  )
+  await fs.writeFile(
+    path.join(root, 'src', 'host.ts'),
+    `export default {
+  storage: {
+    ref(v: number) {
+      let _v = v
+      return { get: () => _v, set: (x: number) => { _v = x } }
+    },
+  },
+}
+`,
+    'utf-8',
+  )
+  await fs.writeFile(
     path.join(root, 'src', 'main.ooc'),
     `// 入口：相对 import math + 包 import @base/loop，组合宿主 storage
 math = #import './math';
 loop = #import '@base/loop';
-n = storage ref 0;
+host = #import './host.ts';
+n = (host storage) ref 0;
 loop apply [n set ((n get) + 1); (n get) < 5];
 {
     sum = (math add 2 3),
@@ -75,7 +102,7 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
     outDir: gen,
   })
 
-  // 产物：入口 + math + 包 loop + 共享 runtime + 共享 globals
+  // 产物：入口 + math + 包 loop + 共享 runtime
   const outs = result.files.map((f) => path.relative(gen, f.out).replace(/\\/g, '/'))
   for (const expected of ['src/main.ts', 'src/math.ts', 'ooc-pkg/base/loop.ts']) {
     if (!outs.includes(expected)) {
@@ -85,11 +112,13 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
   if (path.basename(result.runtimeOut) !== '_ooc_runtime.ts') {
     throw new Error(`共享运行时文件名应为 _ooc_runtime.ts，实际 ${result.runtimeOut}`)
   }
-  if (path.basename(result.globalsOut) !== '_ooc_globals.ts') {
-    throw new Error(`共享 globals 文件名应为 _ooc_globals.ts，实际 ${result.globalsOut}`)
-  }
   if (path.relative(gen, result.entryOut).replace(/\\/g, '/') !== 'src/main.ts') {
     throw new Error(`入口产物应为 src/main.ts，实际 ${result.entryOut}`)
+  }
+  // 产物目录里不应再有 _ooc_globals.ts（宿主依赖改走普通 import）
+  const dirEntries = await fs.readdir(gen)
+  if (dirEntries.includes('_ooc_globals.ts')) {
+    throw new Error(`不应再生成 _ooc_globals.ts，实际产物 ${dirEntries.join(', ')}`)
   }
 
   // Node ≥23.6 原生类型剥离：直接 import 生成的 .ts 树（纯 ES，import 即执行）
@@ -97,20 +126,7 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
     return
   }
   const rt = await import(pathToFileURL(result.runtimeOut).href)
-  // 宿主 globals 走 _ooc_globals.ts：测试项目自带一份并让产物转出去
-  const globalsSrc = path.join(root, 'host-globals.ts')
-  await fs.writeFile(
-    globalsSrc,
-    `export default { storage: { ref: (v: number) => { let _v = v; return { get: () => _v, set: (x: number) => { _v = x } } } } }`,
-    'utf-8',
-  )
-  await buildProject({
-    entry: path.join(root, 'src', 'main.ooc'),
-    rootDir: root,
-    outDir: gen,
-    globalsModule: globalsSrc,
-  })
-  const mod = await import(pathToFileURL(result.entryOut).href + '?v=2')
+  const mod = await import(pathToFileURL(result.entryOut).href)
   const value = mod.default
 
   const sum = rt.__send(value, 'sum', [])

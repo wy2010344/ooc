@@ -22,9 +22,6 @@ import { MODULES_DIR_NAME } from './install.js'
 /** 共享运行时产物文件名：各模块以相对 import 引用它。 */
 export const RUNTIME_FILE = '_ooc_runtime.ts'
 
-/** 共享宿主 globals 产物文件名：各模块静态 import 它拿 storage/dom 等宿主对象。 */
-export const GLOBALS_FILE = '_ooc_globals.ts'
-
 export type BuildResult = {
   /** 已编译模块：source 为源码绝对路径，out 为产物绝对路径 */
   files: Array<{ source: string; out: string }>
@@ -32,8 +29,6 @@ export type BuildResult = {
   entryOut: string
   /** 共享运行时产物绝对路径 */
   runtimeOut: string
-  /** 共享宿主 globals 产物绝对路径 */
-  globalsOut: string
 }
 
 export type BuildOptions = {
@@ -45,33 +40,13 @@ export type BuildOptions = {
   outDir?: string
   /** 包安装目录（默认 <rootDir>/.ooc_modules） */
   modulesDir?: string
-  /** 宿主 globals 模块（默认导出 globals 对象的 TS/JS 文件）：给了就转出去，否则空对象 */
-  globalsModule?: string
-}
-
-/** 空的宿主 globals 桩：没配 globalsModule 时产物自洽（用到宿主名的模块运行时才报错）。 */
-const EMPTY_GLOBALS = 'export default {}'
-
-/** _ooc_globals.ts 内容：转出去或空桩。globalsModule 相对 rootDir 解析，产物里按相对 outDir 引用。 */
-function globalsModuleSource(
-  globalsModule: string | undefined,
-  rootDir: string,
-  outDir: string,
-): string {
-  if (!globalsModule) {
-    return EMPTY_GLOBALS
-  }
-  const abs = path.isAbsolute(globalsModule)
-    ? globalsModule
-    : path.resolve(rootDir, globalsModule)
-  const rel = path.relative(outDir, abs).replace(/\\/g, '/')
-  return `export { default } from '${rel.startsWith('.') ? rel : `./${rel}`}';`
 }
 
 /**
  * 解析一个 #import 原值到真实源码文件。
  * - '@pkg'/sub：经 module-path 虚拟路径 /ooc-pkg/<pkg>/<file> → modulesDir/<pkg>/<file>
- * - 相对路径：相对 fromFile 目录；无扩展名补 .ooc
+ *   （包入口按 .ooc → .ts 顺序探测，OOC 可以 import TS 包）
+ * - 相对路径：相对 fromFile 目录；无扩展名先试 .ooc 再试 .ts
  */
 export function resolveImportSource(
   raw: string,
@@ -84,11 +59,14 @@ export function resolveImportSource(
     const slash = rest.indexOf('/')
     const pkg = slash === -1 ? rest : rest.slice(0, slash)
     const sub = slash === -1 ? 'index.ooc' : rest.slice(slash + 1)
-    return path.resolve(modulesDir, pkg, sub)
+    const ooc = path.resolve(modulesDir, pkg, sub)
+    // 包里没有该 .ooc 时回退到同名 .ts（OOC 可以直接 import TS 包）
+    return fs.existsSync(ooc) ? ooc : `${ooc.slice(0, -4)}.ts`
   }
-  let target = path.resolve(path.dirname(fromFile), raw)
+  const target = path.resolve(path.dirname(fromFile), raw)
   if (path.extname(target) === '') {
-    target += '.ooc'
+    const ooc = `${target}.ooc`
+    return fs.existsSync(ooc) ? ooc : `${target}.ts`
   }
   return target
 }
@@ -183,16 +161,10 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
     }
   }
 
-  // 生成产物：共享运行时 + 共享宿主 globals + 各模块 .ts
+  // 生成产物：共享运行时 + 各模块 .ts（宿主依赖就是普通 ES import，没有 globals 注入）
   fs.mkdirSync(outDir, { recursive: true })
   const runtimeOut = path.join(outDir, RUNTIME_FILE)
   fs.writeFileSync(runtimeOut, OOC_RUNTIME_MODULE + '\n')
-  // 宿主 globals 模块：默认空对象；给了 globalsModule 就转出去（用户自行提供 storage/dom 等）
-  const globalsOut = path.join(outDir, GLOBALS_FILE)
-  fs.writeFileSync(
-    globalsOut,
-    globalsModuleSource(options.globalsModule, rootDir, outDir) + '\n',
-  )
 
   const files: BuildResult['files'] = []
   for (const source of models.keys()) {
@@ -212,11 +184,10 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
       }
     })
     const runtimeImport = importSpecifier(out, runtimeOut)
-    const globalsImport = importSpecifier(out, globalsOut)
     const model = models.get(source)!
     const sourceText =
       `// Generated from ${path.relative(rootDir, source).replace(/\\/g, '/')} (ooc → ts)\n` +
-      modelToTs(model, { runtimeImport, globalsImport, deps })
+      modelToTs(model, { runtimeImport, deps })
     fs.mkdirSync(path.dirname(out), { recursive: true })
     fs.writeFileSync(out, sourceText)
     // 同名 .d.ts：TS 侧 import 该模块时拿到真实类型（而非 any）
@@ -232,6 +203,5 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
     files,
     entryOut: outPathFor(path.resolve(rootDir, options.entry), rootDir, modulesDir, outDir),
     runtimeOut,
-    globalsOut,
   }
 }

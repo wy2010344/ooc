@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { oocPlugin, OOC_GLOBALS_VIRTUAL_ID, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
+import { oocPlugin, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
 import { modelToTs, OOC_RUNTIME_MODULE } from 'object-oriented-c-cli'
 import { ObjectValue, createObjectOrientedCServices } from 'object-oriented-c-language'
 import { URI } from 'langium'
@@ -14,7 +14,6 @@ import * as ts from 'typescript'
 
 const plugin = oocPlugin()
 const RESOLVED_RUNTIME = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
-const RESOLVED_GLOBALS = '\u0000' + OOC_GLOBALS_VIRTUAL_ID
 
 /** vite 的插件 hook 类型是 ObjectHook（函数或 {handler,...}），这里统一取可调用形态。 */
 function hookOf<T extends (...args: any[]) => any>(h: any): T {
@@ -72,9 +71,6 @@ test('.ooc resolveId：相对引用归一化为真实绝对路径 id，dev/build
   if (resolveId.call(ctx, OOC_RUNTIME_VIRTUAL_ID) !== RESOLVED_RUNTIME) {
     throw new Error('runtime 虚拟 id 归一化失败')
   }
-  if (resolveId.call(ctx, OOC_GLOBALS_VIRTUAL_ID) !== RESOLVED_GLOBALS) {
-    throw new Error('globals 虚拟 id 归一化失败')
-  }
   // .ts 不接管，交给 vite 原生解析
   if (resolveId.call(ctx, './helper.ts', path.normalize(appPath)) !== undefined) {
     throw new Error('.ts 不应被本插件接管')
@@ -119,7 +115,6 @@ factory p
   fs.writeFileSync(namedApp, appSrc)
   const tsCode = modelToTs(parseFrom(appSrc, namedApp), {
     runtimeImport: 'virtual:ooc-runtime',
-    globalsImport: 'virtual:ooc-globals',
     deps: [{ path: 'lib', specifier: './lib.ooc', typeNames: ['Point'] }],
   })
   // 类型（Point / P）走 import type；值（scale/factory）走真 ES named import
@@ -134,24 +129,31 @@ factory p
   }
 })
 
-test('.ooc load：用到宿主 globals 时静态 import globals 虚拟模块', () => {
+test('.ooc load：宿主依赖就是普通 import（.ts），不再是 globals 注入', () => {
   const hostDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-host-'))
   test.after(() => fs.rmSync(hostDir, { recursive: true, force: true }))
-  const src = `counter = storage ref 0;
-{ bump() { counter set ((counter get) + 1) } }
+  const hostTs = path.join(hostDir, 'host.ts')
+  fs.writeFileSync(
+    hostTs,
+    `export const storage = { ref: (v: unknown) => ({ value: v }) }\n`,
+  )
+  const src = `#import { storage } './host.ts';
+counter = storage ref 0;
+{ bump() { 1 } }
 `
   const hostApp = path.join(hostDir, 'host.ooc')
   fs.writeFileSync(hostApp, src)
   const tsCode = modelToTs(parseFrom(src, hostApp), {
     runtimeImport: 'virtual:ooc-runtime',
-    globalsImport: 'virtual:ooc-globals',
-    deps: [],
+    deps: [
+      { path: './host.ts', specifier: './host.ts', typeNames: [] },
+    ],
   })
-  if (!/import __globals from 'virtual:ooc-globals'/.test(tsCode)) {
-    throw new Error(`宿主 globals 应静态 import 虚拟模块，实际:\n${tsCode}`)
+  if (!/import \{ storage \} from '\.\/host\.ts'/.test(tsCode)) {
+    throw new Error(`宿主依赖应编译成普通 ES import，实际:\n${tsCode}`)
   }
-  if (!/const storage = __globalsOf\(__globals, "storage"\)/.test(tsCode)) {
-    throw new Error(`宿主名应经 __globalsOf 取，实际:\n${tsCode}`)
+  if (/__globals|__globalsOf|_ooc_globals/.test(tsCode)) {
+    throw new Error(`不应再有任何 globals 注入痕迹，实际:\n${tsCode}`)
   }
   if (!/export const counter/.test(tsCode)) {
     throw new Error(`顶层声明应 export const，实际:\n${tsCode}`)
@@ -170,7 +172,6 @@ Circle #type { kind(): 'circle', radius: number };
   }
   const tsCode = modelToTs(parseFrom(src, path.join(dir, 'shape.ooc')), {
     runtimeImport: 'virtual:ooc-runtime',
-    globalsImport: 'virtual:ooc-globals',
     deps: [],
   })
   const typeAt = tsCode.indexOf('export type Circle')
@@ -188,23 +189,6 @@ test('虚拟 runtime 模块：resolveId 归一化、load 返回去掉类型的 J
   }
   if (/Record<string|: any/.test(js)) {
     throw new Error(`runtime 虚拟模块应为纯 JS（无类型注解），实际:\n${js}`)
-  }
-})
-
-test('虚拟 globals 模块：默认空桩，配置后转出去', () => {
-  const def: any = load.call(ctx, RESOLVED_GLOBALS)
-  if (!/export default \{\}/.test(def.code)) {
-    throw new Error(`未配置 globals 时应给空对象桩，实际:\n${def.code}`)
-  }
-  const withGlobals = oocPlugin({ globals: '/src/bridge-globals.ts' })
-  const resolveId2 = hookOf(withGlobals.resolveId)!
-  const load2 = hookOf(withGlobals.load)!
-  if (resolveId2.call(ctx, OOC_GLOBALS_VIRTUAL_ID) !== RESOLVED_GLOBALS) {
-    throw new Error('globals 虚拟 id 归一化失败')
-  }
-  const out: any = load2.call(ctx, RESOLVED_GLOBALS)
-  if (!/export \{ default \} from '\/src\/bridge-globals\.ts'/.test(out.code)) {
-    throw new Error(`配置后应转出去，实际:\n${out.code}`)
   }
 })
 
