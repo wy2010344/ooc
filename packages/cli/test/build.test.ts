@@ -120,3 +120,44 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
   const double = rt.__send(value, 'double', [])
   if (double !== 8) throw new Error(`math double 4 应为 8，实际 ${double}`)
 })
+test('ooc build��#import �ⲿ .ts ���������������룬ֱ�� ES import Դ�ļ�', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-build-ts-'))
+  await fs.mkdir(path.join(root, 'src'), { recursive: true })
+  // ���� TS ģ�飺���� + ֵ����
+  await fs.writeFile(
+    path.join(root, 'src', 'helper.ts'),
+    `export type Foo = { hi(): string }
+export const tag = 'ts-module'
+export default { tag }
+`,
+    'utf-8',
+  )
+  // ��ڣ����͵��루path ֮�����������루path ֮ǰ��������һ�� .ts ����
+  await fs.writeFile(
+    path.join(root, 'src', 'main.ooc'),
+    `#import './helper.ts' { Foo };
+#import { tag } './helper.ts';
+{ tag() { tag } }
+`,
+    'utf-8',
+  )
+  const gen = path.join(root, 'generated')
+  const result = await buildProject({
+    entry: path.join(root, 'src', 'main.ooc'),
+    rootDir: root,
+    outDir: gen,
+  })
+
+  // .ts �������������б���ֻ������ڣ�
+  const outs = result.files.map((f) => path.relative(gen, f.out).replace(/\\/g, '/'))
+  if (outs.length !== 1 || outs[0] !== 'src/main.ts') {
+    throw new Error(`.ts ������Ӧ�����룬ʵ�ʲ��� ${outs.join(', ')}`)
+  }
+  const code = await fs.readFile(result.entryOut, 'utf8')
+  if (!/import type \{ Foo \} from '\.\.\/\.\.\/src\/helper\.ts'/.test(code)) {
+    throw new Error(`���͵���Ӧ����� import type ָ�� .ts Դ�ļ���ʵ��:\n${code}`)
+  }
+  if (!/import \{ tag \} from '\.\.\/\.\.\/src\/helper\.ts'/.test(code)) {
+    throw new Error(`��������ֵӦ����� ES named import ָ�� .ts Դ�ļ���ʵ��:\n${code}`)
+  }
+})

@@ -166,7 +166,9 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
       ),
   }).ObjectOrientedC
 
-  // BFS 依赖图：source → Model
+  // BFS 依赖图：source → Model。
+  // 非 .ooc 依赖（如 #import './helper.ts'）是外部 ES 模块：不解析、不产码，
+  // 生成侧直接用 ES import 引用它们（vite 插件同样处理）。
   const models = new Map<string, Model>()
   const queue: string[] = [path.resolve(rootDir, options.entry)]
   while (queue.length > 0) {
@@ -176,9 +178,8 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
     models.set(source, model)
     for (const raw of collectImports(model)) {
       const dep = resolveImportSource(raw, source, modulesDir)
-      if (!models.has(dep)) {
-        queue.push(dep)
-      }
+      if (models.has(dep) || path.extname(dep) !== '.ooc') continue
+      queue.push(dep)
     }
   }
 
@@ -196,17 +197,20 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
   const files: BuildResult['files'] = []
   for (const source of models.keys()) {
     const out = outPathFor(source, rootDir, modulesDir, outDir)
-    // 该模块的依赖（按 AST 里 #import 出现顺序）：<原值, 目标产物说明符, 类型导出名>
-    const deps = collectImports(models.get(source)!).map((raw) => ({
-      path: raw,
-      specifier: importSpecifier(
-        out,
-        outPathFor(resolveImportSource(raw, source, modulesDir), rootDir, modulesDir, outDir),
-      ),
-      typeNames: typeExportNames(
-        models.get(resolveImportSource(raw, source, modulesDir)),
-      ),
-    }))
+    // 该模块的依赖（按 AST 里 #import 出现顺序）：<原值, ES import 说明符, 类型导出名>
+    const deps = collectImports(models.get(source)!).map((raw) => {
+      const depSource = resolveImportSource(raw, source, modulesDir)
+      // .ooc 依赖指向其编译产物；外部模块（.ts/.js）直接用源文件
+      const depTarget =
+        path.extname(depSource) === '.ooc'
+          ? outPathFor(depSource, rootDir, modulesDir, outDir)
+          : depSource
+      return {
+        path: raw,
+        specifier: importSpecifier(out, depTarget),
+        typeNames: typeExportNames(models.get(depSource)),
+      }
+    })
     const runtimeImport = importSpecifier(out, runtimeOut)
     const globalsImport = importSpecifier(out, globalsOut)
     const model = models.get(source)!
