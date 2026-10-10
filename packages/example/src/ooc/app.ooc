@@ -3,21 +3,21 @@
 
 // ===== 语言能力展示 =====
 
-// 可区分联合 + guard
+// 可区分联合 + guard 分支链（if/else-if/else）
 Circle #type { kind(): 'circle', radius: number };
 Square #type { kind(): 'square', side: number };
 
 area = {
     calc(s: Circle | Square) {
-        #guard (s kind) == 'circle';
-        (s radius) * (s radius) * 3.14
-    },
-    calc(s: Circle | Square) {
-        #guard (s kind) == 'square';
-        (s side) * (s side)
-    },
-    calc(s: Circle | Square) {
-        nil
+        (#guard (s kind) == 'circle'; {
+            (s radius) * (s radius) * 3.14
+        })
+        (#guard (s kind) == 'square'; {
+            (s side) * (s side)
+        })
+        (#else {
+            nil
+        })
     }
 };
 

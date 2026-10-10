@@ -204,73 +204,37 @@ export class ObjectOrientedCValidator {
 }
 
 /**
- * 重载语义检查：
- * 1. 同名方法必须相邻连续（重载分支聚在一起，中间不能隔其它名字的方法）。
- * 2. guard 只在重载组内起作用：单方法带 guard、非末尾分支缺 guard、末尾分支带 guard 均报错。
- *    重载组 = 同名的实现方法块；guard 分支 = 显式守卫，末尾分支 = 无条件兜底。
+ * 方法名唯一性检查：#guard 改成方法体内的分支语句后不再有「同名重载」，
+ * 同一个对象里同名**实现**（有 body）重复定义直接报错（否则后定义静默覆盖前定义）。
+ * 签名方法（无 body）是纯类型契约，与实现同名合法，不算重复。
  */
 function checkOverloadRules(
   methods: Method[],
   accept: ValidationAcceptor,
   kind: string,
 ): void {
-  // 同名方法必须相邻：末尾出现同名但上一条不是同名 → 报错
-  const lastPosition = new Map<string, number>()
-  methods.forEach((method, i) => {
+  const seen = new Set<string>()
+  for (const method of methods) {
     if (method.$type !== 'MethodAll') {
-      return
+      continue
     }
     const n = getMethodName(method)
     if (!n) {
-      return
+      continue
     }
-    const prev = lastPosition.get(n)
-    if (prev !== undefined && prev !== i - 1) {
+    // 签名方法（无 body）：只作类型声明，不与实现冲突
+    if (!method.body) {
+      continue
+    }
+    if (seen.has(n)) {
       accept(
         'error',
-        `${kind}里同名方法 '${n}' 的重载分支必须聚在一起（相邻连续），中间插了其它名字的方法`,
-        { node: method, property: 'name', data: diagnosticData('overloadNotAdjacent') },
+        `${kind}里方法 '${n}' 重复定义（#guard 是方法体内的分支语句，不再有同名重载；分支请写在同一个方法体里）`,
+        { node: method, property: 'name', data: diagnosticData('duplicateMethod') },
       )
+      continue
     }
-    lastPosition.set(n, i)
-  })
-
-  // 按名字收集实现方法块（MethodAll with body）
-  const groups = new Map<string, MethodAll[]>()
-  methods.forEach((method) => {
-    if (method.$type !== 'MethodAll' || !method.body) {
-      return
-    }
-    const n = getMethodName(method)
-    if (!n) {
-      return
-    }
-    const g = groups.get(n)
-    if (g) {
-      g.push(method)
-    } else {
-      groups.set(n, [method])
-    }
-  })
-
-  for (const [n, group] of groups) {
-    const last = group[group.length - 1]
-    // 多分支重载组：末尾分支是无条件兜底，不能带 guard
-    if (group.length > 1 && last.body?.guardExpression) {
-      accept(
-        'error',
-        `方法 '${n}' 的重载末尾分支是无条件兜底，不能带 #guard（前面的守卫分支对不上时会落入这里）`,
-        { node: last, property: 'name', data: diagnosticData('guardOnTrailingBranch') },
-      )
-    }
-    // 单方法（组里只有 1 个实现）：guard 只在重载组里起作用
-    if (group.length === 1 && last.body?.guardExpression) {
-      accept(
-        'error',
-        `方法 '${n}' 只有单个分支，不能带 #guard（guard 只在多分支重载组里起作用）`,
-        { node: last, property: 'name', data: diagnosticData('guardOnlyInOverload') },
-      )
-    }
+    seen.add(n)
   }
 }
 

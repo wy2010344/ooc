@@ -46,10 +46,13 @@ function messages(diags: Diagnostic[]): string[] {
 const baseLoopSource = `
 loop = {
     apply(fn) {
-        #guard fn apply;
-        this apply fn
+        (#guard fn apply; {
+            this apply fn
+        })
+        (#else {
+            nil
+        })
     },
-    apply(fn) => nil,
     repeat(n, fn) {
         (('x' repeat n) split '') forEach [v, i => fn apply i];
         nil
@@ -121,8 +124,14 @@ describe('OOC Interpreter', () => {
   test('#guard 分支', async () => {
     const result = await interpreter.interpret(`
             obj = {
-                fun(a) { #guard a > 5; a * 2 },
-                fun(a) { a }
+                fun(a) {
+                    (#guard a > 5; {
+                        a * 2
+                    })
+                    (#else {
+                        a
+                    })
+                }
             };
             obj fun 9;
             obj fun 3
@@ -140,20 +149,32 @@ describe('OOC Interpreter', () => {
     expect(result).toEqual([2, 3, 4])
   })
 
-  test('顶层对象 guard 不通过时方法未定义', async () => {
-    await expect(
-      interpreter.interpret(`
-                obj = { foo(x) { #guard x > 10; x } };
+  test('guard 不通过时落入 else 分支（不再视为方法未定义）', async () => {
+    const result = await interpreter.interpret(`
+                obj = { foo(x) {
+                    (#guard x > 10; {
+                        x
+                    })
+                    (#else {
+                        nil
+                    })
+                } };
                 obj foo 3
-            `),
-    ).rejects.toThrow('没有定义该方法')
+            `)
+    expect(result).toBe(null)
   })
 
-  test('重载组 guard 全不通过时落入末尾兜底', async () => {
+  test('guard 分支全不通过时落入 else 兜底块', async () => {
     const result = await interpreter.interpret(`
             obj = {
-                bar(a) { #guard a > 10; 'big' },
-                bar(a) { 'small' }
+                bar(a) {
+                    (#guard a > 10; {
+                        'big'
+                    })
+                    (#else {
+                        'small'
+                    })
+                }
             };
             obj bar 3
         `)
@@ -1251,10 +1272,13 @@ describe('ObjectValue 元信息反射', () => {
         'loop.ooc': `
           loop = {
               apply(fn) {
-                  #guard fn apply;
-                  this apply fn
+                  (#guard fn apply; {
+                      this apply fn
+                  })
+                  (#else {
+                      nil
+                  })
               },
-              apply(fn) => nil,
               repeat(n, fn) {
                   (('x' repeat n) split '') forEach [v, i => fn apply i];
                   nil

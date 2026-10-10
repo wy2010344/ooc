@@ -28,10 +28,13 @@ async function loadRuntime(dir: string): Promise<any> {
 const LOOP_SRC = `
 loop = {
     apply(fn) {
-        #guard fn apply;
-        this apply fn
+        (#guard fn apply; {
+            this apply fn
+        })
+        (#else {
+            nil
+        })
     },
-    apply(fn) => nil,
     repeat(n, fn) {
         (('x' repeat n) split '') forEach [v, i => fn apply i];
         nil
@@ -40,7 +43,7 @@ loop = {
 loop
 `
 
-test('guard 重载循环：apply 至少一次并按真值递归，repeat 恰好 n 次', async (t) => {
+test('guard 分支循环：apply 至少一次并按真值递归，repeat 恰好 n 次', async (t) => {
   const { ts: tsPath, dir } = await compileSource('loop', LOOP_SRC)
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
 

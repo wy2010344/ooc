@@ -128,9 +128,6 @@ export const DIAGNOSTIC_CODES = {
   invalidCast: 'invalidCast',
   unionUncovered: 'unionUncovered',
   delegateNoApply: 'delegateNoApply',
-  overloadNotAdjacent: 'overloadNotAdjacent',
-  guardOnTrailingBranch: 'guardOnTrailingBranch',
-  guardOnlyInOverload: 'guardOnlyInOverload',
 } as const
 
 /**

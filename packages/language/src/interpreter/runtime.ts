@@ -119,7 +119,7 @@ export function bindMethod(
   return s
 }
 
-/** 在已绑定参数的作用域上逐条执行方法体表达式，返回最后一条的值。 */
+/** 在已绑定参数的作用域上逐条执行方法体语句，返回最后一条的值。 */
 export function runBody(
   expressions: Array<Expression | Statement>,
   s: Scope,
@@ -180,24 +180,6 @@ export function objectValue(methods: Method[], scope: Scope) {
       enumerable: true,
       value() {
         const args = arguments
-        // 预计算本名字的 call 分支：是否有 guard、最后一个 call 的下标。
-        // 存在 guard 分支的重载组，末尾 call 作为无条件兜底（else）落入。
-        let lastCallIndex = -1
-        let hasGuardBranch = false
-        let callCount = 0
-        for (let i = 0; i < methods.length; i++) {
-          if (methods[i].type === 'call') {
-            callCount++
-            lastCallIndex = i
-            if (
-              (methods[i].value as { body?: { guardExpression?: unknown } })
-                .body?.guardExpression
-            ) {
-              hasGuardBranch = true
-            }
-          }
-        }
-        const isGuardOverload = hasGuardBranch && callCount >= 2
         for (let i = 0; i < methods.length; i++) {
           const pair = methods[i]
           switch (pair.type) {
@@ -215,74 +197,25 @@ export function objectValue(methods: Method[], scope: Scope) {
                 'apply',
                 Array.from(args),
               )
-            case 'call': {
+            case 'call':
+              // 单方法：按参数数量匹配；方法体内的 #guard 语句负责分支（if/else-if）
+              {
               const method = pair.value
-              if (isGuardOverload) {
-                // 重载组：只靠 #guard 显式守卫分派，不再校验参数数量
-                if (i === lastCallIndex) {
-                  // 末尾兜底：无条件落入（不看 guard 不看参数数量）
-                  const lastScope = bindMethod(
-                    method,
-                    scope,
-                    this,
-                    arguments as unknown as unknown[],
-                  )
-                  return runBody(method.body?.expressions ?? [], lastScope)
-                }
-                // 非末尾分支必须带 guard（validator 已强制），无 guard 防御性跳过
-                if (!method.body?.guardExpression) {
-                  continue
-                }
-                const guardScope = bindMethod(
-                  method,
-                  scope,
-                  this,
-                  arguments as unknown as unknown[],
-                )
-                if (interpretExpression(method.body.guardExpression, guardScope)) {
-                  return runBody(method.body?.expressions ?? [], guardScope)
-                }
-                continue
-              }
-              // 非重载组（单方法/旧参数数量重载）：保留参数数量匹配
               const minArgs = method.params.length
               const hasRest = !!method.restParam
-              
-              // 如果没有 guard，自动检查参数数量是否匹配
-              if (!method.body?.guardExpression) {
-                // 固定参数方法：调用参数数量必须恰好匹配
-                // 可变参数方法：调用参数数量必须 >= minArgs
-                const argsMatch = hasRest 
-                  ? arguments.length >= minArgs 
-                  : arguments.length === minArgs
-                
-                if (!argsMatch) {
-                  continue  // 参数数量不匹配，跳过这个方法
-                }
+              const argsMatch = hasRest
+                ? arguments.length >= minArgs
+                : arguments.length === minArgs
+              if (!argsMatch) {
+                continue // 参数数量不匹配，跳过这个方法
               }
-              
-              // 先绑参数再求值 guard：guard 可引用参数（`#guard a > 5`）
-              const s = bindMethod(
-                method,
-                scope,
-                this,
-                arguments as unknown as unknown[],
-              )
-              if (
-                !method.body?.guardExpression ||
-                (method.body?.guardExpression &&
-                  interpretExpression(method.body.guardExpression, s))
-              ) {
-                return runBody(method.body?.expressions ?? [], s)
+              return runGuardedBody(method, scope, this, args as unknown as unknown[])
               }
-            }
           }
         }
-        // guard 重载组末尾兜底已在前方落入，能走到这是单方法 guard 不通过、
-        // 参数数量不匹配，或对象通用方法也不命中：直接抛结构化错误。
+        // 参数数量不匹配/对象通用方法也不命中：直接抛结构化错误。
         // 无继承，不会沿原型链查找上层同名方法。兜底由显式 `js proxy` 包的
         // Proxy 动态派发，此处分派不再隐式兜底。
-        // 通用对象方法
         const fun = objectDefine[name as '&&']
         if (fun) {
           return fun(this, args[0])
@@ -292,6 +225,39 @@ export function objectValue(methods: Method[], scope: Scope) {
     })
   })
   return obj
+}
+
+/**
+ * 执行一个方法体，支持 #guard 分支链（if / else-if / else 语义）：
+ *   guardBranches 顺序判别，命中即执行该分支体并返回；
+ *   全不命中则执行 #else 分支体（无 #else 时返回 nil）。
+ */
+function runGuardedBody(
+  method: MethodAll,
+  scope: Scope,
+  receiver: unknown,
+  args: unknown[],
+): unknown {
+  const body = method.body
+  const s = bindMethod(method, scope, receiver, args)
+  const branches = body?.guardBranches ?? []
+  if (body?.elseBranch) {
+    // 单行分支链：=> (#guard c; { ... }) ... (#else { ... })
+    for (const branch of branches) {
+      if (interpretExpression(branch.guardExpression, s)) {
+        return runBody(
+          (branch.branchBody?.expressions ?? []) as Expression[],
+          s,
+        )
+      }
+    }
+    return runBody(
+      (body.elseBranch.elseBody?.expressions ?? []) as Expression[],
+      s,
+    )
+  }
+  // 无分支：单行体（=> expr）或普通语句块
+  return runBody((body?.stmts ?? []) as Expression[], s)
 }
 
 export function getMethodCallName({ value }: MethodCallName) {

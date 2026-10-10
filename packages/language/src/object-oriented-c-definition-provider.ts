@@ -66,7 +66,7 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
   private searchInScope(node: AstNode, name: string): AstNode | undefined {
     // 方法体（含实现方法）里的赋值定义；body 抽到 MethodBody 后字段在 body 上
     if (isMethodAll(node) && node.body) {
-      for (const expr of node.body.expressions) {
+      for (const expr of node.body.stmts) {
         if (isAssignment(expr) && expr.name === name) {
           return expr
         }

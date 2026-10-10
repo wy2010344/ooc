@@ -124,7 +124,7 @@ export async function interpret(
         named[e.name] = undefined
         return
       default:
-        last = interpretExpression(e, scope)
+        last = interpretExpression(e as Expression, scope)
         return
     }
   })

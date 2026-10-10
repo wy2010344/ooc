@@ -37,7 +37,6 @@ export type OOCEntry = {
   name: string
   value?: any
   fn?: (...args: any[]) => any
-  guard?: (...args: any[]) => any
   arity?: number
   rest?: boolean
 }
@@ -78,17 +77,6 @@ export function __createObject(entries: OOCEntry[]): any {
       enumerable: true,
       value() {
         const args = Array.from(arguments)
-        let lastCallIndex = -1
-        let hasGuardBranch = false
-        let callCount = 0
-        for (let i = 0; i < methods.length; i++) {
-          if (methods[i].type === 'call') {
-            callCount++
-            lastCallIndex = i
-            if (methods[i].guard) hasGuardBranch = true
-          }
-        }
-        const isGuardOverload = hasGuardBranch && callCount >= 2
         for (let i = 0; i < methods.length; i++) {
           const pair = methods[i]
           switch (pair.type) {
@@ -98,22 +86,12 @@ export function __createObject(entries: OOCEntry[]): any {
             case 'mutable':
               return __send(pair.value, 'apply', Array.from(args))
             case 'call': {
-              if (isGuardOverload) {
-                if (i === lastCallIndex) return pair.fn!.apply(this, args)
-                if (!pair.guard) continue
-                if (pair.guard.apply(this, args)) return pair.fn!.apply(this, args)
-                continue
-              }
+              // #guard 分支已编译进 fn（if/else if 链），这里只按参数数量匹配
               const arity = pair.arity ?? pair.fn!.length
               const rest = !!pair.rest
-              const minArgs = arity
-              if (!pair.guard) {
-                const match = rest ? args.length >= minArgs : args.length === minArgs
-                if (!match) continue
-              }
-              if (!pair.guard || pair.guard.apply(this, args)) {
-                return pair.fn!.apply(this, args)
-              }
+              const match = rest ? args.length >= arity : args.length === arity
+              if (!match) continue
+              return pair.fn!.apply(this, args)
             }
           }
         }

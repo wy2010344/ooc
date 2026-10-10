@@ -156,13 +156,15 @@ function methodCode(m: any): string | null {
       const body = m.body
       // 签名方法（无函数体）不烧录，与解释器一致
       if (!body) return null
-      const fn = `function(${paramList(m)}){ ${bodyCode(body)} }`
-      const guard = body.guardExpression
-        ? `, guard: function(${paramList(m)}){ return ${expressionCode(body.guardExpression)} }`
-        : ''
+      // #guard 分支链（preBranch 是 else 兜底，guardBranches 顺序判别）编译成
+      // if / else if / else 链，命中块执行完即 return
+      const guards = body.guardBranches ?? []
+      const fn = guards.length > 0
+        ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
+        : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
       const arity = m.params?.length ?? 0
       const rest = !!m.restParam
-      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn}, arity: ${arity}, rest: ${rest}${guard} }`
+      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn}, arity: ${arity}, rest: ${rest} }`
     }
   }
 }
@@ -174,9 +176,9 @@ function methodName(n: any): string {
   return raw.value ?? ''
 }
 
-function bodyCode(body: any): string {
+function bodyCode(stmts: any[]): string {
   const lines: string[] = ['let __last = null;']
-  for (const st of body.expressions || []) {
+  for (const st of stmts) {
     if (st.$type === 'Assignment') {
       lines.push(`let ${st.name} = ${expressionCode(st.expression)};`)
     } else {
@@ -185,6 +187,22 @@ function bodyCode(body: any): string {
   }
   lines.push('return __last;')
   return lines.join(' ')
+}
+
+/** #guard 分支链 → if / else if / else：命中即 return 该分支体的值。 */
+function guardedBodyCode(body: any): string {
+  const parts: string[] = []
+  const branches = body.guardBranches ?? []
+  branches.forEach((branch: any, i: number) => {
+    const kw = i === 0 ? 'if' : 'else if'
+    const block = bodyCode(branch.branchBody?.expressions ?? [])
+    parts.push(`${kw} (${expressionCode(branch.guardExpression)}) { ${block} }`)
+  })
+  const elseBlock = body.elseBranch
+    ? bodyCode(body.elseBranch.elseBody?.expressions ?? [])
+    : 'let __last = null; return __last;'
+  parts.push(`else { ${elseBlock} }`)
+  return parts.join(' ')
 }
 
 /** lambda [x => body]：等价 { apply(...) {...} }，编译成真正的 JS 函数（解释器语义：既是值又是函数）。 */

@@ -198,26 +198,33 @@ describe('类型检查（warning）', () => {
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
-  test('#guard 条件类型检查', async () => {
+  test('guard 条件为非布尔时告警', async () => {
     const diags = await diagnostics(`
         obj = {
             fun(a: number) {
-                #guard a;
-                a
+                (#guard a; {
+                    a
+                })
+                (#else {
+                    nil
+                })
             }
         }
     `)
-    expect(messages(diags).join('\n')).toContain('#guard')
+    expect(messages(diags).join('\n')).toContain('#guard 条件应该是布尔值')
   })
 
   test('无类型标注的 guard 不误报', async () => {
     const diags = await diagnostics(`
         obj = {
             fun(a) {
-                #guard a;
-                a
-            },
-            fun(a) { a }
+                (#guard a; {
+                    a
+                })
+                (#else {
+                    nil
+                })
+            }
         }
     `)
     expect(messages(diags)).toEqual([])
@@ -292,7 +299,7 @@ describe('类型检查（warning）', () => {
             fun() { 'x' }
         }
     `)
-    expect(messages(diags).join('\n')).toContain('重载返回类型不一致')
+    expect(messages(diags).join('\n')).toContain("重复定义")
   })
 
   test('不同方法不误报重载不一致', async () => {
@@ -320,15 +327,15 @@ describe('真实示例无类型告警', () => {
                 console log b
             },
             fun(a, b) {
-                #guard a > 9;
-                console log a "dddd
-            },
-            fun(a, b) {
-                #guard a < 5;
-                console log a 'ff'
-            },
-            fun(a, b) {
-                console log a "xxxx
+                (#guard a > 9; {
+                    console log a "dddd"
+                })
+                (#guard a < 5; {
+                    console log a 'ff'
+                })
+                (#else {
+                    console log a "xxxx"
+                })
             }
         };
         obj apply 1 2 3 4;
@@ -455,14 +462,16 @@ describe('字面量类型与可区分联合', () => {
         Square #type { kind(): 'square', side: number };
         area = {
             calc(s: Circle | Square) {
-                #guard (s kind) == 'circle';
-                (s radius) * (s radius)
-            },
-            calc(s: Circle | Square) {
-                #guard (s kind) == 'square';
-                (s side) * (s side)
-            },
-            calc(s: Circle | Square) { 0 }
+                (#guard (s kind) == 'circle'; {
+                    (s radius) * (s radius)
+                })
+                (#guard (s kind) == 'square'; {
+                    (s side) * (s side)
+                })
+                (#else {
+                    0
+                })
+            }
         };
         `)
     expect(messages(diags)).toEqual([])
@@ -474,14 +483,16 @@ describe('字面量类型与可区分联合', () => {
         Square #type { kind(): 'square', side: number };
         isSquare = {
             calc(s: Circle | Square) {
-                #guard (s kind) != 'circle';
-                s side
-            },
-            calc(s: Circle | Square) {
-                #guard (s kind) == 'circle';
-                s radius
-            },
-            calc(s: Circle | Square) { 0 }
+                (#guard (s kind) != 'circle'; {
+                    s side
+                })
+                (#guard (s kind) == 'circle'; {
+                    s radius
+                })
+                (#else {
+                    0
+                })
+            }
         }
     `)
     expect(messages(diags)).toEqual([])
@@ -530,9 +541,17 @@ describe('字面量类型与可区分联合', () => {
         cat = { type() => 'cat', meow() => 'miao' };
         dog = { type() => 'dog', bowwow() => 'bark' };
         say = {
-        speak(p: cat | dog) { #guard (p type) == 'cat'; p meow },
-        speak(p: cat | dog) { #guard (p type) == 'dog'; p bowwow },
-        speak(p: cat | dog) { '?' }
+        speak(p: cat | dog) {
+            (#guard (p type) == 'cat'; {
+                p meow
+            })
+            (#guard (p type) == 'dog'; {
+                p bowwow
+            })
+            (#else {
+                '?'
+            })
+        }
     }
     `)
     expect(messages(diags)).toEqual([])
@@ -1512,14 +1531,16 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
           Square #type { kind(): 'square', side: number };
           area = {
               area(s: Circle | Square) {
-                  #guard (s kind) == 'circle';
-                  (s radius) * (s radius)
-              },
-              area(s: Circle | Square) {
-                  #guard (s kind) == 'square';
-                  (s side) * (s side)
-              },
-              area(s: Circle | Square) { 0 }
+                  (#guard (s kind) == 'circle'; {
+                      (s radius) * (s radius)
+                  })
+                  (#guard (s kind) == 'square'; {
+                      (s side) * (s side)
+                  })
+                  (#else {
+                      0
+                  })
+              }
           };
           shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
           r: number = area area shape
@@ -1533,10 +1554,13 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
           Square #type { kind(): 'square', side: number };
           area = {
               area(s: Circle | Square) {
-                  #guard (s kind) == 'circle';
-                  s radius
-              },
-              area(s: Circle | Square) { 0 }
+                  (#guard (s kind) == 'circle'; {
+                      s radius
+                  })
+                  (#else {
+                      0
+                  })
+              }
           }
       `)
       expect(messages(diags).join('\n')).toContain('可区分联合覆盖不全')
@@ -1547,10 +1571,13 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       const diags = await diagnostics(`
           describe = {
               describe(x: 'circle' | 'square'): string {
-                  #guard x == 'circle';
-                  'round'
-              },
-              describe(x: 'circle' | 'square'): string { 'unknown' }
+                  (#guard x == 'circle'; {
+                      'round'
+                  })
+                  (#else {
+                      'unknown'
+                  })
+              }
           }
       `)
       expect(messages(diags).join('\n')).toContain('可区分联合覆盖不全')
@@ -1563,14 +1590,16 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
           Square #type { kind(): 'square', side: number };
           area = {
               area(s: Circle | Square) {
-                  #guard (s kind) == 'circle';
-                  s radius
-              },
-              area(s: Circle | Square) {
-                  #guard (s kind) != 'circle';
-                  s side
-              },
-              area(s: Circle | Square) { 0 }
+                  (#guard (s kind) == 'circle'; {
+                      s radius
+                  })
+                  (#guard (s kind) != 'circle'; {
+                      s side
+                  })
+                  (#else {
+                      0
+                  })
+              }
           }
       `)
       // 两个判别分支 target 都是 s、method 都是 kind，base 一致，覆盖检查正常进行
@@ -1582,13 +1611,16 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
           Circle #type { kind(): 'circle', radius: number };
           Square #type { kind(): 'square', side: number };
           area = {
-              area(s: Circle | Square): number {
-                  #guard (s kind) == 'circle';
-                  (s radius) * 2
-              },
-              area(s: Circle | Square): string {
-                  #guard (s kind) == 'square';
-                  (s side) + 'cm'
+              area(s: Circle | Square) {
+                  (#guard (s kind) == 'circle'; {
+                      (s radius) * 2
+                  })
+                  (#guard (s kind) == 'square'; {
+                      (s side) + 'cm'
+                  })
+                  (#else {
+                      nil
+                  })
               }
           };
           shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };

@@ -1,21 +1,21 @@
 // OOC 综合示例：覆盖所有语言特性
 // 类型、对象、泛型、lambda、guard、导入、JS 桥接等
 
-// ===== 1. 可区分联合 + guard 收窄 =====
+// ===== 1. 可区分联合 + guard 分支链 =====
 Circle #type { kind(): 'circle', radius: number };
 Square #type { kind(): 'square', side: number };
 
 area = {
     calc(s: Circle | Square) {
-        #guard (s kind) == 'circle';
-        (s radius) * (s radius) * 3.14
-    },
-    calc(s: Circle | Square) {
-        #guard (s kind) == 'square';
-        (s side) * (s side)
-    },
-    calc(s: Circle | Square) {
-        nil
+        (#guard (s kind) == 'circle'; {
+            (s radius) * (s radius) * 3.14
+        })
+        (#guard (s kind) == 'square'; {
+            (s side) * (s side)
+        })
+        (#else {
+            nil
+        })
     }
 };
 

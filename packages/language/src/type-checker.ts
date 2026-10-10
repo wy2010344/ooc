@@ -785,73 +785,7 @@ export class ObjectOrientedCTypeChecker {
         }
       }
     }
-    // 重载返回类型一致性（宽松检查）
-    // 末尾兜底分支（guard 重载组的最后一个无条件落入分支）不参与比较：
-    // 它是 guard 全不匹配时的运行时兜底，类型无需与守卫分支一致。
-    const fallbackMethods = new Set<MethodAll>()
-    {
-      const byName = new Map<string, MethodAll[]>()
-      for (const o of overloads) {
-        const n = this.getMethodName(o.method.name)
-        const g = byName.get(n)
-        if (g) {
-          g.push(o.method)
-        } else {
-          byName.set(n, [o.method])
-        }
-      }
-      for (const group of byName.values()) {
-        const hasGuard = group.some((m) => m.body?.guardExpression)
-        if (hasGuard && group.length > 1) {
-          fallbackMethods.add(group[group.length - 1])
-        }
-      }
-    }
-    for (let i = 0; i < overloads.length; i++) {
-      const a = overloads[i]
-      if (a.returns.kind === 'any') {
-        continue
-      }
-      for (let j = i + 1; j < overloads.length; j++) {
-        const b = overloads[j]
-        if (b.returns.kind === 'any') {
-          continue
-        }
-        if (fallbackMethods.has(a.method) || fallbackMethods.has(b.method)) {
-          continue
-        }
-        if (this.getMethodName(a.method.name) !== this.getMethodName(b.method.name)) {
-          continue
-        }
-        // 可区分联合的判别分支（同一判别目标/方法）各自返回字面量可不同：与 TS 签名豁免同理
-        const aTest =
-          a.method.body?.guardExpression &&
-          this.extractTagTest(a.method.body.guardExpression)
-        const bTest =
-          b.method.body?.guardExpression &&
-          this.extractTagTest(b.method.body.guardExpression)
-        if (
-          aTest &&
-          bTest &&
-          aTest.target === bTest.target &&
-          aTest.method === bTest.method
-        ) {
-          continue
-        }
-        if (
-          !isSubtype(a.returns, b.returns) ||
-          !isSubtype(b.returns, a.returns)
-        ) {
-          accept(
-            'warning',
-            `方法 '${this.getMethodName(a.method.name)}' 的重载返回类型不一致：${describeType(a.returns)} 与 ${describeType(b.returns)}`,
-            { node: b.method, property: 'name', data: diagnosticData('overloadReturnMismatch') },
-          )
-        }
-      }
-    }
-    // 可区分联合全覆盖：按方法名分组实现方法，第一个参数注解是联合时枚举覆盖
-    const implGroups = new Map<string, MethodAll[]>()
+    // 可区分联合全覆盖：方法体内 #guard 链是否覆盖第一个联合参数的所有成员
     for (const method of objDef.methods) {
       if (
         isMethodAll(method) &&
@@ -859,17 +793,8 @@ export class ObjectOrientedCTypeChecker {
         method.params &&
         method.params.length > 0
       ) {
-        const n = this.getMethodName(method.name)
-        const g = implGroups.get(n)
-        if (g) {
-          g.push(method)
-        } else {
-          implGroups.set(n, [method])
-        }
+        this.checkUnionCoverage(this.getMethodName(method.name), method, bodyEnv, accept)
       }
-    }
-    for (const [n, group] of implGroups) {
-      this.checkUnionCoverage(n, group, bodyEnv, accept)
     }
   }
 
@@ -897,13 +822,26 @@ export class ObjectOrientedCTypeChecker {
     const declaredReturn = method.returnType
       ? this.resolveAnnotation(method.returnType, accept, undefined, methodEnv)
       : anyType
-    if (method.body?.guardExpression) {
-      // 可区分联合的判别收窄：
-      //   #guard (x kind) == 'circle'  → x 收窄为 kind 返回 'circle' 的成员
-      //   #guard (x kind) != 'circle'  → x 收窄为其余成员
-      this.narrowByTag(method.body.guardExpression, methodEnv)
+    // #guard 是方法体的分支链（if/else-if/else）：preBranch 是 else 兜底块，
+    // guardBranches 顺序判别；返回类型 = 所有分支块值的联合。
+    const branches = method.body?.guardBranches ?? []
+    const blockReturns: TypeInfo[] = []
+    const returnOf = (stmts: Expression[]): TypeInfo => {
+      let t: TypeInfo = nilType
+      for (const stmt of stmts) {
+        if (isAssignment(stmt)) {
+          this.checkAssignment(stmt, methodEnv, accept)
+        } else {
+          t = this.inferExpression(stmt, methodEnv, accept)
+        }
+      }
+      return t
+    }
+    for (const branch of branches) {
+      // 判别收窄：guard 条件为真时收窄第一个联合参数
+      this.narrowByTag(branch.guardExpression, methodEnv)
       const guardType = this.inferExpression(
-        method.body.guardExpression,
+        branch.guardExpression,
         methodEnv,
         accept,
       )
@@ -915,18 +853,25 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'warning',
           `#guard 条件应该是布尔值，却得到了 ${describeType(guardType)}`,
-          { node: method.body.guardExpression, data: diagnosticData('guardNotBoolean') },
+          { node: branch.guardExpression, data: diagnosticData('guardNotBoolean') },
         )
       }
+      blockReturns.push(
+        returnOf((branch.branchBody?.expressions ?? []) as Expression[]),
+      )
     }
-    let returnType: TypeInfo = nilType
-    for (const stmt of method.body?.expressions ?? []) {
-      if (isAssignment(stmt)) {
-        this.checkAssignment(stmt, methodEnv, accept)
-      } else {
-        returnType = this.inferExpression(stmt, methodEnv, accept)
-      }
+    // else 兜底块：有 guard 分支时它也参与返回类型
+    if (branches.length > 0 && method.body?.elseBranch) {
+      blockReturns.push(
+        returnOf((method.body.elseBranch.elseBody?.expressions ?? []) as Expression[]),
+      )
     }
+    let returnType: TypeInfo =
+      blockReturns.length > 1
+        ? { kind: 'union', types: blockReturns }
+        : branches.length === 1
+          ? blockReturns[0]!
+          : returnOf((method.body?.stmts ?? []) as Expression[])
     if (method.returnType) {
       this.checkAnnotation(method.returnType, returnType, accept, undefined, methodEnv)
     }
@@ -1113,11 +1058,11 @@ export class ObjectOrientedCTypeChecker {
    */
   private checkUnionCoverage(
     name: string,
-    group: MethodAll[],
+    method: MethodAll,
     env: TypeEnv,
     accept: ValidationAcceptor,
   ): void {
-    const firstParam = group[0]?.params?.[0]
+    const firstParam = method.params?.[0]
     if (!firstParam?.typeAnnotation) {
       return
     }
@@ -1131,7 +1076,7 @@ export class ObjectOrientedCTypeChecker {
       return
     }
     const members = paramType.types
-    // 收集每个 #guard 分支的判别；末尾无 guard 的兜底分支跳过（runtime 最后落入）。
+    // 收集方法体内 #guard 分支的判别；末尾无 guard 的兜底块跳过（runtime 最后落入）。
     // 判别基准（target/判别方法）在 guard 分支间不一致时跳过，避免误报。
     const tests: {
       target: string
@@ -1139,12 +1084,8 @@ export class ObjectOrientedCTypeChecker {
       value: TypeInfo
       negate: boolean
     }[] = []
-    for (const m of group) {
-      const guardExpr = m.body?.guardExpression
-      if (!guardExpr) {
-        continue
-      }
-      const t = this.extractTagTest(guardExpr)
+    for (const branch of method.body?.guardBranches ?? []) {
+      const t = this.extractTagTest(branch.guardExpression)
       if (!t || t.target !== firstParam.name) {
         return
       }
@@ -1172,7 +1113,7 @@ export class ObjectOrientedCTypeChecker {
         'warning',
         `方法 '${name}' 的可区分联合覆盖不全：联合成员 ${missing.map(describeType).join('、')} 没有对应的 #guard 判别分支`,
         {
-          node: group[0],
+          node: method,
           property: 'name',
           data: diagnosticData('unionUncovered'),
         },

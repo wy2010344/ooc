@@ -212,7 +212,7 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
         }
       }
       if (method.body) {
-        for (const expr of method.body.expressions) {
+        for (const expr of method.body.stmts) {
           if (isAssignment(expr)) {
             result.set(expr.name, inferTypeString(this.checker, expr.expression))
           }

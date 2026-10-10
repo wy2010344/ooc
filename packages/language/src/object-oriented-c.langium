@@ -46,8 +46,14 @@ TypeMember:
         (':' typeAnnotation=Type)?
 ;
 
+// 语句：
+//  - Assignment  局部赋值
+//  - Expression 其它表达式
+// 分支守卫不是普通语句：#guard 必须带分支体并位于方法体末尾（见 MethodBody/GuardBranch），
+// 这样「命中哪个分支、兜底块是哪段」在语法上无歧义。
 Statement:
-    Assignment  | Expression;
+    Assignment | Expression
+;
 
 //绑定
 Assignment:
@@ -73,13 +79,28 @@ MethodAll:
 
 MethodBody:
     (
-        ('{' 
-            ('#guard' guardExpression=Expression ';')?
-            (expressions+=Statement (';' expressions+=Statement)* ';'?)?
-         '}'
-        ) 
-      | ('=>' expressions+=Expression) 
+        ('{'
+            (stmts+=Statement (';' stmts+=Statement)* ';'?)?
+            (guardBranches+=GuardBranch)*
+            (elseBranch=ElseBranch)?
+         '}')
+      | ('=>' guardBranches+=GuardBranch+ elseBranch=ElseBranch?)
+      | ('=>' stmts+=Expression)
     );
+
+// 分支块：({ #guard 条件; 分支体 }) —— 括号把条件+体包成一个整体，
+// 避免与方法体/对象字面量的花括号混在一起造成二义。
+GuardBranch:
+    '(' '#guard' guardExpression=Expression ';' branchBody=BranchBody ')'
+;
+// else 兜底块：(#else { 语句 }) —— 全部 guard 都不命中时执行。
+ElseBranch:
+    '(' '#else' elseBody=BranchBody ')'
+;
+
+BranchBody:
+    '{' (expressions+=Statement (';' expressions+=Statement)* ';'?)? '}'
+;
 
 
 MethodBind:

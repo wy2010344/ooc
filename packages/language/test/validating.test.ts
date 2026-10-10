@@ -132,10 +132,11 @@ describe('Validating', () => {
     ).toHaveLength(0)
   })
 
-  test('单方法 guard 报 guardOnlyInOverload', async () => {
+  test('同名方法重复定义报 duplicateMethod', async () => {
     document = await parse(`
             obj = {
-                fun(a) { #guard a > 5; a }
+                fun(a) => a,
+                fun(b) => b
             };
         `)
 
@@ -143,29 +144,20 @@ describe('Validating', () => {
       (checkDocumentValid(document) ||
         document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
       ''
-    expect(output).toContain('guard')
+    expect(output).toContain('重复定义')
   })
 
-  test('重载组末尾分支带 guard 报 guardOnTrailingBranch', async () => {
+  test('单方法带 #guard 分支链不再报错', async () => {
     document = await parse(`
             obj = {
-                fun(a) { #guard a > 5; a },
-                fun(a) { #guard a < 5; a }
-            };
-        `)
-
-    const output =
-      (checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
-      ''
-    expect(output).toContain('guard')
-  })
-
-  test('重载组末尾无 guard 兜底合法', async () => {
-    document = await parse(`
-            obj = {
-                fun(a) { #guard a > 5; a },
-                fun(a) { a }
+                fun(a) {
+                    (#guard a > 5; {
+                        a
+                    })
+                    (#else {
+                        a
+                    })
+                }
             };
         `)
 
@@ -173,22 +165,6 @@ describe('Validating', () => {
       checkDocumentValid(document) ||
         document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
-  })
-
-  test('同名重载不相邻报 overloadNotAdjacent', async () => {
-    document = await parse(`
-            obj = {
-                fun(a) { a },
-                bar(a) { a },
-                fun(a, b) { a }
-            };
-        `)
-
-    const output =
-      (checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n')) ||
-      ''
-    expect(output).toContain('相邻')
   })
 })
 
