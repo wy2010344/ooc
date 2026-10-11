@@ -856,15 +856,11 @@ export class ObjectOrientedCTypeChecker {
           { node: branch.guardExpression, data: diagnosticData('guardNotBoolean') },
         )
       }
-      blockReturns.push(
-        returnOf((branch.branchBody?.expressions ?? []) as Expression[]),
-      )
+      blockReturns.push(returnOf(branch.stmts as Expression[]))
     }
     // else 兜底块：有 guard 分支时它也参与返回类型
     if (branches.length > 0 && method.body?.elseBranch) {
-      blockReturns.push(
-        returnOf((method.body.elseBranch.elseBody?.expressions ?? []) as Expression[]),
-      )
+      blockReturns.push(returnOf(method.body.elseBranch.stmts as Expression[]))
     }
     let returnType: TypeInfo =
       blockReturns.length > 1

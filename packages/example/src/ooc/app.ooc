@@ -9,15 +9,12 @@ Square #type { kind(): 'square', side: number };
 
 area = {
     calc(s: Circle | Square) {
-        (#guard (s kind) == 'circle'; {
-            (s radius) * (s radius) * 3.14
-        })
-        (#guard (s kind) == 'square'; {
-            (s side) * (s side)
-        })
-        (#else {
-            nil
-        })
+        #guard (s kind) == 'circle';
+        (s radius) * (s radius) * 3.14
+        #guard (s kind) == 'square';
+        (s side) * (s side)
+        #else;
+        nil
     }
 };
 

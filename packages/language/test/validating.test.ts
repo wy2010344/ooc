@@ -151,12 +151,10 @@ describe('Validating', () => {
     document = await parse(`
             obj = {
                 fun(a) {
-                    (#guard a > 5; {
-                        a
-                    })
-                    (#else {
-                        a
-                    })
+                    #guard a > 5;
+                    a
+                    #else;
+                    a
                 }
             };
         `)

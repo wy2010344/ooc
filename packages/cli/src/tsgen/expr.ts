@@ -189,17 +189,17 @@ function bodyCode(stmts: any[]): string {
   return lines.join(' ')
 }
 
-/** #guard 分支链 → if / else if / else：命中即 return 该分支体的值。 */
+/** #guard 分支链 → if / else if / else：命中即 return 该分支语句段的值。 */
 function guardedBodyCode(body: any): string {
   const parts: string[] = []
   const branches = body.guardBranches ?? []
   branches.forEach((branch: any, i: number) => {
     const kw = i === 0 ? 'if' : 'else if'
-    const block = bodyCode(branch.branchBody?.expressions ?? [])
+    const block = bodyCode(branch.stmts ?? [])
     parts.push(`${kw} (${expressionCode(branch.guardExpression)}) { ${block} }`)
   })
   const elseBlock = body.elseBranch
-    ? bodyCode(body.elseBranch.elseBody?.expressions ?? [])
+    ? bodyCode(body.elseBranch.stmts ?? [])
     : 'let __last = null; return __last;'
   parts.push(`else { ${elseBlock} }`)
   return parts.join(' ')

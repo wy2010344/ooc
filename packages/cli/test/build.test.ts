@@ -28,12 +28,10 @@ async function makeProject(): Promise<string> {
     `// base 包循环：#guard 分支链（递归 apply + nil 兜底）
 loop = {
     apply(fn) {
-        (#guard fn apply; {
-            this apply fn
-        })
-        (#else {
-            nil
-        })
+        #guard fn apply;
+        this apply fn
+        #else;
+        nil
     },
     repeat(n, fn) {
         i = 0;

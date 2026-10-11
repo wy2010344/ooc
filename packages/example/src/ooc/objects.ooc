@@ -9,15 +9,13 @@ calc add 3 4;
 calc cached;
 calc inc 3;
 
-// 守卫分支链：命中的分支体执行完即返回，全不命中走 #else
+// 守卫分支链：命中的分支语句段执行完即返回，全不命中走 #else
 size = {
     check(n) {
-        (#guard n > 100; {
-            'big'
-        })
-        (#else {
-            'small'
-        })
+        #guard n > 100;
+        'big'
+        #else;
+        'small'
     }
 };
 size check 200;

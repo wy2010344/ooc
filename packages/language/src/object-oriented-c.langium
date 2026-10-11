@@ -88,18 +88,16 @@ MethodBody:
       | ('=>' stmts+=Expression)
     );
 
-// 分支块：({ #guard 条件; 分支体 }) —— 括号把条件+体包成一个整体，
-// 避免与方法体/对象字面量的花括号混在一起造成二义。
+// 分支段：#guard 条件; 后跟该分支的语句，直到下一条 #guard / #else / 方法体结束。
+// 不用额外括号或花括号——靠分号分段，读起来就是 if / else if / else。
 GuardBranch:
-    '(' '#guard' guardExpression=Expression ';' branchBody=BranchBody ')'
+    '#guard' guardExpression=Expression ';'
+    (stmts+=Statement (';' stmts+=Statement)* ';'?)?
 ;
-// else 兜底块：(#else { 语句 }) —— 全部 guard 都不命中时执行。
+// else 兜底段：以上 #guard 全不命中时执行。
 ElseBranch:
-    '(' '#else' elseBody=BranchBody ')'
-;
-
-BranchBody:
-    '{' (expressions+=Statement (';' expressions+=Statement)* ';'?)? '}'
+    '#else' ';'
+    (stmts+=Statement (';' stmts+=Statement)* ';'?)?
 ;
 
 

@@ -229,8 +229,9 @@ export function objectValue(methods: Method[], scope: Scope) {
 
 /**
  * 执行一个方法体，支持 #guard 分支链（if / else-if / else 语义）：
- *   guardBranches 顺序判别，命中即执行该分支体并返回；
- *   全不命中则执行 #else 分支体（无 #else 时返回 nil）。
+ *   无分支时按普通语句块（或单行体）执行；
+ *   有分支时 guardBranches 顺序判别，命中即执行该分支语句并返回；
+ *   全不命中则执行 #else 分支（无 #else 时返回 nil）。
  */
 function runGuardedBody(
   method: MethodAll,
@@ -241,23 +242,17 @@ function runGuardedBody(
   const body = method.body
   const s = bindMethod(method, scope, receiver, args)
   const branches = body?.guardBranches ?? []
-  if (body?.elseBranch) {
-    // 单行分支链：=> (#guard c; { ... }) ... (#else { ... })
-    for (const branch of branches) {
-      if (interpretExpression(branch.guardExpression, s)) {
-        return runBody(
-          (branch.branchBody?.expressions ?? []) as Expression[],
-          s,
-        )
-      }
-    }
-    return runBody(
-      (body.elseBranch.elseBody?.expressions ?? []) as Expression[],
-      s,
-    )
+  if (branches.length === 0 && !body?.elseBranch) {
+    return runBody((body?.stmts ?? []) as Expression[], s)
   }
-  // 无分支：单行体（=> expr）或普通语句块
-  return runBody((body?.stmts ?? []) as Expression[], s)
+  for (const branch of branches) {
+    if (interpretExpression(branch.guardExpression, s)) {
+      return runBody(branch.stmts as Expression[], s)
+    }
+  }
+  return body?.elseBranch
+    ? runBody(body.elseBranch.stmts as Expression[], s)
+    : null
 }
 
 export function getMethodCallName({ value }: MethodCallName) {

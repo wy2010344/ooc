@@ -28,12 +28,10 @@ async function loadRuntime(dir: string): Promise<any> {
 const LOOP_SRC = `
 loop = {
     apply(fn) {
-        (#guard fn apply; {
-            this apply fn
-        })
-        (#else {
-            nil
-        })
+        #guard fn apply;
+        this apply fn
+        #else;
+        nil
     },
     repeat(n, fn) {
         (('x' repeat n) split '') forEach [v, i => fn apply i];

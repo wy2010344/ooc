@@ -46,12 +46,10 @@ function messages(diags: Diagnostic[]): string[] {
 const baseLoopSource = `
 loop = {
     apply(fn) {
-        (#guard fn apply; {
-            this apply fn
-        })
-        (#else {
-            nil
-        })
+        #guard fn apply;
+        this apply fn
+        #else;
+        nil
     },
     repeat(n, fn) {
         (('x' repeat n) split '') forEach [v, i => fn apply i];
@@ -125,12 +123,10 @@ describe('OOC Interpreter', () => {
     const result = await interpreter.interpret(`
             obj = {
                 fun(a) {
-                    (#guard a > 5; {
-                        a * 2
-                    })
-                    (#else {
-                        a
-                    })
+                    #guard a > 5;
+                    a * 2
+                    #else;
+                    a
                 }
             };
             obj fun 9;
@@ -152,12 +148,10 @@ describe('OOC Interpreter', () => {
   test('guard 不通过时落入 else 分支（不再视为方法未定义）', async () => {
     const result = await interpreter.interpret(`
                 obj = { foo(x) {
-                    (#guard x > 10; {
-                        x
-                    })
-                    (#else {
-                        nil
-                    })
+                    #guard x > 10;
+                    x
+                    #else;
+                    nil
                 } };
                 obj foo 3
             `)
@@ -168,12 +162,10 @@ describe('OOC Interpreter', () => {
     const result = await interpreter.interpret(`
             obj = {
                 bar(a) {
-                    (#guard a > 10; {
-                        'big'
-                    })
-                    (#else {
-                        'small'
-                    })
+                    #guard a > 10;
+                    'big'
+                    #else;
+                    'small'
                 }
             };
             obj bar 3
@@ -1272,12 +1264,10 @@ describe('ObjectValue 元信息反射', () => {
         'loop.ooc': `
           loop = {
               apply(fn) {
-                  (#guard fn apply; {
-                      this apply fn
-                  })
-                  (#else {
-                      nil
-                  })
+                  #guard fn apply;
+                  this apply fn
+                  #else;
+                  nil
               },
               repeat(n, fn) {
                   (('x' repeat n) split '') forEach [v, i => fn apply i];

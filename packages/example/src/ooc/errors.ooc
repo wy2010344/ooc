@@ -32,7 +32,7 @@
 // calc add 1 'x';
 
 // 9. guardNotBoolean：#guard 条件不是布尔
-// obj = { fun(a: number) { (#guard a; { a }) (#else { nil }) } };
+// obj = { fun(a: number) { #guard a; a #else; nil } };
 
 // 10. partialUnionMessage：联合类型成员专属方法未判别
 // c: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
@@ -40,8 +40,10 @@
 
 // 10b. unionUncovered：可区分联合判别分支覆盖不全（漏掉成员；#else 不算判别）
 // missing = { calc(s: Circle | Square) {
-//     (#guard (s kind) == 'circle'; { s radius })
-//     (#else { nil })
+//     #guard (s kind) == 'circle';
+//     s radius
+//     #else;
+//     nil
 // } };
 
 // 10c. 签名方法必须声明返回类型（否则是悬空的垃圾写法）
