@@ -148,10 +148,17 @@ export function objectDefCode(obj: any): string {
 function methodCode(m: any): string | null {
   const name = methodName(m.name)
   switch (m.$type) {
+    // bind / mutable 是惰性绑定：编译成 thunk（首次调用求值并缓存），
+    // 值可以是单表达式或 @{ 多条语句 } 块（块内可局部赋值、最后一条是值）。
     case 'MethodBind':
-      return `{ type: 'bind', name: ${JSON.stringify(name)}, value: ${expressionCode(m.expression)} }`
-    case 'MethodBindMutable':
-      return `{ type: 'mutable', name: ${JSON.stringify(name)}, value: ${expressionCode(m.expression)} }`
+    case 'MethodBindMutable': {
+      const type = m.$type === 'MethodBind' ? 'bind' : 'mutable'
+      const body = m.bindBody
+      const fn = body && body.$type === 'BindBlock'
+        ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
+        : `function(){ return ${expressionCode(body.expression)} }`
+      return `{ type: '${type}', name: ${JSON.stringify(name)}, fn: ${fn} }`
+    }
     default: {
       const body = m.body
       // 签名方法（无函数体）不烧录，与解释器一致
@@ -176,17 +183,27 @@ function methodName(n: any): string {
   return raw.value ?? ''
 }
 
+/**
+ * 块 → JS：复刻解释器 runBody 的 addScope 语义——「先用外层作用域求值 RHS，再遮蔽绑定」。
+ * JS 的 let/var 提升是词法的，`let x = <引用 x 的 RHS>` 必 TDZ，所以逐层套块：
+ *   { const __v1 = <RHS1>; { const x = __v1; ... } }
+ * RHS 在 x 尚未声明的块里求值，自然引用外层同名值。
+ */
 function bodyCode(stmts: any[]): string {
-  const lines: string[] = ['let __last = null;']
-  for (const st of stmts) {
+  if (stmts.length === 0) {
+    return 'let __last = null; return __last;'
+  }
+  // 自内向外逐层包裹：最内层是最后一条语句（块的值）
+  let inner = `__last = ${expressionCode(stmts[stmts.length - 1] as any)}; return __last;`
+  for (let i = stmts.length - 2; i >= 0; i--) {
+    const st = stmts[i]
     if (st.$type === 'Assignment') {
-      lines.push(`let ${st.name} = ${expressionCode(st.expression)};`)
+      inner = `{ const __v${i} = ${expressionCode(st.expression)}; { const ${st.name} = __v${i}; ${inner} } }`
     } else {
-      lines.push(`__last = ${expressionCode(st)};`)
+      inner = `{ __last = ${expressionCode(st as any)}; ${inner} }`
     }
   }
-  lines.push('return __last;')
-  return lines.join(' ')
+  return `let __last = null; ${inner}`
 }
 
 /** #guard 分支链 → if / else if / else：命中即 return 该分支语句段的值。 */

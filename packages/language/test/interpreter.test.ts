@@ -189,6 +189,62 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(42)
   })
 
+  test('bind 惰性求值：构造时不算，首次读取才算', async () => {
+    const result = await interpreter.interpret(`
+            obj = {
+                total = @{ this scale; 10 },
+                scale = 3
+            };
+            obj total
+        `)
+    expect(result).toBe(10)
+  })
+
+  test('bind 惰性求值只算一次：首次读取后缓存', async () => {
+    const result = await interpreter.interpret(`
+            count = 0;
+            obj = { v = @{ count = count + 1; count } };
+            a = obj v;
+            b = obj v;
+            a + b
+        `)
+    expect(result).toBe(2)
+  })
+
+  test('bind 块支持多条语句：局部赋值 + 最后一条是值', async () => {
+    const result = await interpreter.interpret(`
+            obj = { v = @{ a = 1; b = 2; a + b } };
+            obj v
+        `)
+    expect(result).toBe(3)
+  })
+
+  test('bind 块可引用外层变量', async () => {
+    const result = await interpreter.interpret(`
+            base = 7;
+            obj = { v = @{ dummy = 0; base + 1 } };
+            obj v
+        `)
+    expect(result).toBe(8)
+  })
+
+  test('{ a = 1 } 仍是对象字面量（未被 bind 块抢占）', async () => {
+    const result = await interpreter.interpret(`
+            obj = { a = 1 };
+            obj a
+        `)
+    expect(result).toBe(1)
+  })
+
+  test('转发属性 <= 惰性 + 多语句块', async () => {
+    const result = await interpreter.interpret(`
+            counter = { apply(x) => x * 10 };
+            obj = { ping <= @{ pick = counter; pick } };
+            obj ping 5
+        `)
+    expect(result).toBe(50)
+  })
+
   test('转发属性 <= ：消息转发给委托对象的 apply 执行', async () => {
     const result = await interpreter.interpret(`
             counter = {
@@ -969,11 +1025,12 @@ describe('ObjectValue 元信息反射', () => {
     `)
     const meta = ObjectValue.metaOf(result)
     expect(meta instanceof Map).toBe(true)
-    // 本层成员：d（bind）缓存值即定义时求值、e（call）
+    // 本层成员：d（bind 惰性）、e（call）
     expect([...meta!.keys()]).toEqual(['d', 'e'])
     const d = meta!.get('d')![0]
     expect(d.type).toBe('bind')
-    expect((d as { value: number }).value).toBe(2)
+    // bind 是惰性绑定：meta 上只带 AST/作用域，不存求值后的缓存值
+    expect((d as { lazy: unknown }).lazy).not.toBe(undefined)
     expect(meta!.get('e')![0].type).toBe('call')
   })
 

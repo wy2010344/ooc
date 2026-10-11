@@ -7,6 +7,9 @@ import {
   Message,
   Statement,
   MethodAll,
+  MethodBind,
+  MethodBindMutable,
+  isBindBlock,
 } from '../generated/ast.js'
 import { numDef } from '../library/num.js'
 import { objectDefine } from '../library/object.js'
@@ -33,18 +36,26 @@ export const OOC_META = Symbol.for('ooc:meta')
 /** 对象元信息：只含本层定义，无继承。
  *  Map 键是消息名，值是同名定义（bind/mutable/call，含 guard 重载）的完整列表——
  *  不在烧录期折叠，宿主可据 value 字段直接消费（bind 挂缓存值、mutable 挂委托对象、call 挂方法）。 */
+/** bind / mutable 的惰性绑定：首次访问时求值 body 并缓存 */
+type LazyBind = {
+  method: MethodBind | MethodBindMutable
+  scope: Scope
+  done: boolean
+  value: unknown
+}
+
 export type OocMeta = Map<
   string,
   (
     | {
         type: 'bind'
         name: string
-        value: any
+        lazy: LazyBind
       }
     | {
         type: 'mutable'
         name: string
-        value: unknown
+        lazy: LazyBind
       }
     | {
         type: 'call'
@@ -148,16 +159,18 @@ export function objectValue(methods: Method[], scope: Scope) {
     methods.map((method) => {
       switch (method.$type) {
         case 'MethodBind':
+          // 惰性求值：首次读这个 key 时才算，结果缓存（this 绑定到本对象）
           return {
             type: 'bind' as const,
             name: getObjDefineName(method.name),
-            value: interpretExpression(method.expression, scope),
+            lazy: { method, scope, done: false, value: undefined as unknown },
           }
         case 'MethodBindMutable':
+          // 转发属性同样惰性：首次发消息时求值委托对象并缓存
           return {
             type: 'mutable' as const,
             name: getObjDefineName(method.name),
-            value: interpretExpression(method.expression, scope) as unknown,
+            lazy: { method, scope, done: false, value: undefined as unknown },
           }
         default:
           // 签名方法（无 body）是纯书写期类型契约，运行时无行为，不烧录
@@ -173,6 +186,21 @@ export function objectValue(methods: Method[], scope: Scope) {
     }).filter((item) => item !== undefined),
     getName,
   )
+  // 惰性绑定：首次访问时求值 body 并缓存（多语句块的最后一条是值）
+  const lazyValue = (pair: {
+    lazy: LazyBind
+  }): unknown => {
+    if (pair.lazy.done) {
+      return pair.lazy.value
+    }
+    const body = pair.lazy.method.bindBody
+    const s = addScope(pair.lazy.scope, 'this', obj)
+    pair.lazy.value = isBindBlock(body)
+      ? runBody(body.bindStmts, s)
+      : interpretExpression(body.expression, s)
+    pair.lazy.done = true
+    return pair.lazy.value
+  }
   attachMeta(obj, meta)
   meta.forEach(function (methods, name) {
     // 所有定义（含 bind）统一作为方法函数，bind 在函数体内直接返回绑定值
@@ -186,14 +214,14 @@ export function objectValue(methods: Method[], scope: Scope) {
             case 'bind':
               // bind 只匹配无参调用，有参数时跳过，让后面的 call 方法处理
               if (arguments.length === 0) {
-                return pair.value
+                return lazyValue(pair)
               }
               continue
             case 'mutable':
               // 转发属性：本 key 上的一切消息（任意参数数量）都原样转发给
               // 委托对象的 apply 执行（消息名不传给 apply，只传实参）。
               return sendMessage(
-                (pair as { value: unknown }).value,
+                lazyValue(pair),
                 'apply',
                 Array.from(args),
               )

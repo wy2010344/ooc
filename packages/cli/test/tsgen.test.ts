@@ -136,6 +136,24 @@ calc = 2;
   if (!/[^=]calc = 2;/.test(code)) throw new Error('第二次绑定应生成重赋 calc = 2')
 })
 
+test('bind 惰性 + 多语句块：编译成 thunk，运行时只算一次', async (t) => {
+  const { dir } = await compileSource('bindblock', `
+tally = 5;
+obj = { v = @{ n = tally + 1; n }, w = @{ m = tally; m * 2 } };
+{ get() { (obj v) + (obj v) + (obj w) } }
+`)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(path.join(dir, 'bindblock.ts')).href)
+  const rt = await loadRuntime(dir)
+  const value = rt.__send(mod.default, 'get', [])
+  // v 惰性只算一次（tally+1=6），w 用外层 tally *2=10；合计 6 + 6 + 10
+  if (value !== 22) throw new Error(`bind 惰性块应为 22，实际 ${value}`)
+  const code = await fs.readFile(path.join(dir, 'bindblock.ts'), 'utf8')
+  if (!/type: 'bind'/.test(code) || !/fn: function/.test(code)) {
+    throw new Error(`bind 应编译成 fn thunk，实际:\n${code}`)
+  }
+})
+
 test('命名导入：跨模块绑定顶层声明的值', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(

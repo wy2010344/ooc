@@ -35,8 +35,11 @@ export const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
 export type OOCEntry = {
   type: 'bind' | 'mutable' | 'call'
   name: string
-  value?: any
+  /** bind/mutable 的惰性 thunk：首次访问时调用求值；call 的实现函数 */
   fn?: (...args: any[]) => any
+  /** 惰性求值标记与缓存（首次访问时写入） */
+  lazyDone?: boolean
+  lazy?: any
   arity?: number
   rest?: boolean
 }
@@ -81,10 +84,16 @@ export function __createObject(entries: OOCEntry[]): any {
           const pair = methods[i]
           switch (pair.type) {
             case 'bind':
-              if (args.length === 0) return pair.value
+              // 惰性绑定：首次无参读取时求值，之后返回缓存（与解释器 objectValue 一致）
+              if (args.length === 0) {
+                if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
+                return pair.lazy
+              }
               continue
             case 'mutable':
-              return __send(pair.value, 'apply', Array.from(args))
+              // 转发属性同样惰性：首次发消息时求值委托对象并缓存
+              if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
+              return __send(pair.lazy, 'apply', Array.from(args))
             case 'call': {
               // #guard 分支已编译进 fn（if/else if 链），这里只按参数数量匹配
               const arity = pair.arity ?? pair.fn!.length

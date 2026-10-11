@@ -3,6 +3,7 @@ import { AstUtils, URI } from 'langium'
 import { diagnosticData } from './diagnostics-config.js'
 import {
   isAssignment,
+  isBindBlock,
   isBool,
   isCastExpression,
   isComplexPrimary,
@@ -27,6 +28,7 @@ import {
   isStr,
   isTypeDef,
   type Assignment,
+  type BindBody,
   type ComplexPrimary,
   type Expression,
   type ImportStatement,
@@ -704,7 +706,7 @@ export class ObjectOrientedCTypeChecker {
     } else if (isMethodBindMutable(method)) {
       // 转发属性：本 key 的一切消息原样转发给委托对象的 apply 执行，
       // 因此静态签名 = 委托对象 apply 方法的签名。
-      const delegateType = this.inferExpression(method.expression, env, accept)
+      const delegateType = this.inferBindBody(method.bindBody, env, accept)
       const applySigs = this.resolveSigs(delegateType, 'apply') ?? []
       if (applySigs.length > 0) {
         for (const s of applySigs) {
@@ -716,7 +718,7 @@ export class ObjectOrientedCTypeChecker {
         accept(
           'error',
           `转发目标需要含 apply 方法，委托对象类型为 ${describeType(delegateType)}，其中没有 apply`,
-          { node: method.expression, data: diagnosticData('delegateNoApply') },
+          { node: method.bindBody, data: diagnosticData('delegateNoApply') },
         )
         sigs.push({ params: [], rest: anyType, returns: anyType })
       }
@@ -725,10 +727,30 @@ export class ObjectOrientedCTypeChecker {
         params: [],
         returns: method.typeAnnotation
           ? this.resolveAnnotation(method.typeAnnotation, accept, undefined, env)
-          : this.inferExpression(method.expression, env, accept),
+          : this.inferBindBody(method.bindBody, env, accept),
       })
     }
     objType.methods.set(name, sigs)
+  }
+
+  /** 推断绑定体（bindBody）的类型：单表达式直接推断，多语句块取最后一条的类型。 */
+  private inferBindBody(
+    bindBody: BindBody,
+    env: TypeEnv,
+    accept: ValidationAcceptor,
+  ): TypeInfo {
+    if (isBindBlock(bindBody)) {
+      let last: TypeInfo = nilType
+      for (const stmt of bindBody.bindStmts) {
+        if (isAssignment(stmt)) {
+          this.checkAssignment(stmt, env, accept)
+        } else {
+          last = this.inferExpression(stmt, env, accept)
+        }
+      }
+      return last
+    }
+    return this.inferExpression(bindBody.expression, env, accept)
   }
 
   private checkObjectBody(
@@ -753,7 +775,7 @@ export class ObjectOrientedCTypeChecker {
           ? contextSigs[contextSigs.length - 1]
           : undefined
       if (isMethodBind(method)) {
-        const inferred = this.inferExpression(method.expression, bodyEnv, accept)
+        const inferred = this.inferBindBody(method.bindBody, bodyEnv, accept)
         this.checkAnnotation(method.typeAnnotation, inferred, accept, undefined, bodyEnv)
         const sigs = objType.methods.get(name)
         if (sigs && sigs.length > 0) {
@@ -767,7 +789,7 @@ export class ObjectOrientedCTypeChecker {
       if (isMethodBindMutable(method)) {
         // 转发属性：签名已在 collectMethod 按委托 apply 记录，
         // 这里只为副作用推断委托表达式（复用同一引用不再回填）。
-        this.inferExpression(method.expression, bodyEnv, accept)
+        this.inferBindBody(method.bindBody, bodyEnv, accept)
         continue
       }
       // 签名方法（无 body）：纯类型契约。只把声明放入 sig（dispatch 推断用），

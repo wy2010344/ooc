@@ -102,11 +102,23 @@ ElseBranch:
 
 
 MethodBind:
-    name=MethodDefName (':' typeAnnotation=Type)? '=' expression=Expression;
+    name=MethodDefName (':' typeAnnotation=Type)? '=' bindBody=BindBody
+;
+
+// 绑定体：单表达式，或 { 多条语句; ... } 块（与方法体同款，块内可局部赋值、最后一条是值）。
+// 用 @{ 引导以与对象字面量 { ... } 明确区分——否则 `value = { a = 1 }` 是对象还是块无法判定。
+BindBody:
+    BindBlock | expression=Expression
+;
+
+BindBlock:
+    '@{' bindStmts+=Statement (';' bindStmts+=Statement)* ';'? '}'
+;
 
 //转发属性：本 key 的一切消息原样转发给委托对象的 apply 执行（消息名不传给 apply）
 MethodBindMutable:
-    name=MethodDefName '<=' expression=Expression;
+    name=MethodDefName '<=' bindBody=BindBody
+;
 
 MethodDefName:
     name=(Ref|Str|StID);
