@@ -50,7 +50,7 @@ box value 1 2    // 会按 apply 的形参匹配（这里 apply 只有 1 参，�
 ```
 
 - 委托对象必须含 `apply`（像 lambda 或可调用对象）；没有时类型检查会报错。
-- 可与同名普通方法共存，但转发优先：消息一律走 `apply`。
+- 名字唯一：`<=` 转发与同名 `=` / 方法体不能共存（重复定义报 `duplicateMethod`）。
 - 实例/模块级可变状态不靠属性写入，改用宿主容器（`storage ref`、signal、数组等）。
 
 ## this
@@ -74,35 +74,33 @@ obj apply 1 2 3 4    // [2, 3, 4]
 
 ## 守卫 #guard
 
-方法体以 `#guard` 开头时，条件不满足则该方法不执行，会继续找同名的下一条方法。
-
-守卫的分派规则：
-
-- **`#guard` 只用在同名重载组里**（≥2 条带 body 的同名方法）。单条方法带 guard 会报 `guardOnlyInOverload`。
-- 重载组末尾分支是**无条件兜底**，落入即执行，不能带 guard（报 `guardOnTrailingBranch`）。
-- 前面若干分支各自带 guard，条件满足即命中，全部不满足则落入末尾兜底。
-- 同名重载分支必须**相邻定义**（中间不能夹别的名字，报 `overloadNotAdjacent`）。
+方法体用 `#guard` 分支链组织，就是 if / else-if / else：逐条 `#guard 条件; 语句`，条件为真就执行该段并返回；全不命中落入 `#else; 语句`（无 `#else` 返回 nil）。`#guard` 不参与消息派发——一个名字只有一个成员，没有同名重载。
 
 ```ooc
 f = {
-    r(a) { #guard a > 5; 'big' },   // 守卫分支
-    r(a) { #guard a < 0; 'neg' },   // 守卫分支
-    r(a) { 'small' }                // 末尾兜底
+    r(a) {
+        #guard a > 5;
+        'big'
+        #guard a < 0;
+        'neg'
+        #else;
+        'small'
+    }
 };
 f r 9    // 'big'
 f r 2    // 'small'
 f r -1   // 'neg'
 ```
 
-## 签名方法（TS 式重载类型标注）
+## 签名方法（TS 式签名类型标注）
 
-方法可以不写 body：**签名方法**只在类型层声明「参数类型 → 返回类型」，运行时是纯契约（不烧录任何行为，配合实现方法做参数化重载）：
+方法可以不写 body：**签名方法**只在类型层声明「参数类型 → 返回类型」，运行时是纯契约（不烧录任何行为，调用点按签名做参数化分派）：
 
 ```ooc
 calc = {
     area(radius: number): number;   // 签名
     area(radius: string): string;   // 签名
-    area(r) {                       // 实现（无签名，运行时按签名分派后落入）
+    area(r) {                       // 实现（运行时按名字落到唯一实现）
         r
     }
 };

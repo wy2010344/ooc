@@ -15,6 +15,7 @@ import {
   getMethodCallName,
   sendMessage,
   sendMessageWith,
+  interpretMessageArgs,
   bindMethod,
   runBody,
 } from './runtime.js'
@@ -153,9 +154,7 @@ export function interpretExpression(e: Expression, scope: Scope): any {
           const rv = r.value
           switch (rv.$type) {
             case 'MessageChain':
-              const args = rv.message.args.map((arg) =>
-                interpretPrimary(arg, scope),
-              )
+              const args = interpretMessageArgs(rv.message.args, scope)
               args.unshift(obj)
               const main = interpretPrimary(rv.primary, scope)
               return sendMessage(main, getMethodCallName(rv.message.name), args)

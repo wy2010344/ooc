@@ -187,7 +187,8 @@ export function formatValue(value: Value): string {
       if (head.type === 'call') {
         rendered = '(方法)'
       } else {
-        rendered = formatValue(head.value)
+        // bind/mutable 的 value 是惰性 getter：读它才求值并缓存，零副作用
+        rendered = formatValue(head.value as Value)
       }
       lines.push(`  ${head.name}: ${rendered}`)
     })

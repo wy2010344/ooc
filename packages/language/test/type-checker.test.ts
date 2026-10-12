@@ -288,7 +288,7 @@ describe('类型检查（warning）', () => {
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
-  test('同名重载返回类型不一致会告警', async () => {
+  test('同名实现重复定义报错', async () => {
     const diags = await diagnostics(`
         obj = {
             fun() { 1 },
@@ -298,7 +298,7 @@ describe('类型检查（warning）', () => {
     expect(messages(diags).join('\n')).toContain("重复定义")
   })
 
-  test('不同方法不误报重载不一致', async () => {
+  test('不同方法名不误报重复', async () => {
     const diags = await diagnostics(`
         config = {
             cache() => {
@@ -1481,7 +1481,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       expect(messages(diags).join('\n')).toContain('类型不匹配')
     })
 
-    test('签名方法之间返回类型不同，不触发重载返回不一致告警（TS 式豁免）', async () => {
+    test('签名方法之间返回类型不同，不触发返回类型不一致告警（TS 式豁免）', async () => {
       const diags = await diagnostics(`
           calc = {
               area(): number,
@@ -1489,10 +1489,10 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
               area() { 1 }
           }
       `)
-      expect(messages(diags).join('\n')).not.toContain('重载返回类型不一致')
+      expect(messages(diags).join('\n')).not.toContain('返回类型不一致')
     })
 
-    test('重载签名参与参数化 dispatch：命中签名时用签名返回值', async () => {
+    test('签名方法参与参数化分派：命中签名时用签名返回值', async () => {
       const diags = await diagnostics(`
           calc = {
               area(radius: number): number,

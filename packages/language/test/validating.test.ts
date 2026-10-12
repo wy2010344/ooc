@@ -54,18 +54,19 @@ describe('Validating', () => {
     ).not.toContain('必须声明返回类型')
   })
 
-  test('同名方法重载不报重复错误', async () => {
+  test('同名成员（bind 与 call）重复定义报错', async () => {
     document = await parse(`
             obj = {
-                fun(a) { a },
-                fun(a, b) { a }
+                x = 1,
+                x(v) => v
             };
         `)
 
-    expect(
+    const output =
       checkDocumentValid(document) ||
-        document?.diagnostics?.map(diagnosticToString)?.join('\n'),
-    ).not.toContain('已经定义了')
+      document?.diagnostics?.map(diagnosticToString)?.join('\n') ||
+      ''
+    expect(output).toContain('重复定义')
   })
 
   test('重复方法参数报错', async () => {

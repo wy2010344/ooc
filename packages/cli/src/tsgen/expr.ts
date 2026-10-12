@@ -32,10 +32,14 @@ function messageName(m: Message): string {
   return v?.value ?? ''
 }
 
+function argCode(a: any): string {
+  const value = primaryCode(a.value)
+  // 展开参数：`...expr` 求值为数组则摊平，否则整体作单参（与解释器语义一致）
+  return a.spread ? `...__spread(${value})` : value
+}
+
 function argsCode(m: Message): string {
-  return (m.args || [])
-    .map((a: Primary) => primaryCode(a))
-    .join(', ')
+  return (m.args || []).map((a: any) => argCode(a)).join(', ')
 }
 
 /** MessageOrChain / 其它 Expression 的递归求值。 */
@@ -79,7 +83,7 @@ function piplingCode(e: any): string {
       }
       // '|' 管道：left 作为第一实参传给消息链
       const mc = v as any
-      const chainArgs = [left, ...(mc.message.args || []).map((a: Primary) => primaryCode(a))]
+      const chainArgs = [left, ...(mc.message.args || []).map((a: any) => argCode(a))]
       return `__send(${primaryCode(mc.primary)}, ${JSON.stringify(messageName(mc.message))}, [${chainArgs.join(', ')}])`
     }
     case 'MessageInfixRight':
@@ -169,9 +173,7 @@ function methodCode(m: any): string | null {
       const fn = guards.length > 0
         ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
         : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
-      const arity = m.params?.length ?? 0
-      const rest = !!m.restParam
-      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn}, arity: ${arity}, rest: ${rest} }`
+      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn} }`
     }
   }
 }

@@ -5,6 +5,7 @@ import {
   MethodCallName,
   MethodDefName,
   Message,
+  MessageArg,
   Statement,
   MethodAll,
   MethodBind,
@@ -34,8 +35,10 @@ const EMPTY_OBJECT: Record<string, unknown> = {}
 export const OOC_META = Symbol.for('ooc:meta')
 
 /** 对象元信息：只含本层定义，无继承。
- *  Map 键是消息名，值是同名定义（bind/mutable/call，含 guard 重载）的完整列表——
- *  不在烧录期折叠，宿主可据 value 字段直接消费（bind 挂缓存值、mutable 挂委托对象、call 挂方法）。 */
+ *  Map 键是消息名，值是成员定义（bind/mutable/call）列表——名字唯一，每个 key 只有一个成员，
+ *  宿主可据 value 字段直接消费（bind 挂缓存值、mutable 挂委托对象、call 挂方法）。
+ *  bind / mutable 为惰性值：value 是 getter，首次读取时求值 body 并缓存（bind 恒返构造值、
+ *  mutable 为委托对象）；call 的 value 是方法本身，宿主不得擅自调用（可能有副作用）。 */
 /** bind / mutable 的惰性绑定：首次访问时求值 body 并缓存 */
 type LazyBind = {
   method: MethodBind | MethodBindMutable
@@ -51,11 +54,13 @@ export type OocMeta = Map<
         type: 'bind'
         name: string
         lazy: LazyBind
+        readonly value: unknown
       }
     | {
         type: 'mutable'
         name: string
         lazy: LazyBind
+        readonly value: unknown
       }
     | {
         type: 'call'
@@ -164,6 +169,10 @@ export function objectValue(methods: Method[], scope: Scope) {
             type: 'bind' as const,
             name: getObjDefineName(method.name),
             lazy: { method, scope, done: false, value: undefined as unknown },
+            // 宿主经 metaOf 读元信息时按需求值（getter 惰性，读它才绑定 this）
+            get value() {
+              return lazyValue(this as { lazy: LazyBind })
+            },
           }
         case 'MethodBindMutable':
           // 转发属性同样惰性：首次发消息时求值委托对象并缓存
@@ -171,6 +180,9 @@ export function objectValue(methods: Method[], scope: Scope) {
             type: 'mutable' as const,
             name: getObjDefineName(method.name),
             lazy: { method, scope, done: false, value: undefined as unknown },
+            get value() {
+              return lazyValue(this as { lazy: LazyBind })
+            },
           }
         default:
           // 签名方法（无 body）是纯书写期类型契约，运行时无行为，不烧录
@@ -203,52 +215,25 @@ export function objectValue(methods: Method[], scope: Scope) {
   }
   attachMeta(obj, meta)
   meta.forEach(function (methods, name) {
-    // 所有定义（含 bind）统一作为方法函数，bind 在函数体内直接返回绑定值
+    // 名字唯一（校验器保证）：每个 key 只有一个成员，直接派发，不再按参数数量匹配。
+    // bind / mutable / call 都以方法函数形式挂载，bind 在函数体内直接返回绑定值。
+    const pair = methods[0]
     Object.defineProperty(obj, name, {
       enumerable: true,
       value() {
-        const args = arguments
-        for (let i = 0; i < methods.length; i++) {
-          const pair = methods[i]
-          switch (pair.type) {
-            case 'bind':
-              // bind 只匹配无参调用，有参数时跳过，让后面的 call 方法处理
-              if (arguments.length === 0) {
-                return lazyValue(pair)
-              }
-              continue
-            case 'mutable':
-              // 转发属性：本 key 上的一切消息（任意参数数量）都原样转发给
-              // 委托对象的 apply 执行（消息名不传给 apply，只传实参）。
-              return sendMessage(
-                lazyValue(pair),
-                'apply',
-                Array.from(args),
-              )
-            case 'call':
-              // 单方法：按参数数量匹配；方法体内的 #guard 语句负责分支（if/else-if）
-              {
-              const method = pair.value
-              const minArgs = method.params.length
-              const hasRest = !!method.restParam
-              const argsMatch = hasRest
-                ? arguments.length >= minArgs
-                : arguments.length === minArgs
-              if (!argsMatch) {
-                continue // 参数数量不匹配，跳过这个方法
-              }
-              return runGuardedBody(method, scope, this, args as unknown as unknown[])
-              }
-          }
+        const args = Array.from(arguments) as unknown[]
+        switch (pair.type) {
+          case 'bind':
+            // bind：常量绑定，读取即返回缓存值（参数忽略）
+            return lazyValue(pair)
+          case 'mutable':
+            // 转发属性：本 key 上的一切消息原样转发给委托对象的 apply
+            //（消息名不传给 apply，只传实参）。
+            return sendMessage(lazyValue(pair), 'apply', args)
+          default:
+            // call：方法体内的 #guard 分支链负责条件（if/else-if/else）
+            return runGuardedBody(pair.value, scope, this, args)
         }
-        // 参数数量不匹配/对象通用方法也不命中：直接抛结构化错误。
-        // 无继承，不会沿原型链查找上层同名方法。兜底由显式 `js proxy` 包的
-        // Proxy 动态派发，此处分派不再隐式兜底。
-        const fun = objectDefine[name as '&&']
-        if (fun) {
-          return fun(this, args[0])
-        }
-        throw new OocMethodNotFoundError(this, name, Array.from(args))
       },
     })
   })
@@ -294,9 +279,31 @@ export function getMethodCallName({ value }: MethodCallName) {
   }
 }
 
+/** 展开单个消息实参：`...expr` 若求值为数组则摊平成多个实参，否则整体作为单个实参。 */
+export function spreadArg(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [value]
+}
+
+/** 求值消息实参列表，`...` 展开参数按元素摊平（与 codegen 语义一致）。 */
+export function interpretMessageArgs(
+  args: MessageArg[],
+  scope: Scope,
+): unknown[] {
+  const out: unknown[] = []
+  for (const arg of args) {
+    const value = interpretPrimary(arg.value, scope)
+    if (arg.spread) {
+      out.push(...spreadArg(value))
+    } else {
+      out.push(value)
+    }
+  }
+  return out
+}
+
 export function sendMessageWith(o: any, message: Message, scope: Scope) {
   const name = message.name
-  const args = message.args.map((arg) => interpretPrimary(arg, scope))
+  const args = interpretMessageArgs(message.args, scope)
   return sendMessage(o, getMethodCallName(name), args)
 }
 

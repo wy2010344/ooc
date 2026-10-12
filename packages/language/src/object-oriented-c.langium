@@ -154,7 +154,12 @@ MessageChain:
 
 /**消息名 消息参数 消息类型参数（可选）*/
 Message:
-    name=MethodCallName ('<' typeArgs+=Type (',' typeArgs+=Type)* '>')? args+=Primary*;
+    name=MethodCallName ('<' typeArgs+=Type (',' typeArgs+=Type)* '>')? args+=MessageArg*;
+
+// 消息实参：普通实参，或 `...expr` 展开（JS 风格，可出现在任意位置；
+// 求值结果若为数组则把元素依次展开为多个实参，否则整体作为单个实参）。
+MessageArg:
+    spread?='...'? value=Primary;
 
 MethodCallName:
     value=(Ref|StID|Str);

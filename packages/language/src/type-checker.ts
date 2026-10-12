@@ -792,8 +792,7 @@ export class ObjectOrientedCTypeChecker {
         this.inferBindBody(method.bindBody, bodyEnv, accept)
         continue
       }
-      // 签名方法（无 body）：纯类型契约。只把声明放入 sig（dispatch 推断用），
-      // 不检查 body、不参与重载返回一致性对比（TS 式：签名之间不强制返回一致）
+      // 签名方法（无 body）：纯类型契约。只把声明放入 sig（dispatch 推断用），不检查 body
       if (isMethodAll(method) && !method.body) {
         continue
       }
@@ -1406,7 +1405,8 @@ export class ObjectOrientedCTypeChecker {
       // 管道调用：x | main args 等价于 main 的 (x, ...args)
       const argTypes = [left]
       for (const arg of value.message.args) {
-        argTypes.push(this.inferPrimary(arg, env, accept))
+        // 展开参数：静态按 any 参与匹配
+        argTypes.push(arg.spread ? anyType : this.inferPrimary(arg.value, env, accept))
       }
       const mainType = this.inferPrimary(value.primary, env, accept)
       return this.dispatch(
@@ -1466,9 +1466,15 @@ export class ObjectOrientedCTypeChecker {
     accept: ValidationAcceptor,
   ): TypeInfo {
     const name = this.getMessageName(message)
-    const argTypes = message.args.map((arg, i) =>
-      this.inferArg(arg, i, receiver, name, env, accept),
-    )
+    const argTypes: TypeInfo[] = []
+    message.args.forEach((arg, i) => {
+      if (arg.spread) {
+        // 展开参数：数量/类型由运行时决定，静态按 any 参与匹配
+        argTypes.push(anyType)
+      } else {
+        argTypes.push(this.inferArg(arg.value, i, receiver, name, env, accept))
+      }
+    })
     // 解析调用点显式类型参数
     const explicitTypeArgs = message.typeArgs?.length
       ? message.typeArgs.map((t) =>
@@ -1779,7 +1785,7 @@ export class ObjectOrientedCTypeChecker {
 
     // 无显式类型参数：原有推断逻辑
     // 可区分联合实参：分支感知推断——对 union 的每个成员分别找第一个匹配
-    // 签名，返回各分支返回类型的联合（成员命中不同重载时比「取第一条」精确）。
+    // 签名，返回各分支返回类型的联合（比「取第一条」精确）。
     // 只在签名参数是对象/成员类型时启用；参数本身是 union 的签名保持原「整体匹配」。
     if (
       args.length > 0 &&

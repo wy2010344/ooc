@@ -1,5 +1,5 @@
 // tsgen 端到端测试：.ooc → 编译成纯 ES .ts 产物（Node ≥23.6 原生类型剥离直接 import）→
-// 运行断言（语义与解释器一致）。覆盖：guard 重载循环、宿主依赖按 import 导入、跨模块 import、
+// 运行断言（语义与解释器一致）。覆盖：guard 分支循环、宿主依赖按 import 导入、跨模块 import、
 // 顶层重复绑定、命名导入、同名 .d.ts。
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
@@ -19,12 +19,12 @@ async function compileSource(name: string, source: string): Promise<{ ts: string
   return { ts: path.join(dir, `${name}.ts`), dir }
 }
 
-/** 共享 runtime：产物从它 import __send/__createObject */
+/** 共享 runtime：产物从它 import __send/__createObject/__spread */
 async function loadRuntime(dir: string): Promise<any> {
   return import(pathToFileURL(path.join(dir, '_ooc_runtime.ts')).href)
 }
 
-// 精简 loop fixture：guard 重载（递归 apply + nil 兜底）+ repeat（JS 字符串生态 forEach）
+// 精简 loop fixture：guard 分支（递归 apply + nil 兜底）+ repeat（JS 字符串生态 forEach）
 const LOOP_SRC = `
 loop = {
     apply(fn) {
@@ -199,6 +199,32 @@ factory
   // 不再有 run()/bag/内联运行时那套模板
   if (/export const __oocNamed|export async function run\(|OOC_NUM_DEF/.test(code)) {
     throw new Error(`产物不应再有自包含模板，实际:\n${code}`)
+  }
+})
+
+test('消息实参 ...array 展开：编译成 __spread，运行语义与解释器一致', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('spread', `
+obj = { apply(...xs) { xs } };
+arr = Array of 1 2 3;
+{ collect = (obj apply ...arr), mixed = (obj apply 0 ...arr 9) }
+`)
+  const code = await fs.readFile(tsPath, 'utf8')
+  if (!/__spread\(/.test(code)) {
+    throw new Error(`展开参数应编译成 __spread，实际:\n${code}`)
+  }
+  if (!/import \{ __send, __createObject, __spread \} from '\.\/_ooc_runtime\.ts';/.test(code)) {
+    throw new Error(`应 import __spread，实际:\n${code}`)
+  }
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  const rt = await loadRuntime(dir)
+  const collect = rt.__send(mod.default, 'collect', [])
+  if (JSON.stringify(collect) !== JSON.stringify([1, 2, 3])) {
+    throw new Error(`...arr 应展开为 [1,2,3]，实际 ${JSON.stringify(collect)}`)
+  }
+  const mixed = rt.__send(mod.default, 'mixed', [])
+  if (JSON.stringify(mixed) !== JSON.stringify([0, 1, 2, 3, 9])) {
+    throw new Error(`混用应展开为 [0,1,2,3,9]，实际 ${JSON.stringify(mixed)}`)
   }
 })
 

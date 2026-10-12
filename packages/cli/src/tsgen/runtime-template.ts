@@ -40,8 +40,10 @@ export type OOCEntry = {
   /** 惰性求值标记与缓存（首次访问时写入） */
   lazyDone?: boolean
   lazy?: any
-  arity?: number
-  rest?: boolean
+}
+// 展开参数辅助：'...expr' 求值为数组则摊平，否则整体作单参（与解释器语义一致）
+export function __spread(value: any): any[] {
+  return Array.isArray(value) ? value : [value]
 }
 // 反射元信息键：与解释器（object-oriented-c-language 的 OOC_META）同源——
 // 全局符号注册表 Symbol.for 让编译产物与宿主桥接层（如 ObjectValue.metaOf）
@@ -76,37 +78,25 @@ export function __createObject(entries: OOCEntry[]): any {
   // 宿主/桥接层可经 ObjectValue.metaOf 判断类型（call=事件回调、bind=常量）
   Object.defineProperty(obj, OOC_META, { enumerable: false, value: groups })
   groups.forEach((methods, name) => {
+    // 名字唯一（校验器保证）：每个 key 只有一个成员，直接派发，不再按参数数量匹配。
+    const pair = methods[0]
     Object.defineProperty(obj, name, {
       enumerable: true,
       value() {
         const args = Array.from(arguments)
-        for (let i = 0; i < methods.length; i++) {
-          const pair = methods[i]
-          switch (pair.type) {
-            case 'bind':
-              // 惰性绑定：首次无参读取时求值，之后返回缓存（与解释器 objectValue 一致）
-              if (args.length === 0) {
-                if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
-                return pair.lazy
-              }
-              continue
-            case 'mutable':
-              // 转发属性同样惰性：首次发消息时求值委托对象并缓存
-              if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
-              return __send(pair.lazy, 'apply', Array.from(args))
-            case 'call': {
-              // #guard 分支已编译进 fn（if/else if 链），这里只按参数数量匹配
-              const arity = pair.arity ?? pair.fn!.length
-              const rest = !!pair.rest
-              const match = rest ? args.length >= arity : args.length === arity
-              if (!match) continue
-              return pair.fn!.apply(this, args)
-            }
-          }
+        switch (pair.type) {
+          case 'bind':
+            // 惰性绑定：读取即求值一次并缓存（参数忽略）
+            if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
+            return pair.lazy
+          case 'mutable':
+            // 转发属性同样惰性：首次发消息时求值委托对象并缓存
+            if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
+            return __send(pair.lazy, 'apply', Array.from(args))
+          default:
+            // call：#guard 分支已编译进 fn（if/else if 链），直接调用
+            return pair.fn!.apply(this, args)
         }
-        const objFun = OOC_OBJ_DEF[name]
-        if (objFun) return objFun(this, args[0])
-        throw new Error('OOC 方法未找到: ' + String(this) + ' . ' + name + '(' + Array.from(args).map((a) => String(a)).join(', ') + ')')
       },
     })
   })

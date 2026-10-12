@@ -9,7 +9,7 @@ import type {
   Method,
 } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
-import { getMethodName } from './completion-type-utils.js'
+import { getMethodName, extractMethodDefName } from './completion-type-utils.js'
 import {
   createImportResolver,
   ObjectOrientedCTypeChecker,
@@ -195,7 +195,7 @@ export class ObjectOrientedCValidator {
         }
       }
     })
-    checkOverloadRules(model.methods, this.wrap(accept), '对象')
+    checkMemberNameUniqueness(model.methods, this.wrap(accept), '对象')
   }
 
   checkLambdaDef(lambda: LambdaDef, accept: ValidationAcceptor): void {
@@ -204,32 +204,30 @@ export class ObjectOrientedCValidator {
 }
 
 /**
- * 方法名唯一性检查：#guard 改成方法体内的分支语句后不再有「同名重载」，
- * 同一个对象里同名**实现**（有 body）重复定义直接报错（否则后定义静默覆盖前定义）。
+ * 成员名唯一性检查：方法重载已移除（#guard 改为方法体内的分支语句），运行时按名字
+ * 唯一派发、不再按参数数量匹配。因此同一对象里同名**成员**（= 常量绑定 / <= 转发 /
+ * 带体方法）重复定义一律报错（否则后定义静默覆盖前定义）。
  * 签名方法（无 body）是纯类型契约，与实现同名合法，不算重复。
  */
-function checkOverloadRules(
+function checkMemberNameUniqueness(
   methods: Method[],
   accept: ValidationAcceptor,
   kind: string,
 ): void {
   const seen = new Set<string>()
   for (const method of methods) {
-    if (method.$type !== 'MethodAll') {
+    // 签名方法（无 body）：只作类型声明，不占名字、不与实现冲突
+    if (method.$type === 'MethodAll' && !method.body) {
       continue
     }
-    const n = getMethodName(method)
+    const n = extractMethodDefName(method.name)
     if (!n) {
-      continue
-    }
-    // 签名方法（无 body）：只作类型声明，不与实现冲突
-    if (!method.body) {
       continue
     }
     if (seen.has(n)) {
       accept(
         'error',
-        `${kind}里方法 '${n}' 重复定义（#guard 是方法体内的分支语句，不再有同名重载；分支请写在同一个方法体里）`,
+        `${kind}里成员 '${n}' 重复定义（一个名字只对应一个成员：= 绑定 / <= 转发 / 方法体）`,
         { node: method, property: 'name', data: diagnosticData('duplicateMethod') },
       )
       continue

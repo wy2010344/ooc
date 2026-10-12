@@ -145,6 +145,32 @@ describe('OOC Interpreter', () => {
     expect(result).toEqual([2, 3, 4])
   })
 
+  test('消息实参 ...array 展开为多个实参', async () => {
+    const result = await interpreter.interpret(`
+            obj = { apply(...xs) { xs } };
+            arr = Array of 1 2 3;
+            obj apply ...arr
+        `)
+    expect(result).toEqual([1, 2, 3])
+  })
+
+  test('展开参数与普通实参混用，且可出现在任意位置', async () => {
+    const result = await interpreter.interpret(`
+            obj = { apply(...xs) { xs } };
+            arr = Array of 2 3;
+            obj apply 1 ...arr 4
+        `)
+    expect(result).toEqual([1, 2, 3, 4])
+  })
+
+  test('非数组的展开参数整体作为单个实参', async () => {
+    const result = await interpreter.interpret(`
+            obj = { apply(...xs) { xs } };
+            obj apply ...42
+        `)
+    expect(result).toEqual([42])
+  })
+
   test('guard 不通过时落入 else 分支（不再视为方法未定义）', async () => {
     const result = await interpreter.interpret(`
                 obj = { foo(x) {
@@ -1034,7 +1060,7 @@ describe('ObjectValue 元信息反射', () => {
     expect(meta!.get('e')![0].type).toBe('call')
   })
 
-  test('guard 重载同 key 不折叠，bind 与动态同名条目并列（顺序即定义序）', async () => {
+  test('同名成员：运行时按定义序并列分组，派发取首个定义（唯一性由校验器保证）', async () => {
     const eq = await interpreter.interpret(`
         eq = { equal(a, b) => 1, equal(a) => 2 };
         eq
@@ -1043,17 +1069,18 @@ describe('ObjectValue 元信息反射', () => {
         mix = { x = 1, x(v) => v };
         mix
     `)
-    // guard 重载同 key 两条都保留（宿主可自行取 value[0] 或遍历）
+    // 元信息按定义序并列（宿主可遍历），派发取首个定义
     const equalEntries = ObjectValue.metaOf(eq)!.get('equal')!
     expect(equalEntries.length).toBe(2)
     expect(equalEntries.every((m) => m.type === 'call')).toBe(true)
+    expect(sendMessage(eq, 'equal', [1, 2])).toBe(1)
+    expect(sendMessage(eq, 'equal', [9])).toBe(1)
     // 同名 x：bind 在前 + call 在后，两条并列
     const xEntries = ObjectValue.metaOf(mix)!.get('x')!
     expect(xEntries.map((m) => m.type)).toEqual(['bind', 'call'])
-    // 行为取首位定义（宿主消费元信息同样取 value[0]）：bind 在最前，无参返回缓存值
+    // bind 在最前：忽略参数，命中即返回缓存值
     expect(sendMessage(mix, 'x', [])).toBe(1)
-    // 有参数时 bind 跳过，call 方法匹配：参数数量匹配的 call 方法被调用
-    expect(sendMessage(mix, 'x', [5])).toBe(5)
+    expect(sendMessage(mix, 'x', [5])).toBe(1)
   })
 
   test('签名方法（无 body）不烧录运行时行为，实现方法正常履职', async () => {
@@ -1081,18 +1108,17 @@ describe('ObjectValue 元信息反射', () => {
     expect(() => sendMessage(result, 'area', [])).toThrow()
   })
 
-  test('bind 有参数时跳过，call 方法匹配', async () => {
+  test('同名 bind/call：派发取首个定义，bind 不因带参而跳过', async () => {
     const result = await interpreter.interpret(`
         obj = { name = 'hello', name(n) { n } };
         obj
     `)
-    // 0参数 → bind 返回 'hello'
+    // bind 在前：任何时候都返回缓存值（派发取首个定义）
     expect(sendMessage(result, 'name', [])).toBe('hello')
-    // 1参数 → bind 跳过，call 方法匹配
-    expect(sendMessage(result, 'name', ['world'])).toBe('world')
+    expect(sendMessage(result, 'name', ['world'])).toBe('hello')
   })
 
-  test('转发属性 <= 参数转发给 apply，同名 call 不会被优先选中', async () => {
+  test('转发属性 <= 参数转发给 apply（同名成员派发取首个定义）', async () => {
     const result = await interpreter.interpret(`
         delegate = { apply(v, w) { v + w } };
         obj = { count <= delegate, count(v, w) { v * w } };
