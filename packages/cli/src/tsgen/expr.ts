@@ -208,8 +208,31 @@ function bodyCode(stmts: any[]): string {
   return `let __last = null; ${inner}`
 }
 
-/** #guard 分支链 → if / else if / else：命中即 return 该分支语句段的值。 */
+/**
+ * #guard 分支链 → 前置语句先执行（与解释器 runGuardedBody 一致：
+ * 赋值进作用域，表达式求值），再 if / else if / else：命中即 return 该分支语句段的值。
+ * 复刻 bodyCode 的逐层嵌套遮蔽语义，但不 return，执行完进入 guard 链。
+ */
 function guardedBodyCode(body: any): string {
+  const chain = guardChainCode(body)
+  const pre = body.stmts ?? []
+  if (pre.length === 0) {
+    return chain
+  }
+  let inner = chain
+  for (let i = pre.length - 1; i >= 0; i--) {
+    const st = pre[i]
+    if (st.$type === 'Assignment') {
+      inner = `{ const __v${i} = ${expressionCode(st.expression)}; { const ${st.name} = __v${i}; ${inner} } }`
+    } else {
+      inner = `{ __last = ${expressionCode(st)}; ${inner} }`
+    }
+  }
+  return `let __last = null; ${inner}`
+}
+
+/** if / else if / else 链本体：命中即 return，无 else 时返回 nil。 */
+function guardChainCode(body: any): string {
   const parts: string[] = []
   const branches = body.guardBranches ?? []
   branches.forEach((branch: any, i: number) => {

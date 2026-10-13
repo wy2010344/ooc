@@ -135,6 +135,24 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(3)
   })
 
+  test('#guard 前的语句先执行（赋值对条件与分支可见）', async () => {
+    const result = await interpreter.interpret(`
+            obj = {
+                fun(a) {
+                    t = a * 2;
+                    #guard t > 10;
+                    t + 1
+                    #else;
+                    t
+                }
+            };
+            r1 = obj fun 3;
+            r2 = obj fun 8;
+            Array of r1 r2
+        `)
+    expect(result).toEqual([6, 17])
+  })
+
   test('剩余参数', async () => {
     const result = await interpreter.interpret(`
             obj = {

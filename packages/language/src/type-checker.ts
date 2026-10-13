@@ -843,8 +843,9 @@ export class ObjectOrientedCTypeChecker {
     const declaredReturn = method.returnType
       ? this.resolveAnnotation(method.returnType, accept, undefined, methodEnv)
       : anyType
-    // #guard 是方法体的分支链（if/else-if/else）：preBranch 是 else 兜底块，
-    // guardBranches 顺序判别；返回类型 = 所有分支块值的联合。
+    // #guard 是方法体的分支链（if/else-if/else）：guardBranches 顺序判别，
+    // 返回类型 = 所有分支块值的联合。#guard 之前的语句先执行（与运行时一致）：
+    // 赋值进 env，表达式做校验，之后 guard 条件/分支才能引用到它们。
     const branches = method.body?.guardBranches ?? []
     const blockReturns: TypeInfo[] = []
     const returnOf = (stmts: Expression[]): TypeInfo => {
@@ -858,6 +859,8 @@ export class ObjectOrientedCTypeChecker {
       }
       return t
     }
+    // 先执行 #guard 前的语句：校验 + 赋值入 env（无分支时它的最后表达式即返回类型）
+    const preLast = returnOf((method.body?.stmts ?? []) as Expression[])
     for (const branch of branches) {
       // 判别收窄：guard 条件为真时收窄第一个联合参数
       this.narrowByTag(branch.guardExpression, methodEnv)
@@ -888,7 +891,7 @@ export class ObjectOrientedCTypeChecker {
         ? { kind: 'union', types: blockReturns }
         : branches.length === 1
           ? blockReturns[0]!
-          : returnOf((method.body?.stmts ?? []) as Expression[])
+          : preLast
     if (method.returnType) {
       this.checkAnnotation(method.returnType, returnType, accept, undefined, methodEnv)
     }

@@ -212,6 +212,36 @@ describe('类型检查（warning）', () => {
     expect(messages(diags).join('\n')).toContain('#guard 条件应该是布尔值')
   })
 
+  test('#guard 前的带注解赋值参与校验', async () => {
+    const diags = await diagnostics(`
+        obj = {
+            fun(a) {
+                t: number = 'str';
+                #guard a;
+                t
+                #else;
+                t
+            }
+        }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
+  test('#guard 前的赋值参与分支返回类型推断', async () => {
+    const diags = await diagnostics(`
+        obj = {
+            fun(a: number): string {
+                t = a * 2;
+                #guard a > 10;
+                t
+                #else;
+                t
+            }
+        }
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
+  })
+
   test('无类型标注的 guard 不误报', async () => {
     const diags = await diagnostics(`
         obj = {

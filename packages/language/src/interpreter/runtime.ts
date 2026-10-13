@@ -242,9 +242,10 @@ export function objectValue(methods: Method[], scope: Scope) {
 
 /**
  * 执行一个方法体，支持 #guard 分支链（if / else-if / else 语义）：
- *   无分支时按普通语句块（或单行体）执行；
- *   有分支时 guardBranches 顺序判别，命中即执行该分支语句并返回；
- *   全不命中则执行 #else 分支（无 #else 时返回 nil）。
+ *   先执行 #guard 之前的语句（赋值更新作用域，表达式求值有副作用），
+ *   再进入分支判别：命中即执行该分支语句并返回；
+ *   全不命中则执行 #else 分支（无 #else 时返回 nil）；
+ *   无分支时返回前置语句最后一条的值（与 runBody 一致）。
  */
 function runGuardedBody(
   method: MethodAll,
@@ -253,10 +254,19 @@ function runGuardedBody(
   args: unknown[],
 ): unknown {
   const body = method.body
-  const s = bindMethod(method, scope, receiver, args)
+  let s = bindMethod(method, scope, receiver, args)
+  const preStmts = (body?.stmts ?? []) as Array<Expression | Statement>
+  let last: unknown = null
+  for (const e of preStmts) {
+    if (e.$type === 'Assignment') {
+      s = addScope(s, e.name, interpretExpression(e.expression, s))
+    } else {
+      last = interpretExpression(e, s)
+    }
+  }
   const branches = body?.guardBranches ?? []
   if (branches.length === 0 && !body?.elseBranch) {
-    return runBody((body?.stmts ?? []) as Expression[], s)
+    return last
   }
   for (const branch of branches) {
     if (interpretExpression(branch.guardExpression, s)) {

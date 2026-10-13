@@ -58,6 +58,33 @@ test('guard 分支循环：apply 至少一次并按真值递归，repeat 恰好 
   if (sum !== 6) throw new Error(`repeat 4 次应累加 0..3=6，实际 ${sum}`)
 })
 
+test('#guard 前的语句先执行：赋值进作用域后 guard 链才能引用', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('guardpre', `
+obj = {
+    fun(a) {
+        t = a * 2;
+        #guard t > 10;
+        t + 1
+        #else;
+        t
+    },
+    pair() {
+        r1 = this fun 3;
+        r2 = this fun 8;
+        Array of r1 r2
+    }
+};
+obj
+`)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  const rt = await loadRuntime(dir)
+  const pair = rt.__send(mod.default, 'pair', [])
+  if (JSON.stringify(pair) !== JSON.stringify([6, 17])) {
+    throw new Error(`guard 前赋值应对分支可见，期望 [6,17]，实际 ${JSON.stringify(pair)}`)
+  }
+})
+
 test('跨模块 import + 宿主模块 import：storage ref 与 loop 组合', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(path.join(dir, 'loop.ooc'), LOOP_SRC, 'utf-8')
