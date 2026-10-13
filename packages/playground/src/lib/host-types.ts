@@ -18,7 +18,7 @@ import { createBridgeGlobalsTypes } from 'ooc-mve-bridge'
 export const EXTRA_HOST_SOURCE = `// playground 本地宿主类型源（响应式原语与 console）
 // 运行时实现来自 wy-helper / mve-core，这里只声明类型。
 Signal #type {
-    get(): any,
+    get: any,
     set(value): any,
     update(fn): any
 };

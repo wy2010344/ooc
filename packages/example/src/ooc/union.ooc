@@ -1,8 +1,8 @@
 // union.ooc — 字面量类型 + 可区分联合
 // #guard 分支链（if/else-if/else）：命中分支的语句段执行完即返回，全不命中走 #else。
 // 分支不用花括号，靠分号分段。
-Circle #type { kind() : 'circle', radius: number };
-Square #type { kind() : 'square', side: number };
+Circle #type { kind : 'circle', radius: number };
+Square #type { kind : 'square', side: number };
 
 area = {
     calc(s: Circle | Square) {
@@ -15,7 +15,7 @@ area = {
     }
 };
 
-c: Circle = { kind() { 'circle' }, radius() { 3 } };
+c: Circle = { kind { 'circle' }, radius { 3 } };
 area calc c;
 
 // 未判别直接访问专属成员会触发 partialUnionMessage warning
@@ -41,5 +41,5 @@ areas = {
         nil
     }
 };
-shape: Circle | Square = { kind() { 'circle' }, radius() { 3 } };
+shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
 areas desc shape

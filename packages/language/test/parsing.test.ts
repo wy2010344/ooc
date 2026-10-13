@@ -47,7 +47,7 @@ describe('Parsing tests', () => {
     document = await parse(`
             calc = {
                 value = 42,
-                getValue() => value,
+                getValue => value,
                 add(x) => value + x
             };
         `)

@@ -26,10 +26,10 @@ calc = {
 config = {
     base = 10,
     area = @{
-        r = this radius(),
+        r = this radius;
         r * r * 3.14
     },
-    radius() => { 2 }
+    radius => 2
 };
 config area        // → 12.56
 ```
@@ -124,15 +124,15 @@ calc = {
 
 - 调用点按签名推断返回类型：`calc area 3` → `number`，`calc area 'x'` → `string`。
 - 签名方法之间返回类型不同**不告警**（TS 式豁免）；实现方法体与声明不符才告警。
-- **签名方法必须有返回类型**（`f()` 这种既无 body 又无返回类型的写法会报错）。
+- **签名方法必须有返回类型**（既无 body 又无返回类型会报错）；**无参方法不写括号**（`f()` 是语法错误，写 `f` 即可）。
 
 ## 委托组合 withDefault
 
 OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `withDefault` 委托（宿主端 `delegate` 全局）：spec 的方法优先，未知消息按 defaults 顺序查找。
 
 ```ooc
-defaults = { speak() => 'voice', bark() => 'wang' };
-spec = { fly() => 'fly' };
+defaults = { speak => 'voice', bark => 'wang' };
+spec = { fly => 'fly' };
 w = delegate withDefault spec defaults;
 
 w fly      // 'fly'（spec 自有）
@@ -142,7 +142,7 @@ w speak    // 'voice'（转给 defaults）
 spec 与 defaults 同名时 spec 优先：
 
 ```ooc
-spec2 = { speak() => 'wang' };
+spec2 = { speak => 'wang' };
 w2 = delegate withDefault spec2 defaults;
 w2 speak   // 'wang'
 ```

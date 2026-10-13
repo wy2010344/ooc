@@ -33,7 +33,7 @@ describe('Validating', () => {
 
   test('签名方法（无 body）必须声明返回类型', async () => {
     document = await parse(`
-            obj = { f() };
+            obj = { f };
         `)
 
     const output =
@@ -45,7 +45,7 @@ describe('Validating', () => {
 
   test('签名方法（有返回类型）合法', async () => {
     document = await parse(`
-            obj = { f(): number };
+            obj = { f: number };
         `)
 
     expect(
@@ -116,13 +116,13 @@ describe('Validating', () => {
   test('复杂嵌套对象无类型告警', async () => {
     document = await parse(`
             config = {
-                cache() => {
-                    ttl() => 3600,
-                    enabled() => true
+                cache => {
+                    ttl => 3600,
+                    enabled => true
                 },
-                logging() => {
-                    level() => 'info',
-                    output() => 'console'
+                logging => {
+                    level => 'info',
+                    output => 'console'
                 }
             };
         `)

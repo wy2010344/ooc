@@ -2,13 +2,13 @@
 Point #type {
     x: number,
     y: number,
-    dist() : number
+    dist : number
 };
 
 p: Point = {
     x = 3,
     y = 4,
-    dist() { (this x) * (this x) + (this y) * (this y) }
+    dist { (this x) * (this x) + (this y) * (this y) }
 };
 p dist;
 
@@ -16,12 +16,12 @@ p dist;
 // bad: Point = { x = 1, y = 'two' }
 
 // ===== typedef 组合（无继承：交集 & 合并形状） =====
-Animal #type { speak(): string };
-Dog #type { speak(): string, bark(): string };
-d: Dog = { speak() { 'wang' }, bark() { 'bow' } };
+Animal #type { speak: string };
+Dog #type { speak: string, bark: string };
+d: Dog = { speak { 'wang' }, bark { 'bow' } };
 
 // 类型交集：同一值同时满足两个形状（替代继承的「形状合并」，无隐式链）
-Named #type { label(): string };
-tagged: Animal & Named = { speak() { 'wang' }, label() { 'round' } };
+Named #type { label: string };
+tagged: Animal & Named = { speak { 'wang' }, label { 'round' } };
 
 (d speak) + ' ' + (tagged label)

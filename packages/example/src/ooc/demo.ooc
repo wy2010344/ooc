@@ -2,8 +2,8 @@
 // 类型、对象、泛型、lambda、guard、导入、JS 桥接等
 
 // ===== 1. 可区分联合 + guard 分支链 =====
-Circle #type { kind(): 'circle', radius: number };
-Square #type { kind(): 'square', side: number };
+Circle #type { kind: 'circle', radius: number };
+Square #type { kind: 'square', side: number };
 
 area = {
     calc(s: Circle | Square) {
@@ -17,19 +17,19 @@ area = {
 };
 
 // ===== 2. 泛型 typedef =====
-Box #type<T> { get(): T, set(x: T) };
-intBox: Box<number> = { get() { 42 }, set(x) { x } };
+Box #type<T> { get: T, set(x: T) };
+intBox: Box<number> = { get { 42 }, set(x) { x } };
 
 // 实例化类型不符会告警（取消注释看波浪线）
-// bad: Box<number> = { get() { 'not a number' } }
+// bad: Box<number> = { get { 'not a number' } }
 
 // ===== 3. typedef 组合（无继承：类型交集 & 合并形状） =====
-Animal #type { speak(): string };
-Dog #type { speak(): string, bark(): string };
+Animal #type { speak: string };
+Dog #type { speak: string, bark: string };
 
 // 类型交集：同一值同时满足两个形状
-Named #type { label(): string };
-tagged: Animal & Named = { speak() { 'wang' }, label() { 'round' } };
+Named #type { label: string };
+tagged: Animal & Named = { speak { 'wang' }, label { 'round' } };
 
 // ===== 4. 对象方法与 lambda =====
 hello = { greet(name) { 'Hello, ' + name + '!' } };
@@ -52,15 +52,15 @@ result = 'hello' slice 0 4 | s -> s + ' world';
 
 // ===== 返回汇总对象 =====
 {
-    circle = (area calc { kind() { 'circle' }, radius() { 3 } }),
-    square = (area calc { kind() { 'square' }, side() { 4 } }),
+    circle = (area calc { kind { 'circle' }, radius { 3 } }),
+    square = (area calc { kind { 'square' }, side { 4 } }),
     box = (intBox get),
     greeting = (hello greet 'OOC'),
     doubled = (double calc 21),
     added = (math add 2 3),
     doubledByModule = (math double 21),
     counter = (counter get),
-    dog = ({ speak() { 'wang' }, bark() { 'bow' } }),
+    dog = ({ speak { 'wang' }, bark { 'bow' } }),
     labeledTag = (tagged label),
     year = year,
     piped = result

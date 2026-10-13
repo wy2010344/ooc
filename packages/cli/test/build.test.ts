@@ -154,7 +154,7 @@ export default { tag }
     path.join(root, 'src', 'main.ooc'),
     `#import './helper.ts' { Foo };
 #import { tag } './helper.ts';
-{ tag() { tag } }
+{ tag { tag } }
 `,
     'utf-8',
   )

@@ -18,7 +18,7 @@ import type { TypeInfo } from './type-system.js'
 export const coreBridgeTypesSource = `// 语言内置桥接类型源（storage / js / ObjectValue / delegate）
 // 运行时实现见 interpreter/bridges.ts，这里只声明类型（签名方法不落地）。
 Ref #type {
-    get(): any,
+    get: any,
     set(value): any
 };
 

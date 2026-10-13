@@ -15,13 +15,13 @@ typedefs = #import 'typedef' { Point, Dog };
 p: Point = {
     x = 3,
     y = 4,
-    dist() { (this x) * (this x) + (this y) * (this y) }
+    dist { (this x) * (this x) + (this y) * (this y) }
 };
 
 // ===== 3. 本地类型定义 =====
 // 在当前文件中定义的类型
 Color #type { r: number, g: number, b: number };
-Shape #type { area(): number, name(): string };
+Shape #type { area: number, name: string };
 
 // ===== 4. 使用本地类型 =====
 red: Color = { r = 255, g = 0, b = 0 };
@@ -37,7 +37,7 @@ docTitle = [document title];
 
 // 5.3 计算并返回结果
 calcInfo = {
-    description() {
+    description {
         'Point at (' + (p x) + ', ' + (p y) + ') dist=' + (p dist)
     }
 };

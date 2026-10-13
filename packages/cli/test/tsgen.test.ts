@@ -68,7 +68,7 @@ obj = {
         #else;
         t
     },
-    pair() {
+    pair {
         r1 = this fun 3;
         r2 = this fun 8;
         Array of r1 r2
@@ -167,7 +167,7 @@ test('bind 惰性 + 多语句块：编译成 thunk，运行时只算一次', asy
   const { dir } = await compileSource('bindblock', `
 tally = 5;
 obj = { v = @{ n = tally + 1; n }, w = @{ m = tally; m * 2 } };
-{ get() { (obj v) + (obj v) + (obj w) } }
+{ get { (obj v) + (obj v) + (obj w) } }
 `)
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
   const mod = await import(pathToFileURL(path.join(dir, 'bindblock.ts')).href)
@@ -185,8 +185,8 @@ test('命名导入：跨模块绑定顶层声明的值', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(
     path.join(dir, 'lib.ooc'),
-    `Point #type { x(): number };
-make = { p() { { x() { 42 } } } };
+    `Point #type { x: number };
+make = { p { { x { 42 } } } };
 make
 `,
     'utf-8',
@@ -208,9 +208,9 @@ m x
 
 test('纯 ES 产物形态：顶层声明 export、默认导出 = 最后一条表达式、运行时外部导入', async () => {
   const { dir } = await compileSource('shape', `
-Point #type { x(): number };
+Point #type { x: number };
 scale = 2;
-factory = { make() { { x() { 1 } } } };
+factory = { make { { x { 1 } } } };
 factory
 `)
   const code = await fs.readFile(path.join(dir, 'shape.ts'), 'utf8')
@@ -257,9 +257,9 @@ arr = Array of 1 2 3;
 
 test('同名 .d.ts：TS 侧 import 编译产物拿到真实类型（含泛型 typedef）', async () => {
   const { dir } = await compileSource('typed', `
-Point #type { x(): number, y(): number };
-Box #type <T> { value(): T };
-origin = { x() { 0 }, y() { 0 } };
+Point #type { x: number, y: number };
+Box #type <T> { value: T };
+origin = { x { 0 }, y { 0 } };
 scale = 2;
 origin
 `)

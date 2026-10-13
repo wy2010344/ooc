@@ -10,13 +10,13 @@ Component #type {
 };
 
 Signal #type {
-    get(): any,
+    get: any,
     set(value): any,
     update(fn): any
 };
 
 Ref #type {
-    get(): any,
+    get: any,
     set(value): any,
     update(fn): any
 };

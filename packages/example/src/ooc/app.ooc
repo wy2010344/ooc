@@ -4,8 +4,8 @@
 // ===== 语言能力展示 =====
 
 // 可区分联合 + guard 分支链（if/else-if/else）
-Circle #type { kind(): 'circle', radius: number };
-Square #type { kind(): 'square', side: number };
+Circle #type { kind: 'circle', radius: number };
+Square #type { kind: 'square', side: number };
 
 area = {
     calc(s: Circle | Square) {
@@ -44,8 +44,8 @@ Card = fc apply [ctx, title, content =>
     preview(ctx){
         ctx addDestroy [console log 'app 预览关闭';];
 
-        circleArea = (area calc { kind() { 'circle' }, radius() { 5 } });
-        squareArea = (area calc { kind() { 'square' }, side() { 4 } });
+        circleArea = (area calc { kind { 'circle' }, radius { 5 } });
+        squareArea = (area calc { kind { 'square' }, side { 4 } });
         mathResult = (math add 2 3);
         greeting = (hello greet 'World');
 

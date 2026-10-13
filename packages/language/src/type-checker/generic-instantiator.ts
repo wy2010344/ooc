@@ -67,7 +67,7 @@ export function instantiateSigWithExplicitArgs(
 /**
  * 方法泛型实例化：（调用方视角）从实参类型推断签名里的占位类型参数。
  * 顶层占位参数直接绑定实参类型；占位也可能嵌在对象类型里（如 `Box<T>` 的
- * `value(): T`），此时从实参对象的对应方法签名递归反推；无法由实参推断出
+ * `value: T`），此时从实参对象的对应方法签名递归反推；无法由实参推断出
  * 的占位按 any 处理（“未声明又不能推断，退回 any”）。
  */
 export function instantiateGenericSig(

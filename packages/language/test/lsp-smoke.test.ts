@@ -186,7 +186,7 @@ test('LSP: Hover 签名方法（无 body）显示签名', async () => {
     text:
       'obj = {\n        ' +
       IDX +
-      'area(): number,\n        area() { 42 }\n      };',
+      'area: number,\n        area { 42 }\n      };',
     indexMarker: IDX,
     index: 0,
     hover: /方法|area/,
@@ -251,7 +251,7 @@ test('LSP: Completion 应在 Ref 位置提供方法补全', async () => {
 
   // 在 obj 引用上请求补全，应能看到 obj 的方法
   const result = await expect({
-    text: 'obj = { greet() => 1 }; ' + IDX + 'obj',
+    text: 'obj = { greet => 1 }; ' + IDX + 'obj',
     indexMarker: IDX,
     index: 0,
     assert: (completions: any) => {
@@ -269,7 +269,7 @@ test('LSP: Completion 应在对象后空格提供方法补全', async () => {
 
   // 在 obj 后空格处请求补全（模拟用户准备输入方法名）
   const result = await expect({
-    text: 'obj = { greet() => 1 }; obj ' + IDX,
+    text: 'obj = { greet => 1 }; obj ' + IDX,
     indexMarker: IDX,
     index: 0,
     assert: (completions: any) => {
@@ -375,7 +375,7 @@ test('LSP: Completion 应在链式调用位置提供补全', async () => {
 
   // 链式调用中间位置
   const result = await expect({
-    text: 'obj = { greet() => 1 }; obj greet ' + IDX,
+    text: 'obj = { greet => 1 }; obj greet ' + IDX,
     indexMarker: IDX,
     index: 0,
     assert: (completions: any) => {

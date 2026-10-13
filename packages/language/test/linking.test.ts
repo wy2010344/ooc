@@ -57,10 +57,10 @@ describe('Linking tests', () => {
   test('multiple object references in chain', async () => {
     document = await parse(`
             obj1 = {
-                method1() => 10
+                method1 => 10
             };
             obj2 = {
-                method2() => 20
+                method2 => 20
             };
             result = obj1 method1;
         `)
@@ -71,8 +71,8 @@ describe('Linking tests', () => {
   test('nested object references', async () => {
     document = await parse(`
             outer = {
-                inner() => {
-                    value() => 42
+                inner => {
+                    value => 42
                 }
             };
             x = outer inner;

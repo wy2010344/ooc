@@ -42,7 +42,7 @@ TypeMemberList:
 TypeMember:
     name=MethodDefName 
         ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')?
-        ('(' ((params+=Param (',' params+=Param)*)?) ')')? 
+        ('(' params+=Param (',' params+=Param)* ')')? 
         (':' typeAnnotation=Type)?
 ;
 
@@ -63,8 +63,9 @@ Assignment:
 Method:
     MethodAll | MethodBind | MethodBindMutable;
 
+// 参数列表：括号内至少一个参数——无参方法不写括号（禁止空括号 `f()`）。
 fragment ParamAll:
-    (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)?
+    (params+=Param (',' params+=Param)* ( ',' '...' restParam=Param)?)
              | ('...' restParam=Param)
 ;
 MethodAll:
@@ -168,7 +169,7 @@ MethodCallName:
 Type:
     first=TypeName (seps+=('&'|'|') rest+=TypeName)*;
 
-//类型名：具名类型 / 内置 / 字面量（用于可区分联合的判别，如 kind(): 'circle'）
+//类型名：具名类型 / 内置 / 字面量（用于可区分联合的判别，如 kind: 'circle'）
 //泛型实例化：Box<number>、Pair<A, B>
 //命名空间访问：#import 导入的模块类型成员，如 math#Circle、math#area（方法返回类型）
 TypeName:

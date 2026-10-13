@@ -102,9 +102,9 @@ test('.ooc load：命名/类型导入按类型与值分类发射（真 ES named 
   test.after(() => fs.rmSync(namedDir, { recursive: true, force: true }))
   fs.writeFileSync(
     path.join(namedDir, 'lib.ooc'),
-    `Point #type { x(): number };
+    `Point #type { x: number };
 scale = 2;
-factory = { p() { { x() { 42 } } } };
+factory = { p { { x { 42 } } } };
 factory
 `,
   )
@@ -139,7 +139,7 @@ test('.ooc load：宿主依赖就是普通 import（.ts），不再是 globals �
   )
   const src = `#import { storage } './host.ts';
 counter = storage ref 0;
-{ bump() { 1 } }
+{ bump { 1 } }
 `
   const hostApp = path.join(hostDir, 'host.ooc')
   fs.writeFileSync(hostApp, src)
@@ -162,7 +162,7 @@ counter = storage ref 0;
 
 test('.ooc load：#type 提升等价 modelToTs 行为（typedef 在 TS 层、JS 产物无类型别名）', () => {
   const src = `
-Circle #type { kind(): 'circle', radius: number };
+Circle #type { kind: 'circle', radius: number };
 { area(r) { (r radius) * (r radius) * 3.14 } }
 `
   fs.writeFileSync(path.join(dir, 'shape.ooc'), src)

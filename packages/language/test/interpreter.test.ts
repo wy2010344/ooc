@@ -314,7 +314,7 @@ describe('OOC Interpreter', () => {
   test('转发属性 <= ：无参消息也转发（消息名不传给 apply）', async () => {
     const result = await interpreter.interpret(`
             greeting = {
-                apply() => 'hello'
+                apply => 'hello'
             };
             obj = { greet <= greeting };
             obj greet
@@ -344,7 +344,7 @@ describe('OOC Interpreter', () => {
 
   test('对象即 JS 对象：属性均为方法函数', async () => {
     const result = await interpreter.interpret(`
-            obj = { value = 42, f() { 'f' } };
+            obj = { value = 42, f { 'f' } };
             obj
         `)
     expect(typeof result.value).toBe('function')
@@ -361,7 +361,7 @@ describe('OOC Interpreter', () => {
 
   test('方法体内 this 引用自身字段', async () => {
     const result = await interpreter.interpret(`
-            obj = { name = 'pet', greet() { this name } };
+            obj = { name = 'pet', greet { this name } };
             obj greet
         `)
     expect(result).toBe('pet')
@@ -448,7 +448,7 @@ good = 3;`
   test('未知消息：未包兜底 Proxy 的对象直接抛结构化错误', async () => {
     try {
       await interpreter.interpret(`
-            obj = { foo() => 1 };
+            obj = { foo => 1 };
             obj bar 2 3
         `)
       throw new Error('预期抛错但没有抛')
@@ -788,7 +788,7 @@ describe('OOC #import 模块', () => {
     })
     const result = await interpret(
       `types = #import 'types';
-       p: Point = { x() { 1 }, y() { 2 } };
+       p: Point = { x { 1 }, y { 2 } };
        p x`,
       'demo.ooc',
     )
@@ -797,7 +797,7 @@ describe('OOC #import 模块', () => {
 
   test('命名导入：绑定模块顶层声明的值', async () => {
     const fs = memoryFs({
-      'greet.ooc': `greeting = 'hello';\nname = 'world';\n{ hi() { greeting + ' ' + name } }`,
+      'greet.ooc': `greeting = 'hello';\nname = 'world';\n{ hi { greeting + ' ' + name } }`,
       'ooc.json': JSON.stringify({}),
     })
     const { interpret } = createInterpretAction({
@@ -828,7 +828,7 @@ describe('OOC #import 模块', () => {
 
   test('命名导入值 + 类型导入可同时存在（path 两侧）', async () => {
     const fs = memoryFs({
-      'mix.ooc': `factory = { make() { 7 } };\nPoint #type { x: number };\n{ note() { 'mod' } }`,
+      'mix.ooc': `factory = { make { 7 } };\nPoint #type { x: number };\n{ note { 'mod' } }`,
       'ooc.json': JSON.stringify({}),
     })
     const { interpret } = createInterpretAction({
@@ -836,7 +836,7 @@ describe('OOC #import 模块', () => {
     })
     const result = await interpret(
       `#import { factory } 'mix' { Point };
-       p: Point = { x() { factory make } };
+       p: Point = { x { factory make } };
        p x`,
       'demo.ooc',
     )
@@ -854,7 +854,7 @@ describe('OOC #import 模块', () => {
     // 若类型导入会执行 side.ooc，则 boom 求值会抛错
     const result = await interpret(
       `#import 'side' { Point };
-       p: Point = { x() { 1 }, y() { 2 } };
+       p: Point = { x { 1 }, y { 2 } };
        p x`,
       'demo.ooc',
     )
@@ -1104,8 +1104,8 @@ describe('ObjectValue 元信息反射', () => {
   test('签名方法（无 body）不烧录运行时行为，实现方法正常履职', async () => {
     const result = await interpreter.interpret(`
         calc = {
-            area(): number,
-            area() { 42 }
+            area: number,
+            area { 42 }
         };
         calc
     `)
@@ -1119,7 +1119,7 @@ describe('ObjectValue 元信息反射', () => {
 
   test('纯签名方法（连实现都没有）运行时未知消息抛错，无成员烧录', async () => {
     const result = await interpreter.interpret(`
-        calc = { area(): number };
+        calc = { area: number };
         calc
     `)
     expect([...ObjectValue.metaOf(result)!.keys()]).toEqual([])
@@ -1188,8 +1188,8 @@ describe('ObjectValue 元信息反射', () => {
     const withBridge = createInterpretAction(EmptyFileSystem, { js })
     // 消息名是运行期字符串：兜底 handler 拿到 name 后用 js send 转发
     const result = await withBridge.interpret(`
-        defaults = { greet() => 'hi' };
-        w = js proxy { meow() => 'miao' } [name, ...args => js send defaults name args];
+        defaults = { greet => 'hi' };
+        w = js proxy { meow => 'miao' } [name, ...args => js send defaults name args];
         (w meow) + ' ' + (w greet)
     `)
     expect(result).toBe('miao hi')
@@ -1198,7 +1198,7 @@ describe('ObjectValue 元信息反射', () => {
   test('js send 无参消息：参数列表为空', async () => {
     const withBridge = createInterpretAction(EmptyFileSystem, { js })
     const result = await withBridge.interpret(`
-        o = { hi() => 'hay' };
+        o = { hi => 'hay' };
         js send o 'hi'
     `)
     expect(result).toBe('hay')
@@ -1208,7 +1208,7 @@ describe('ObjectValue 元信息反射', () => {
     const withBridge = createInterpretAction(EmptyFileSystem, { js })
     const result = await withBridge.interpret(`
         o = js new Object;
-        js send Object 'assign' o { hi() => 'hay' };
+        js send Object 'assign' o { hi => 'hay' };
         w = js proxy o [name, ...args => 'fb:' + name];
         (w hi) + ' ' + (w ping 7)
     `)
@@ -1228,8 +1228,8 @@ describe('ObjectValue 元信息反射', () => {
     test('spec 自有消息优先，未知消息转发给 defaults', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          defaults = { greet() => 'hi', gadget() => 'gadget' };
-          spec = { meow() => 'miao' };
+          defaults = { greet => 'hi', gadget => 'gadget' };
+          spec = { meow => 'miao' };
           w = delegate withDefault spec defaults;
           (w meow) + ' ' + (w greet) + ' ' + (w gadget)
         `,
@@ -1241,8 +1241,8 @@ describe('ObjectValue 元信息反射', () => {
     test('转发时 this 也是包装对象：defaults 方法体内 this 回读 spec', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          defaults = { name() => 'D', who() { this name } };
-          spec = { name() => 'S' };
+          defaults = { name => 'D', who { this name } };
+          spec = { name => 'S' };
           w = delegate withDefault spec defaults;
           w who
         `,
@@ -1256,8 +1256,8 @@ describe('ObjectValue 元信息反射', () => {
     test('spec 方法抢占同名消息，不经过转发', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          defaults = { greet() => 'hi' };
-          spec = { greet() => 'miaoo' };
+          defaults = { greet => 'hi' };
+          spec = { greet => 'miaoo' };
           w = delegate withDefault spec defaults;
           w greet
         `,
@@ -1270,8 +1270,8 @@ describe('ObjectValue 元信息反射', () => {
       await expect(
         delegateInterpreter().interpret(
           `
-            defaults = { greet() => 'hi' };
-            spec = { meow() => 'miao' };
+            defaults = { greet => 'hi' };
+            spec = { meow => 'miao' };
             w = delegate withDefault spec defaults;
             w missing
           `,
@@ -1283,9 +1283,9 @@ describe('ObjectValue 元信息反射', () => {
     test('多参数 withDefault：三个参数按链依次查找', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          defaults1 = { a() => 'a1', b() => 'b1' };
-          defaults2 = { a() => 'a2', c() => 'c2' };
-          spec = { d() => 'd_spec' };
+          defaults1 = { a => 'a1', b => 'b1' };
+          defaults2 = { a => 'a2', c => 'c2' };
+          spec = { d => 'd_spec' };
           w = delegate withDefault spec defaults1 defaults2;
           (w a) + ' ' + (w b) + ' ' + (w c) + ' ' + (w d)
         `,
@@ -1304,9 +1304,9 @@ describe('ObjectValue 元信息反射', () => {
       await expect(
         delegateInterpreter().interpret(
           `
-            defaults1 = { a() => 'a1' };
-            defaults2 = { b() => 'b2' };
-            spec = { c() => 'c_spec' };
+            defaults1 = { a => 'a1' };
+            defaults2 = { b => 'b2' };
+            spec = { c => 'c_spec' };
             w = delegate withDefault spec defaults1 defaults2;
             w missing
           `,
@@ -1318,10 +1318,10 @@ describe('ObjectValue 元信息反射', () => {
     test('二次拼接：把已组合的 c 再 withDefault d，链不丢', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          a = { a1() => 'a1' };
-          b = { b1() => 'b1' };
+          a = { a1 => 'a1' };
+          b = { b1 => 'b1' };
           c = delegate withDefault a b;
-          e = delegate withDefault c { e1() => 'e1' };
+          e = delegate withDefault c { e1 => 'e1' };
           (e a1) + ' ' + (e b1) + ' ' + (e e1)
         `,
         'demo.ooc',
@@ -1333,10 +1333,10 @@ describe('ObjectValue 元信息反射', () => {
     test('两次拼接不影响原组合：c 依旧独立可用', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          a = { a1() => 'a1' };
-          b = { b1() => 'b1' };
+          a = { a1 => 'a1' };
+          b = { b1 => 'b1' };
           c = delegate withDefault a b;
-          e = delegate withDefault c { e1() => 'e1' };
+          e = delegate withDefault c { e1 => 'e1' };
           (c b1) + ' ' + (e b1)
         `,
         'demo.ooc',
@@ -1347,9 +1347,9 @@ describe('ObjectValue 元信息反射', () => {
     test('共享 defaults：多个包装互相不污染原对象', async () => {
       const result = await delegateInterpreter().interpret(
         `
-          shared = { tag() => 'shared' };
-          w1 = delegate withDefault { n1() => 1 } shared;
-          w2 = delegate withDefault { n2() => 2 } shared;
+          shared = { tag => 'shared' };
+          w1 = delegate withDefault { n1 => 1 } shared;
+          w2 = delegate withDefault { n2 => 2 } shared;
           (w1 tag) + '-' + (w2 tag) + '-' + ((w1 n1) + (w2 n2))
         `,
         'demo.ooc',
