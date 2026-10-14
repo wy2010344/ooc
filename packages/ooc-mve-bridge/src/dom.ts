@@ -30,11 +30,18 @@ const makeTagFn = (tag: string): TagFactory => {
         meta.forEach(function (value, key) {
           const v = value[0]
           if (v.type == 'call') {
-            //是函数（事件回调/动态 getter），交给 mve 当 SyncFun
-            to[key] = arg[key].bind(arg)
+            // descriptor 分流：属性成员（getter，零参）每次读取重算（等价旧的
+            // 每次调用），返回值（可为 lambda）原样透传给 mve；带参方法函数保持
+            // bind（mve 按 SyncFun 调用，事件实参正常传入）
+            const desc = Object.getOwnPropertyDescriptor(arg, key)
+            if (desc && desc.get) {
+              to[key] = () => arg[key]
+            } else {
+              to[key] = arg[key].bind(arg)
+            }
           } else {
-            //是常量值，构造时读一次
-            to[key] = arg[key]()
+            // 常量值（bind getter），构造时读一次
+            to[key] = arg[key]
           }
         })
       }

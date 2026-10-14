@@ -52,6 +52,17 @@ export function getContextualMethodCompletions(
   return []
 }
 
+/** 成员补全的 detail：零参无泛型渲染为属性形态（判别字段），其余为方法签名 */
+function sigDetail(methodName: string, sig: any): string {
+  if ((sig.params ?? []).length === 0 && !sig.rest && !sig.typeParams) {
+    return `${methodName}: ${describeType(sig.returns)}`
+  }
+  const params = (sig.params ?? [])
+    .map((p: any) => (p ? describeType(p) : 'any'))
+    .join(', ')
+  return `${methodName}(${params}) => ${describeType(sig.returns)}`
+}
+
 /**
  * 从 Ref 节点获取方法补全
  */
@@ -61,13 +72,10 @@ function getMethodCompletionsFromRef(checker: any, refNode: AstNode): Completion
   if (t?.kind === 'object' && t.methods) {
     for (const [methodName, sigs] of t.methods) {
       const sig = (sigs as any[])[(sigs as any[]).length - 1]
-      const params = (sig.params ?? [])
-        .map((p: any) => (p ? describeType(p) : 'any'))
-        .join(', ')
       items.push({
         label: methodName,
         kind: CompletionItemKind.Method,
-        detail: `${methodName}(${params}) => ${describeType(sig.returns)}`,
+        detail: sigDetail(methodName, sig),
       })
     }
   }
@@ -86,13 +94,10 @@ function getMessageChainCompletions(checker: any, chainNode: AstNode): Completio
       if (t?.kind === 'object' && t.methods) {
         for (const [methodName, sigs] of t.methods) {
           const sig = (sigs as any[])[(sigs as any[]).length - 1]
-          const params = (sig.params ?? [])
-            .map((p: any) => (p ? describeType(p) : 'any'))
-            .join(', ')
           items.push({
             label: methodName,
             kind: CompletionItemKind.Method,
-            detail: `${methodName}(${params}) => ${describeType(sig.returns)}`,
+            detail: sigDetail(methodName, sig),
           })
         }
       }

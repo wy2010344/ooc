@@ -328,8 +328,14 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     const ret = node.returnType
       ? ` : ${this.formatType(node.returnType)}`
       : ''
+    const name = this.extractName(node.name)
+    // 零参无泛型 = 属性成员：hover 显示属性形态（与 d.ts/类型对象一致）
+    const isProp =
+      (node.params?.length ?? 0) === 0 &&
+      !node.restParam &&
+      (node.typeParams?.length ?? 0) === 0
     return this.buildHoverContent(
-      `方法 ${this.extractName(node.name)}(${params}${rest})${ret}`,
+      isProp ? `属性 ${name}${ret}` : `方法 ${name}(${params}${rest})${ret}`,
       comment,
     )
   }
@@ -454,6 +460,10 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
             .map((p: any) => (p ? describeType(p) : 'any'))
             .join(', ')
           const rest = sig.rest ? `, ...${describeType(sig.rest)}` : ''
+          // 零参无泛型成员渲染为属性形态（判别字段），与 d.ts 一致
+          if ((sig.params ?? []).length === 0 && !sig.rest && !sig.typeParams) {
+            return `${n}: ${describeType(sig.returns)}`
+          }
           return `${n}(${params}${rest}) => ${describeType(sig.returns)}`
         }),
       )

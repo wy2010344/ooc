@@ -264,21 +264,42 @@ scale = 2;
 origin
 `)
   const dts = await fs.readFile(path.join(dir, 'typed.d.ts'), 'utf8')
-  // typedef 原样声明（含泛型）
-  if (!/export type Point = \{\s*x\(\): number;\s*y\(\): number\s*\}/.test(dts)) {
+  // typedef 原样声明（含泛型）：零参成员渲染为属性形态（判别字段）
+  if (!/export type Point = \{\s*x: number;\s*y: number\s*\}/.test(dts)) {
     throw new Error(`d.ts 应含 Point 形状，实际:\n${dts}`)
   }
-  if (!/export type Box<T> = \{\s*value\(\): T\s*\}/.test(dts)) {
+  if (!/export type Box<T> = \{\s*value: T\s*\}/.test(dts)) {
     throw new Error(`d.ts 应含泛型 Box<T>，实际:\n${dts}`)
   }
-  // 顶层值：字面量放宽成基础类型，方法签名里保持精确
+  // 顶层值：字面量放宽成基础类型，属性形态里保持精确
   if (!/export declare const scale: number;/.test(dts)) {
     throw new Error(`顶层字面量应放宽为 number，实际:\n${dts}`)
   }
-  if (!/export declare const origin: \{ x\(\): 0; y\(\): 0 \};/.test(dts)) {
-    throw new Error(`对象形状应从方法签名推断，实际:\n${dts}`)
+  if (!/export declare const origin: \{ x: 0; y: 0 \};/.test(dts)) {
+    throw new Error(`对象形状应从属性签名推断，实际:\n${dts}`)
   }
-  if (!/export default \{ x\(\): 0; y\(\): 0 \};/.test(dts)) {
+  if (!/export default \{ x: 0; y: 0 \};/.test(dts)) {
     throw new Error(`默认导出应有类型，实际:\n${dts}`)
   }
+})
+
+test('lambda 保留：零参属性成员返回 lambda 本体，__send 读取不二次 apply', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('lam', `
+obj = { handler => [x => x + 1], inc = [x => x + 2] };
+obj
+`)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  const rt = await loadRuntime(dir)
+  // __send 读属性成员：拿到 lambda 本体而非执行结果
+  const h = rt.__send(mod.default, 'handler', [])
+  if (typeof h !== 'function') throw new Error('handler 应为 lambda 函数本体')
+  if (h(41) !== 42) throw new Error('lambda 直调应得 42')
+  // bind 形同理
+  const inc = rt.__send(mod.default, 'inc', [])
+  if (typeof inc !== 'function') throw new Error('inc 应为 lambda 函数本体')
+  if (rt.__send(inc, 'apply', [41]) !== 43) throw new Error('apply 显式调用应得 43')
+  // JS 直读也是 lambda 本体
+  if (typeof mod.default.handler !== 'function') throw new Error('JS 直读应为函数本体')
+  if (mod.default.handler(1) !== 2) throw new Error('JS 直调 lambda 应得 2')
 })

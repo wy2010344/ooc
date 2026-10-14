@@ -209,6 +209,18 @@ test('LSP: Hover 转发属性（<=）显示转发说明', async () => {
   })
 })
 
+test('LSP: Hover 零参成员显示属性形态（判别字段）', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  await expect({
+    text: 'obj = {\n        ' + IDX + "kind { 'circle' }\n      };",
+    indexMarker: IDX,
+    index: 0,
+    hover: /属性 kind/,
+  })
+})
+
 // ========== Completion Provider 测试 ==========
 
 test('LSP: Completion 应在变量位置提供补全', async () => {
@@ -381,6 +393,32 @@ test('LSP: Completion 应在链式调用位置提供补全', async () => {
     assert: (completions: any) => {
       const labels = completions.items.map((item: any) => item.label)
       assert.ok(labels.length > 0, `补全列表应有内容`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 零参成员 detail 为属性形态，带参保持方法形态', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  const result = await expect({
+    text: "obj = { kind { 'circle' }, radius(x) => x };\nobj " + IDX,
+    indexMarker: IDX,
+    index: 0,
+    assert: (completions: any) => {
+      const kind = completions.items.find((item: any) => item.label === 'kind')
+      assert.ok(kind, `补全列表应包含 kind`)
+      assert.ok(
+        /kind:/.test(kind.detail),
+        `零参成员 detail 应为属性形态，实际: ${kind.detail}`,
+      )
+      const radius = completions.items.find((item: any) => item.label === 'radius')
+      assert.ok(radius, `补全列表应包含 radius`)
+      assert.ok(
+        /radius\(/.test(radius.detail),
+        `带参成员 detail 应保持方法形态，实际: ${radius.detail}`,
+      )
     },
   })
   assert.ok(result, '应返回补全结果')

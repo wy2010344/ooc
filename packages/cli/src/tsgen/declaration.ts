@@ -44,6 +44,11 @@ function tsTypeOf(t: TypeInfo | undefined, widen = false): string {
 function sigSignature(name: string, sigs: MethodSig[]): string {
   const first = sigs[0]
   if (!first) return `${name}(...args: any[]): any`
+  // 零参无泛型渲染为属性形态（判别字段），与 typedef 的 typeDefCode 一致；
+  // 泛型零参保持方法形态（TS 属性不能泛型）
+  if (first.params.length === 0 && !first.rest && !first.typeParams) {
+    return `${name}: ${tsTypeOf(first.returns)}`
+  }
   const params = first.params.map((p, i) => `p${i}: ${tsTypeOf(p)}`)
   if (first.rest) params.push(`...rest: ${tsTypeOf(first.rest)}[]`)
   return `${name}(${params.join(', ')}): ${tsTypeOf(first.returns)}`

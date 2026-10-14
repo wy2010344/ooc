@@ -225,7 +225,7 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(42)
   })
 
-  test('bind 是方法函数：无参返回绑定值，有参数跳过', async () => {
+  test('bind 是属性成员：消息读取返回绑定值', async () => {
     const result = await interpreter.interpret(`
             obj = { value = 42 };
             obj value
@@ -342,21 +342,49 @@ describe('OOC Interpreter', () => {
     ).rejects.toThrow()
   })
 
-  test('对象即 JS 对象：属性均为方法函数', async () => {
+  test('对象即 JS 对象：零参成员为属性直读，带参成员为方法函数', async () => {
     const result = await interpreter.interpret(`
-            obj = { value = 42, f { 'f' } };
+            obj = { value = 42, f { 'f' }, add(x) => x + 1 };
             obj
         `)
-    expect(typeof result.value).toBe('function')
-    expect(result.value()).toBe(42)
-    expect(typeof result.f).toBe('function')
-    expect(result.f()).toBe('f')
-    expect(Object.keys(result)).toEqual(['value', 'f'])
+    // bind 与零参 call 都是属性：JS 侧直读值（getter 每次读取重算）
+    expect(result.value).toBe(42)
+    expect(result.f).toBe('f')
+    // 带参成员仍是方法函数
+    expect(typeof result.add).toBe('function')
+    expect(result.add(1)).toBe(2)
+    expect(Object.keys(result)).toEqual(['value', 'f', 'add'])
   })
 
   test('顶层对象为普通 JS 对象（保留 Object.prototype）', async () => {
     const result = await interpreter.interpret(`{ value = 42 }`)
     expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+  })
+
+  test('lambda 保留：零参成员返回 lambda，消息读取不二次 apply', async () => {
+    // call 形：方法体返回 lambda
+    const callImpl = await interpreter.interpret(`
+            obj = { handler => [x => x + 1] };
+            h = obj handler;
+            h apply 41
+        `)
+    expect(callImpl).toBe(42)
+    // bind 形：常量绑定 lambda
+    const bindImpl = await interpreter.interpret(`
+            obj2 = { handler = [x => x + 1] };
+            h = obj2 handler;
+            h apply 41
+        `)
+    expect(bindImpl).toBe(42)
+  })
+
+  test('lambda 保留：JS 直读 obj.handler 是 lambda 本体（非执行结果）', async () => {
+    const result = await interpreter.interpret(`
+            obj = { handler => [x => x + 1] };
+            obj
+        `)
+    expect(typeof result.handler).toBe('function')
+    expect(result.handler(41)).toBe(42)
   })
 
   test('方法体内 this 引用自身字段', async () => {
@@ -1264,6 +1292,20 @@ describe('ObjectValue 元信息反射', () => {
         'demo.ooc',
       )
       expect(result).toBe('miaoo')
+    })
+
+    test('lambda 保留：委托链原样透传 getter 返回的 lambda', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          spec = {};
+          defaults = { handler => [x => x + 1] };
+          w = delegate withDefault spec defaults;
+          h = w handler;
+          h apply 41
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe(42)
     })
 
     test('defaults 也未知的消息最终抛错', async () => {

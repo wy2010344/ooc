@@ -20,7 +20,12 @@ export function typeDefCode(td: any): string {
         .map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation)}`)
         .join(', ')
       const ret = typeAnnot(m.typeAnnotation)
-      return `  ${mname}${typeArgs ? `<${typeArgs}>` : ''}(${mparams})${ret || ': any'}`
+      // 零参无泛型成员渲染为属性形态（kind: 'circle'）：TS 可区分联合判别/收窄生效；
+      // 泛型零参保持方法形态（TS 属性不能泛型）
+      const isProp = (m.params || []).length === 0 && !typeArgs
+      return isProp
+        ? `  ${mname}${ret || ': any'}`
+        : `  ${mname}${typeArgs ? `<${typeArgs}>` : ''}(${mparams})${ret || ': any'}`
     })
     .join(';\n')
   return `export type ${name}${params ? `<${params}>` : ''} = {\n${members}\n};`

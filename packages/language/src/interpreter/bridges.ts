@@ -110,6 +110,19 @@ function chainWrap(entries: unknown[]): unknown {
   const wrapped = proxyCatchAll(wrapper, (name, ...args) => {
     for (const o of entries) {
       if (o == null) continue
+      // descriptor 优先：属性成员（getter）以包装对象为 receiver 单次读取，
+      // 结果原样返回（可为 lambda，绝不二次 apply）；未命中（undefined）继续向后查找
+      const desc =
+        typeof o === 'object' || typeof o === 'function'
+          ? Object.getOwnPropertyDescriptor(o, name)
+          : undefined
+      if (desc && (desc.get || desc.set)) {
+        if (desc.get) {
+          const v = desc.get.call(receiverHolder.v ?? o)
+          if (v !== undefined) return v
+        }
+        continue
+      }
       const v = (o as Record<string, unknown>)[name]
       if (v === undefined) continue
       if (typeof v === 'function') {

@@ -861,9 +861,25 @@ export class ObjectOrientedCTypeChecker {
     }
     // 先执行 #guard 前的语句：校验 + 赋值入 env（无分支时它的最后表达式即返回类型）
     const preLast = returnOf((method.body?.stmts ?? []) as Expression[])
+    // else-if 链语义：每个判别目标记录「前序条件为假」的基准类型。
+    // 进入每条分支前把目标恢复为基准再按本分支条件收窄——避免上一分支的
+    // 收窄结果泄漏到后续分支（修复前第二个分支会看到第一个分支的收窄类型）。
+    const bases = new Map<string, TypeInfo>()
     for (const branch of branches) {
-      // 判别收窄：guard 条件为真时收窄第一个联合参数
-      this.narrowByTag(branch.guardExpression, methodEnv)
+      const test = this.extractTagTest(branch.guardExpression)
+      if (test && !bases.has(test.target)) {
+        const cur = methodEnv.lookup(test.target)
+        if (cur && cur.kind === 'union') {
+          bases.set(test.target, cur)
+        }
+      }
+      for (const [target, base] of bases) {
+        methodEnv.define(target, base)
+      }
+      // 判别收窄：guard 条件为真时收窄判别目标
+      if (test) {
+        this.narrowByTag(branch.guardExpression, methodEnv)
+      }
       const guardType = this.inferExpression(
         branch.guardExpression,
         methodEnv,
@@ -881,9 +897,29 @@ export class ObjectOrientedCTypeChecker {
         )
       }
       blockReturns.push(returnOf(branch.stmts as Expression[]))
+      // 本分支条件为假的世界：== v 剔除命中成员，!= v 只留命中成员
+      if (test) {
+        const base = bases.get(test.target)
+        if (base && base.kind === 'union') {
+          const rest = base.types.filter((member) => {
+            const match = test.method
+              ? this.memberTagMatches(member, test.method, test.value)
+              : member.kind === 'literal' &&
+                test.value.kind === 'literal' &&
+                member.value === test.value.value
+            return test.negate ? match : !match
+          })
+          if (rest.length > 0) {
+            bases.set(test.target, rest.length === 1 ? rest[0]! : unionOf(rest))
+          }
+        }
+      }
     }
-    // else 兜底块：有 guard 分支时它也参与返回类型
+    // else 兜底块：有 guard 分支时它也参与返回类型；看到的是全部条件为假的基准
     if (branches.length > 0 && method.body?.elseBranch) {
+      for (const [target, base] of bases) {
+        methodEnv.define(target, base)
+      }
       blockReturns.push(returnOf(method.body.elseBranch.stmts as Expression[]))
     }
     let returnType: TypeInfo =
@@ -1129,9 +1165,12 @@ export class ObjectOrientedCTypeChecker {
       })
     })
     if (missing.length > 0) {
+      // 无 #else 兜底时覆盖不全是硬错误：运行时全不命中会静默返回 nil，
+      // 与声明的返回类型不符。有 #else 兜底维持 warning（运行时安全）。
+      const hasElse = !!method.body?.elseBranch
       accept(
-        'warning',
-        `方法 '${name}' 的可区分联合覆盖不全：联合成员 ${missing.map(describeType).join('、')} 没有对应的 #guard 判别分支`,
+        hasElse ? 'warning' : 'error',
+        `方法 '${name}' 的可区分联合覆盖不全：联合成员 ${missing.map(describeType).join('、')} 没有对应的 #guard 判别分支${hasElse ? '' : '，且没有 #else 兜底'}`,
         {
           node: method,
           property: 'name',

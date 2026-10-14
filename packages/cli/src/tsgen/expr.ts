@@ -173,7 +173,13 @@ function methodCode(m: any): string | null {
       const fn = guards.length > 0
         ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
         : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
-      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn} }`
+      // 零参无泛型 = 属性成员：__createObject 挂 getter 读取即执行（判据同解释器，
+      // 不能用 fn.length——rest 参数会误判）
+      const prop =
+        (m.params?.length ?? 0) === 0 &&
+        !m.restParam &&
+        (m.typeParams?.length ?? 0) === 0
+      return `{ type: 'call', name: ${JSON.stringify(name)}${prop ? ', prop: true' : ''}, fn: ${fn} }`
     }
   }
 }

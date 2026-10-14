@@ -43,7 +43,7 @@ packages/
 - `//` 是**单行注释**，不是除法。除法写法：`12 div 3`（`div` 是消息名）。`/` 是级联符，`/` 是独立 token，`list get/ at i`、`list get /filter [...]/length` 无空格连写也合法。
 - 消息调用用空格分隔，无括号；字符串用单引号。
 - 运算符无优先级，左结合。
-- **对象成员 `=` 是常量绑定**：对象构造时求值一次，之后永远返回同一缓存值；`=>` 单行与 `{ ... }` 方法体每次调用都重新求值。事件/跟随信号的属性必须用 `=>`（`onClick = ...` 会拿到构造时的旧值）。
+- **对象成员 `=` 是常量绑定**：对象构造时求值一次，之后永远返回同一缓存值；`=>` 单行与 `{ ... }` 方法体每次**读取**都重新求值（零参成员是属性/getter，带参成员是方法、每次调用执行）。事件/跟随信号的属性必须用 `=>`（`onClick = ...` 会拿到构造时的旧值）。
 - **管道 `|` 参数前置**（thread-first）：`et index|remove apply` ≡ `remove apply (et index)`；`|` 右侧必须是一条消息链，单消息要写 `| f apply`。
 - **数组直接用 JS 生态**：`Array` 是 globalThis 全局对象，`(Array of)` 构造数组（含空数组）；不可变改数据用数组原生 `toSpliced`：`xs / toSpliced 1 0 {...}`（返回新数组）。
 - `#import` 用相对路径，最后一条表达式是模块导出值。包引用用显式标记符：`'@name'` / `'@name/sub'` 解析为 `/ooc-pkg/<name>/<file>`（`@name` 默认映射到 `ooc.json` 的 `entry`，即 `index.ooc`），经 `package-fs.ts` 重定向到 `.ooc_modules/`。项目内安装的包由 CLI `ooc install <目录|git-url>` 写入 `.ooc_modules/<name>/`。base 标准库即经此发布：`#import '@base/loop'`、`#import '@base'`。

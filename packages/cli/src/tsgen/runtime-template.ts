@@ -37,6 +37,8 @@ export type OOCEntry = {
   name: string
   /** bind/mutable 的惰性 thunk：首次访问时调用求值；call 的实现函数 */
   fn?: (...args: any[]) => any
+  /** call 的属性成员标记（零参无泛型）：__createObject 挂 getter，读取即执行 */
+  prop?: boolean
   /** 惰性求值标记与缓存（首次访问时写入） */
   lazyDone?: boolean
   lazy?: any
@@ -53,6 +55,21 @@ export const OOC_EMPTY_OBJECT = {}
 Object.defineProperty(OOC_EMPTY_OBJECT, OOC_META, { enumerable: false, value: new Map() })
 export function __send(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
+  // descriptor 优先：属性成员（getter）单次读取、结果原样返回（可为 lambda，绝不
+  // 二次 apply——lambda 保留语义的关键）；数据属性带参写入、无参读取；数据函数按
+  // 方法 apply。无 own descriptor（原型链方法 / Proxy / 宿主内建）走下方回退链。
+  const desc = o == null || (typeof o !== 'object' && typeof o !== 'function')
+    ? undefined
+    : Object.getOwnPropertyDescriptor(o, value)
+  if (desc) {
+    if (desc.get || desc.set) {
+      if (args.length && desc.set) { desc.set.call(o, args[0]); return o[value] }
+      return desc.get ? desc.get.call(o) : undefined
+    }
+    if (typeof desc.value === 'function') return desc.value.apply(o, args)
+    if (args.length) o[value] = args[0]
+    return o[value]
+  }
   const fun = o?.[value]
   if (typeof fun == 'function') return fun.apply(o, args)
   if (value in Object(o)) {
@@ -79,24 +96,37 @@ export function __createObject(entries: OOCEntry[]): any {
   Object.defineProperty(obj, OOC_META, { enumerable: false, value: groups })
   groups.forEach((methods, name) => {
     // 名字唯一（校验器保证）：每个 key 只有一个成员，直接派发，不再按参数数量匹配。
+    // bind 挂 getter（惰性求值一次缓存）；call 且 prop（零参属性成员）挂 getter
+    // 读取即执行方法体（值可为 lambda，原样返回）；mutable 为转发函数；其余为方法函数。
     const pair = methods[0]
+    if (pair.type === 'bind') {
+      Object.defineProperty(obj, name, {
+        enumerable: true,
+        get() {
+          if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
+          return pair.lazy
+        },
+      })
+      return
+    }
+    if (pair.type === 'call' && pair.prop) {
+      Object.defineProperty(obj, name, {
+        enumerable: true,
+        get() { return pair.fn!.call(this) },
+      })
+      return
+    }
     Object.defineProperty(obj, name, {
       enumerable: true,
       value() {
         const args = Array.from(arguments)
-        switch (pair.type) {
-          case 'bind':
-            // 惰性绑定：读取即求值一次并缓存（参数忽略）
-            if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
-            return pair.lazy
-          case 'mutable':
-            // 转发属性同样惰性：首次发消息时求值委托对象并缓存
-            if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
-            return __send(pair.lazy, 'apply', Array.from(args))
-          default:
-            // call：#guard 分支已编译进 fn（if/else if 链），直接调用
-            return pair.fn!.apply(this, args)
+        if (pair.type === 'mutable') {
+          // 转发属性同样惰性：首次发消息时求值委托对象并缓存
+          if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
+          return __send(pair.lazy, 'apply', args)
         }
+        // call：#guard 分支已编译进 fn（if/else if 链），直接调用
+        return pair.fn!.apply(this, args)
       },
     })
   })

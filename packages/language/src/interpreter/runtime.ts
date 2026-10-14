@@ -216,24 +216,49 @@ export function objectValue(methods: Method[], scope: Scope) {
   attachMeta(obj, meta)
   meta.forEach(function (methods, name) {
     // 名字唯一（校验器保证）：每个 key 只有一个成员，直接派发，不再按参数数量匹配。
-    // bind / mutable / call 都以方法函数形式挂载，bind 在函数体内直接返回绑定值。
+    // bind 挂 getter（惰性求值一次缓存）；call 按成员形状分流——
+    // 零参无泛型（属性成员）挂 getter 读取即执行方法体（值可为 lambda，原样返回），
+    // 带参/泛型保持方法函数（d.ts 需渲染 f<T>() 可调用形态）；mutable 仍为转发函数。
     const pair = methods[0]
+    if (pair.type === 'bind') {
+      Object.defineProperty(obj, name, {
+        enumerable: true,
+        get() {
+          return lazyValue(pair)
+        },
+      })
+      return
+    }
+    if (pair.type === 'call') {
+      const method = pair.value
+      if (
+        method.params.length === 0 &&
+        !method.restParam &&
+        method.typeParams.length === 0
+      ) {
+        Object.defineProperty(obj, name, {
+          enumerable: true,
+          get() {
+            return runGuardedBody(method, scope, this, [])
+          },
+        })
+        return
+      }
+      Object.defineProperty(obj, name, {
+        enumerable: true,
+        value() {
+          const args = Array.from(arguments) as unknown[]
+          return runGuardedBody(method, scope, this, args)
+        },
+      })
+      return
+    }
     Object.defineProperty(obj, name, {
       enumerable: true,
       value() {
-        const args = Array.from(arguments) as unknown[]
-        switch (pair.type) {
-          case 'bind':
-            // bind：常量绑定，读取即返回缓存值（参数忽略）
-            return lazyValue(pair)
-          case 'mutable':
-            // 转发属性：本 key 上的一切消息原样转发给委托对象的 apply
-            //（消息名不传给 apply，只传实参）。
-            return sendMessage(lazyValue(pair), 'apply', args)
-          default:
-            // call：方法体内的 #guard 分支链负责条件（if/else-if/else）
-            return runGuardedBody(pair.value, scope, this, args)
-        }
+        // mutable 转发属性：本 key 上的一切消息原样转发给委托对象的 apply
+        //（消息名不传给 apply，只传实参）。
+        return sendMessage(lazyValue(pair), 'apply', Array.from(arguments))
       },
     })
   })
@@ -321,6 +346,31 @@ export function sendMessage(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') {
     //lambda需要特殊处理
     return o.apply(o, args)
+  }
+  // descriptor 优先：属性成员（getter）单次读取、结果原样返回——即使结果是
+  // lambda 也绝不二次 apply；数据属性带参写入、无参读取；数据函数仍按方法 apply。
+  // 无 own descriptor（原型链方法 / Proxy / 宿主内建）走下方回退链。
+  const desc =
+    o == null || (typeof o !== 'object' && typeof o !== 'function')
+      ? undefined
+      : Object.getOwnPropertyDescriptor(o, value)
+  if (desc) {
+    if (desc.get || desc.set) {
+      if (args.length && desc.set) {
+        desc.set.call(o, args[0])
+        return o[value]
+      }
+      // 只读 getter（或无实参读取）：取值一次，函数值原样透传
+      return desc.get ? desc.get.call(o) : undefined
+    }
+    if (typeof desc.value === 'function') {
+      return desc.value.apply(o, args)
+    }
+    // 数据非函数属性：带参写入，否则读取（宿主对象语义）
+    if (args.length) {
+      o[value] = args[0]
+    }
+    return o[value]
   }
   const fun = o?.[value]
   if (typeof fun == 'function') {

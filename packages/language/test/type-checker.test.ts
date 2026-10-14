@@ -1559,6 +1559,40 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       expect(messages(diags)).toEqual([])
     })
 
+    test('穷尽覆盖且无 #else：不报覆盖不全，返回类型为分支联合', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind: 'circle', radius: number };
+          Square #type { kind: 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  (s radius) * (s radius)
+                  #guard (s kind) == 'square';
+                  (s side) * (s side)
+              }
+          };
+          shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
+          r: number = area area shape
+      `)
+      expect(messages(diags)).toEqual([])
+    })
+
+    test('覆盖不全且无 #else：升级为 error（运行时会静默 nil）', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind: 'circle', radius: number };
+          Square #type { kind: 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  s radius
+              }
+          }
+      `)
+      const uncovered = diags.find((d) => d.message.includes('可区分联合覆盖不全'))
+      expect(uncovered?.message).toContain('没有 #else 兜底')
+      expect(uncovered?.severity).toBe(1)
+    })
+
     test('漏掉一个联合成员的判别分支会报覆盖不全', async () => {
       const diags = await diagnostics(`
           Circle #type { kind: 'circle', radius: number };
@@ -1631,6 +1665,43 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       // r 得到分支联合 number | string 不报；bad 只认 string 会报（可能命中 number 分支）
       expect(messages(diags).join('\n')).toContain('类型不匹配')
       expect(messages(diags).join('\n')).not.toContain('可区分联合覆盖不全')
+    })
+
+    test('else-if 链：第 2 分支在前序条件为假的基准上收窄（精确类型）', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind: 'circle', radius: number };
+          Square #type { kind: 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  s radius
+                  #guard (s kind) == 'square';
+                  bad: string = s side;
+                  s side
+              }
+          }
+      `)
+      // 修复前第 2 分支看到第 1 分支收窄后的 Circle，s side 退 any、bad 不报；
+      // 修复后第 2 分支基准是联合减 circle = Square，side: number 赋给 string 应报
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
+    })
+
+    test('else 段按全部条件为假的基准收窄', async () => {
+      const diags = await diagnostics(`
+          Circle #type { kind: 'circle', radius: number };
+          Square #type { kind: 'square', side: number };
+          area = {
+              area(s: Circle | Square) {
+                  #guard (s kind) == 'circle';
+                  s radius
+                  #else;
+                  bad: string = s side;
+                  s side
+              }
+          }
+      `)
+      // else 基准 = 联合减 circle = Square，side: number 赋 string 应报
+      expect(messages(diags).join('\n')).toContain('类型不匹配')
     })
   })
 })

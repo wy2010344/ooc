@@ -128,6 +128,37 @@ describe('toOocConfig（从解释器返回值转换）', () => {
       noImplicitAny: 'off',
     })
   })
+
+  test('lambda 保留：属性成员（getter）直取内层配置对象', () => {
+    // 模拟 OOC 对象 bind/属性成员：diagnostics 是 getter，读取即值
+    const obj: Record<string, unknown> = {}
+    Object.defineProperty(obj, 'diagnostics', {
+      enumerable: true,
+      get() {
+        return { typeMismatch: 'error' }
+      },
+    })
+    expect(toOocConfig(obj).diagnostics).toEqual({ typeMismatch: 'error' })
+  })
+
+  test('lambda 保留：getter 返回的函数值不被二次调用', () => {
+    // 配置成员值是 lambda（函数）：绝不执行（执行会产生副作用且结果仍非法）
+    let calls = 0
+    const lambda = () => {
+      calls++
+      return { typeMismatch: 'off' }
+    }
+    const obj: Record<string, unknown> = {}
+    Object.defineProperty(obj, 'diagnostics', {
+      enumerable: true,
+      get() {
+        return lambda
+      },
+    })
+    const config = toOocConfig(obj)
+    expect(config).toEqual({})
+    expect(calls).toBe(0)
+  })
 })
 
 describe('filterDiagnostic', () => {

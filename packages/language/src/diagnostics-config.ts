@@ -142,15 +142,14 @@ export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_C
 
 /**
  * 从 OOC 解释器返回值中提取 OocConfig。
- * OOC 对象的属性都是方法函数（如 obj.diagnostics() 返回内层对象），
- * 需要调用这些方法才能取到实际值。
+ * OOC 对象的零参成员（bind/属性）直读即值；带参方法成员是函数需要调用。
  */
 export function toOocConfig(value: unknown): OocConfig {
   if (!value || typeof value !== 'object') {
     return EMPTY_OOC_CONFIG
   }
   const obj = value as Record<string, unknown>
-  // OOC 对象属性是方法函数，需要调用才能取值
+  // bind/属性成员直读即值；带参方法成员需要调用（extractOocValue 内部分流）
   const rawDiags = extractOocValue(obj, 'diagnostics')
   if (rawDiags && typeof rawDiags === 'object') {
     const normalized = extractDiagLevels(rawDiags as Record<string, unknown>)
@@ -164,10 +163,18 @@ export function toOocConfig(value: unknown): OocConfig {
 }
 
 /**
- * 从 OOC 对象中提取命名属性值：OOC 对象属性是方法，
- * 调用后返回实际值；如果不是函数则直接返回。
+ * 从 OOC 对象中提取命名属性值：
+ * - 属性成员（own getter，bind/零参 call）：直读原样返回——值可能是 lambda 等
+ *   函数值，绝不能二次调用；
+ * - 无 getter 时是函数（宿主 JS 对象的方法成员）：调用后返回实际值；
+ * - 其余直读。
  */
 function extractOocValue(obj: Record<string, unknown>, key: string): unknown {
+  // 属性成员（getter）：直读原样返回，函数值不二次调用
+  const desc = Object.getOwnPropertyDescriptor(obj, key)
+  if (desc && desc.get) {
+    return obj[key]
+  }
   const v = obj[key]
   if (typeof v === 'function') {
     try {
@@ -194,14 +201,15 @@ function extractDiagLevels(
   const result: Record<string, DiagLevel> = {}
 
   // 遍历所有可能的 diagnostic code，通过消息发送获取值
-  // 这样可以触发兜底 Proxy 转发（withDefault 包装的 handler）
+  // 这样可以触发兜底 Proxy 转发（withDefault 包装的 handler）。
+  // sendMessage 已完成派发（属性 getter 直读、数据函数 apply），raw 就是最终值；
+  // 函数值（lambda 配置）原样透传并被过滤，绝不能再二次调用。
   for (const code of Object.values(DIAGNOSTIC_CODES)) {
     try {
       const raw = sendMessage(obj, code, [])
       if (raw !== undefined) {
-        const level = typeof raw === 'function' ? raw.call(obj) : raw
-        if (level === 'off' || level === 'warning' || level === 'error') {
-          result[code] = level as DiagLevel
+        if (raw === 'off' || raw === 'warning' || raw === 'error') {
+          result[code] = raw as DiagLevel
         }
       }
     } catch {
