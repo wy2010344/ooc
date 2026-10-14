@@ -255,31 +255,31 @@ arr = Array of 1 2 3;
   }
 })
 
-test('同名 .d.ts：TS 侧 import 编译产物拿到真实类型（含泛型 typedef）', async () => {
-  const { dir } = await compileSource('typed', `
+test('.ts 产物含 typedef（属性形态），不再写同名 .d.ts', async () => {
+  const { ts: tsPath, dir } = await compileSource('typed', `
 Point #type { x: number, y: number };
 Box #type <T> { value: T };
 origin = { x { 0 }, y { 0 } };
 scale = 2;
 origin
 `)
-  const dts = await fs.readFile(path.join(dir, 'typed.d.ts'), 'utf8')
-  // typedef 原样声明（含泛型）：零参成员渲染为属性形态（判别字段）
-  if (!/export type Point = \{\s*x: number;\s*y: number\s*\}/.test(dts)) {
-    throw new Error(`d.ts 应含 Point 形状，实际:\n${dts}`)
+  const code = await fs.readFile(tsPath, 'utf8')
+  // typedef 在 .ts 产物里（属性形态：零参成员 = 判别字段）
+  if (!/export type Point = \{\s*x: number;\s*y: number\s*\};/.test(code)) {
+    throw new Error(`.ts 应含 Point 形状，实际:\n${code}`)
   }
-  if (!/export type Box<T> = \{\s*value: T\s*\}/.test(dts)) {
-    throw new Error(`d.ts 应含泛型 Box<T>，实际:\n${dts}`)
+  if (!/export type Box<T> = \{\s*value: T\s*\};/.test(code)) {
+    throw new Error(`.ts 应含泛型 Box<T>，实际:\n${code}`)
   }
-  // 顶层值：字面量放宽成基础类型，属性形态里保持精确
-  if (!/export declare const scale: number;/.test(dts)) {
-    throw new Error(`顶层字面量应放宽为 number，实际:\n${dts}`)
+  // 不再旁挂 .d.ts（TS 解析同名 .ts 优先，.d.ts 是死文件）
+  let hasDts = true
+  try {
+    await fs.readFile(path.join(dir, 'typed.d.ts'), 'utf8')
+  } catch {
+    hasDts = false
   }
-  if (!/export declare const origin: \{ x: 0; y: 0 \};/.test(dts)) {
-    throw new Error(`对象形状应从属性签名推断，实际:\n${dts}`)
-  }
-  if (!/export default \{ x: 0; y: 0 \};/.test(dts)) {
-    throw new Error(`默认导出应有类型，实际:\n${dts}`)
+  if (hasDts) {
+    throw new Error('不应再生成同名 .d.ts')
   }
 })
 
