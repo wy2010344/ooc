@@ -1705,3 +1705,31 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
     })
   })
 })
+
+describe('#import 模块存在性检查', () => {
+  test('导入不存在的 OOC 模块：报 moduleNotFound', async () => {
+    const diags = await diagnostics(`m = #import './definitely-missing';\nm`)
+    expect(messages(diags).join('\n')).toContain('找不到模块')
+  })
+
+  test('已注册（工作区内）的模块不报', async () => {
+    await parse(`{ x = 1 }`, {
+      documentUri: URI.file('existMod.ooc').toString(),
+    })
+    const doc = await parse(`m = #import 'existMod';\nm`, {
+      documentUri: URI.file('existDemo.ooc').toString(),
+      validation: true,
+    })
+    expect(messages(doc.diagnostics ?? []).join('\n')).not.toContain('找不到模块')
+  })
+
+  test('.ts 宿主依赖不报（存在性交给打包器）', async () => {
+    const diags = await diagnostics(`d = #import './helper.ts';\nd`)
+    expect(messages(diags).join('\n')).not.toContain('找不到模块')
+  })
+
+  test('@pkg 包引用不报（IDE 无包感知 FS，交给 CLI/运行时）', async () => {
+    const diags = await diagnostics(`b = #import '@base/loop';\nb`)
+    expect(messages(diags).join('\n')).not.toContain('找不到模块')
+  })
+})

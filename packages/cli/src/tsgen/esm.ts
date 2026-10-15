@@ -11,6 +11,7 @@
 // 产物里就是普通 import；浏览器全局（document/window/console）本来就是自由标识符。
 // 重复的底层辅助（__send/__createObject）从共享 runtime 外部导入。
 import type { Model } from 'object-oriented-c-language'
+import { AstUtils } from 'langium'
 import { expressionCode, typeAnnot, typeDefCode } from './helpers.js'
 
 /** 项目 build 的依赖：path 是 AST 里的 #import 原值，specifier 是 ES import 目标（相对本产物）。 */
@@ -93,6 +94,17 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
     return id
   }
 
+  // 预扫描：命名空间类型 `ns#Name` 的用点（类型位要 `ns$ns.Name`，
+  // esm 头部按用点补发 `import * as ns$ns from '<同一模块>'`；值侧仍走默认导入）
+  const nsUsages = new Set<string>()
+  for (const node of AstUtils.streamAst(model)) {
+    const ns = (node as any).ns
+    if (node.$type === 'TypeName' && typeof ns === 'string' && ns) {
+      nsUsages.add(ns)
+    }
+  }
+  const nsImported = new Set<string>()
+
   // 第一遍：只处理 import 语句，产出 ES import 头与桥接绑定
   const defaultImports: string[] = []
   const valueImports = new Map<string, string[]>()
@@ -131,6 +143,27 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         const id = reserve(alias, typeTaken, 'type')
         clauses.push(id === original ? original : `${original} as ${id}`)
         typeImports.set(spec, clauses)
+      }
+    }
+  }
+
+  // 命名空间类型用点补发 `ns$ns` 命名空间导入（按绑定名匹配，默认/命名/类型导入皆可）
+  if (nsUsages.size > 0) {
+    for (const st of model.expressions) {
+      if (st.$type !== 'ImportStatement') continue
+      const spec = specFor(st.path)
+      const bindings: string[] = []
+      if (st.name) bindings.push(st.name)
+      if (st.named) {
+        for (const item of st.named.items) bindings.push(item.alias ?? item.name)
+      }
+      if (st.types) {
+        for (const item of st.types.items) bindings.push(item.alias ?? item.name)
+      }
+      for (const b of bindings) {
+        if (!nsUsages.has(b) || nsImported.has(b)) continue
+        nsImported.add(b)
+        defaultImports.push(`import * as ${b}$ns from '${spec}';`)
       }
     }
   }

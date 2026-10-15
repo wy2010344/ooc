@@ -11,7 +11,7 @@ import type { FileSystemProvider, URI } from 'langium'
 import { addEffect, createSignal, memo } from 'wy-helper'
 import { createContext } from 'mve-core'
 import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
-import { buildEngineGlobals } from './host-types.js'
+import { createBridgeGlobalsTypes } from 'ooc-mve-bridge'
 
 export interface NotebookEntry {
   name: string
@@ -145,11 +145,12 @@ export function createEngine(
     { fileSystemProvider: () => fs },
     createGlobals(),
   )
-  // Route A：全局类型由各宿主包自持的 .ooc 类型源合并注入（见 host-types.ts），
+  // Route A：全局类型注册表 = 各宿主包自持类型源合并（createBridgeGlobalsTypes：
+  // language 内置 storage/js/delegate/ObjectValue/console ∪ ooc-mve-bridge 视图与信号），
   // 让类型检查看到 dom/createSignal 等桥接对象的真实形状
   const typeCheck = createTypeCheckAction(
     { fileSystemProvider: () => fs },
-    buildEngineGlobals(),
+    createBridgeGlobalsTypes(),
   )
   return { interpret, typeCheck }
 }

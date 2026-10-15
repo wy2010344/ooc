@@ -6,6 +6,7 @@ import type { AstNode, CstNode, LangiumDocument } from 'langium'
 import type { LangiumServices } from 'langium/lsp'
 import {
   isAssignment,
+  isImportStatement,
   isLambdaDef,
   isModel,
   isMethodAll,
@@ -234,6 +235,12 @@ export class ObjectOrientedCCompletionProvider extends DefaultCompletionProvider
       for (const stmt of node.expressions) {
         if (isAssignment(stmt) && isBeforeCursor(stmt, offset)) {
           result.set(stmt.name, inferTypeString(this.checker, stmt.expression))
+        }
+        // #import 绑定（默认/命名/类型别名）：类型从导入模块解析，模块不可见则不入表
+        if (isImportStatement(stmt) && isBeforeCursor(stmt, offset)) {
+          for (const [name, type] of this.checker.inferImportBindings(stmt)) {
+            result.set(name, describeType(type))
+          }
         }
       }
     }

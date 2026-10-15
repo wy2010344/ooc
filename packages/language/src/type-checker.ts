@@ -300,20 +300,64 @@ export class ObjectOrientedCTypeChecker {
   }
 
   /**
+   * 供补全/hover 等只读场景：解析 #import 各绑定名的类型（不产生诊断、不改共享状态）：
+   * 默认绑定 = 模块结果类型（含平铺类型成员）；命名导入 = 模块对应导出项；
+   * 类型导入 = 模块类型成员。模块不可见时默认绑定按 any（与 checkModel 一致），
+   * 命名/类型绑定不入表（与 checkModel 不定义任何名字一致）。
+   */
+  inferImportBindings(stmt: ImportStatement): Map<string, TypeInfo> {
+    const out = new Map<string, TypeInfo>()
+    const imported = this.resolveImportedModule(stmt)
+    if (!imported) {
+      if (stmt.name) out.set(stmt.name, anyType)
+      return out
+    }
+    if (stmt.name) {
+      out.set(stmt.name, this.defaultImportType(imported, stmt.name))
+    }
+    if (stmt.named) {
+      for (const item of stmt.named.items) {
+        const found = imported.namedExports.get(item.name)
+        if (found) {
+          out.set(item.alias ?? item.name, found.type)
+        }
+      }
+    }
+    if (stmt.types) {
+      for (const item of stmt.types.items) {
+        const member = imported.typeMembers.get(item.name)
+        if (member) {
+          out.set(item.alias ?? item.name, member.type)
+        }
+      }
+    }
+    return out
+  }
+
+  private resolveImportedModule(stmt: ImportStatement): ImportedModuleType | undefined {
+    if (!this.importResolver) {
+      return undefined
+    }
+    const fromPath = AstUtils.getDocument(stmt)?.uri.path
+    return fromPath ? this.importResolver(stmt.path, fromPath) : undefined
+  }
+
+  /** 默认导入的绑定类型：模块结果 + 平铺类型成员（与运行时 last 语义一致） */
+  private defaultImportType(imported: ImportedModuleType, name: string): TypeInfo {
+    return imported.result.kind === 'object' && imported.result.typeMembers
+      ? imported.result
+      : this.withTypeMembers(imported.result, imported.typeMembers, name)
+  }
+
+  /**
    * 处理 #import（三种成分可共存，同属一个 ImportStatement）：
    *   - name 默认导入（x = #import 'p'）：绑定模块结果类型，并平铺全部类型成员
    *   - named 命名导入（#import { a as b } 'p'）：绑定模块对应顶层声明（类型或值）
-   *   - types 类型导入（#import 'p' { T as U }）：把选中的类型注册进当前文档
-   * 三者都可同时出现（默认/命名在 path 前，类型在 path 后）。
+   *   - types 类型导入（#import 'p' { T as U }）：把选中类型注册进当前文档
+   *   三者都可同时出现（默认/命名在 path 前，类型在 path 后）。
    */
   private applyImport(stmt: ImportStatement, env: TypeEnv): void {
-    let imported: ImportedModuleType | undefined
-    if (this.importResolver) {
-      const fromPath = AstUtils.getDocument(stmt)?.uri.path
-      if (fromPath) {
-        imported = this.importResolver(stmt.path, fromPath)
-      }
-    }
+    const imported = this.resolveImportedModule(stmt)
 
     // 类型导入（path 之后）：只把选中类型注册进当前文档，不产生运行时绑定
     if (stmt.types && imported) {
@@ -360,12 +404,7 @@ export class ObjectOrientedCTypeChecker {
         this.typedefParams.set(name, member.params)
       }
     }
-    env.define(
-      stmt.name,
-      imported.result.kind === 'object' && imported.result.typeMembers
-        ? imported.result
-        : this.withTypeMembers(imported.result, imported.typeMembers, stmt.name),
-    )
+    env.define(stmt.name, this.defaultImportType(imported, stmt.name))
   }
 
   /** 兜底：result 非对象时，把类型成员包成仅含类型成员的对象 */

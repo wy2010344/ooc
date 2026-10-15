@@ -49,7 +49,7 @@ interface MethodsOwner {
 }
 
 describe('loadGlobalsTypesFromSource', () => {
-  test('language 内置类型源：storage/js/delegate/ObjectValue 全部解析出来', () => {
+  test('language 内置类型源：storage/js/delegate/ObjectValue/console 全部解析出来', () => {
     const globals = loadGlobalsTypesFromSource(coreBridgeTypesSource)
     expect(globals).toBeTypeOf('object')
     const storage = globals!.get('storage') as MethodsOwner
@@ -59,6 +59,7 @@ describe('loadGlobalsTypesFromSource', () => {
     expect(globals!.has('js')).toBe(true)
     expect(globals!.has('delegate')).toBe(true)
     expect(globals!.has('ObjectValue')).toBe(true)
+    expect(globals!.has('console')).toBe(true)
   })
 
   test('桥接形状类型源：dom 的标签方法是签名方法（Component 返回）', () => {
@@ -74,6 +75,7 @@ describe('loadGlobalsTypesFromSource', () => {
     const shortcut = coreBridgeGlobals()
     expect(shortcut?.size).toBe(direct?.size)
     expect(shortcut?.has('storage')).toBe(true)
+    expect(shortcut?.has('console')).toBe(true)
   })
 })
 

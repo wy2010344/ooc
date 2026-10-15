@@ -1,6 +1,6 @@
 import { test } from './compat.js'
 import assert from 'node:assert/strict'
-import { EmptyFileSystem } from 'langium'
+import { EmptyFileSystem, URI } from 'langium'
 import {
   expectHover,
   expectCompletion,
@@ -252,6 +252,52 @@ test('LSP: Completion 应支持 lambda 参数补全', async () => {
     assert: (completions: any) => {
       const labels = completions.items.map((item: any) => item.label)
       assert.ok(labels.includes('x'), `补全列表应包含参数 x，实际: ${labels.join(', ')}`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应包含 #import 默认导入绑定（跨文件解析类型）', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+  // 先注册被导入模块（与主文档同目录，路径相对解析）
+  await parse(`{ add(a: number, b: number): number { a + b } }`, {
+    documentUri: URI.file('/proj/util.ooc').toString(),
+  })
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  const result = await expect({
+    text: `m = #import './util';\nn = ` + IDX + `;`,
+    indexMarker: IDX,
+    index: 0,
+    parseOptions: { documentUri: URI.file('/proj/main.ooc').toString() },
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(labels.includes('m'), `补全列表应包含导入绑定 m，实际: ${labels.join(', ')}`)
+      const m = completions.items.find((item: any) => item.label === 'm')
+      assert.ok(m?.detail && m.detail !== 'any', `导入绑定 m 应有类型 detail，实际: ${m?.detail}`)
+    },
+  })
+  assert.ok(result, '应返回补全结果')
+})
+
+test('LSP: Completion 应包含 #import 命名/类型导入绑定', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+  await parse(`foo = 42;\nBar #type { x: number }`, {
+    documentUri: URI.file('/proj/util2.ooc').toString(),
+  })
+  const expect = expectCompletion(services.ObjectOrientedC)
+
+  const result = await expect({
+    text: `#import { foo } './util2' { Bar };\nn = ` + IDX + `;`,
+    indexMarker: IDX,
+    index: 0,
+    parseOptions: { documentUri: URI.file('/proj/main2.ooc').toString() },
+    assert: (completions: any) => {
+      const labels = completions.items.map((item: any) => item.label)
+      assert.ok(labels.includes('foo'), `补全列表应含命名导入 foo，实际: ${labels.join(', ')}`)
+      assert.ok(labels.includes('Bar'), `补全列表应含类型导入 Bar，实际: ${labels.join(', ')}`)
     },
   })
   assert.ok(result, '应返回补全结果')

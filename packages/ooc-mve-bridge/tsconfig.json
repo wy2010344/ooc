@@ -8,6 +8,7 @@
         /* Bundler mode */
         "moduleResolution": "bundler",
         "moduleDetection": "force",
+        "composite": true,
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true,
@@ -20,5 +21,8 @@
         "noFallthroughCasesInSwitch": true,
         "strict": true
     },
-    "include": ["src"]
+    "include": ["src"],
+    "references": [
+        { "path": "../language/tsconfig.src.json" }
+    ]
 }

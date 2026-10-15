@@ -10,6 +10,7 @@ import {
 } from 'object-oriented-c-language'
 import chalk from 'chalk'
 import { Command } from 'commander'
+import { createBridgeGlobalsTypes } from 'ooc-mve-bridge/types'
 import { buildProject, RUNTIME_FILE } from './build.js'
 import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
@@ -101,9 +102,12 @@ export const interpretAction = (fileName: string) => {
 }
 
 export const typeCheckAction = async (fileName: string): Promise<void> => {
-  const diagnostics = await createTypeCheckAction(pkgContext()).checkPath(
-    fileName,
-  )
+  // 注册表（Route A）：宿主包类型源先行注入，config.ooc 的 globals 成员
+  // 只列名即可解析出真实类型（storage/js/dom/createSignal/console 等）。
+  const diagnostics = await createTypeCheckAction(
+    pkgContext(),
+    createBridgeGlobalsTypes(),
+  ).checkPath(fileName)
   if (diagnostics.length === 0) {
     console.log(chalk.green('No type errors or warnings.'))
     return

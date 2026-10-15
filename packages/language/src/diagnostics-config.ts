@@ -124,6 +124,7 @@ export const DIAGNOSTIC_CODES = {
   noImplicitAny: 'noImplicitAny',
   typeNotFound: 'typeNotFound',
   circularImport: 'circularImport',
+  moduleNotFound: 'moduleNotFound',
   extendsValueType: 'extendsValueType',
   invalidCast: 'invalidCast',
   unionUncovered: 'unionUncovered',

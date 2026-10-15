@@ -1,6 +1,6 @@
 // tsgen 端到端测试：.ooc → 编译成纯 ES .ts 产物（Node ≥23.6 原生类型剥离直接 import）→
 // 运行断言（语义与解释器一致）。覆盖：guard 分支循环、宿主依赖按 import 导入、跨模块 import、
-// 顶层重复绑定、命名导入、同名 .d.ts。
+// 顶层重复绑定、命名导入。（类型形态与命名空间类型见 tsgen-types.test.ts）
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -252,34 +252,6 @@ arr = Array of 1 2 3;
   const mixed = rt.__send(mod.default, 'mixed', [])
   if (JSON.stringify(mixed) !== JSON.stringify([0, 1, 2, 3, 9])) {
     throw new Error(`混用应展开为 [0,1,2,3,9]，实际 ${JSON.stringify(mixed)}`)
-  }
-})
-
-test('.ts 产物含 typedef（属性形态），不再写同名 .d.ts', async () => {
-  const { ts: tsPath, dir } = await compileSource('typed', `
-Point #type { x: number, y: number };
-Box #type <T> { value: T };
-origin = { x { 0 }, y { 0 } };
-scale = 2;
-origin
-`)
-  const code = await fs.readFile(tsPath, 'utf8')
-  // typedef 在 .ts 产物里（属性形态：零参成员 = 判别字段）
-  if (!/export type Point = \{\s*x: number;\s*y: number\s*\};/.test(code)) {
-    throw new Error(`.ts 应含 Point 形状，实际:\n${code}`)
-  }
-  if (!/export type Box<T> = \{\s*value: T\s*\};/.test(code)) {
-    throw new Error(`.ts 应含泛型 Box<T>，实际:\n${code}`)
-  }
-  // 不再旁挂 .d.ts（TS 解析同名 .ts 优先，.d.ts 是死文件）
-  let hasDts = true
-  try {
-    await fs.readFile(path.join(dir, 'typed.d.ts'), 'utf8')
-  } catch {
-    hasDts = false
-  }
-  if (hasDts) {
-    throw new Error('不应再生成同名 .d.ts')
   }
 })
 

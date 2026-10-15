@@ -8,15 +8,25 @@
  * 此处只枚举常见标签供补全，未知标签在类型上静默退化为 any，无需 methodNotFound。
  */
 import type { LangiumCoreServices } from 'langium'
-import { loadGlobalsTypesFromSource } from 'object-oriented-c-language'
+import {
+  coreBridgeGlobals,
+  loadGlobalsTypesFromSource,
+  mergeGlobalsTypes,
+} from 'object-oriented-c-language'
 import type { TypeInfo } from 'object-oriented-c-language'
 
-/** ooc-mve-bridge 的 .ooc 类型源：视图层组件（dom/text/html/fc/forEach） */
-export const bridgeTypesSource = `// ooc-mve-bridge 类型源（视图层组件）
-// 运行时实现见 src/dom.ts / src/fc.ts。
+/** ooc-mve-bridge 的 .ooc 类型源：视图层组件（dom/text/html/fc/forEach）+ 响应式信号 */
+export const bridgeTypesSource = `// ooc-mve-bridge 类型源（视图层组件 + 响应式信号）
+// 运行时实现见 src/dom.ts / src/fc.ts / wy-helper / mve-core。
 Component #type {
     class(props): Component,
     on(event): Component
+};
+
+Signal #type {
+    get: any,
+    set(value): any,
+    update(fn): any
 };
 
 dom = {
@@ -154,13 +164,33 @@ forEach = {
     apply(config): Component
 };
 
+createSignal = {
+    apply(initial): Signal
+};
+
+memo = {
+    apply(fn): any
+};
+
+addEffect = {
+    apply(fn): any
+};
+
+createContext = {
+    apply(...args): any
+};
+
 config = {
     globals = {
         dom = dom,
         text = text,
         html = html,
         fc = fc,
-        forEach = forEach
+        forEach = forEach,
+        createSignal = createSignal,
+        memo = memo,
+        addEffect = addEffect,
+        createContext = createContext
     }
 };
 
@@ -168,11 +198,15 @@ config
 `
 
 /**
- * 创建桥接对象的类型映射（Route A loader，复用 language 的 collectConfigGlobals 管线）。
- * 返回 Map<string, TypeInfo>，可传给 createObjectOrientedCServices / createTypeCheckAction。
+ * 创建完整引擎全局类型（Route A loader，可传给 createObjectOrientedCServices /
+ * createTypeCheckAction 作注册表）：language 内置桥接（storage/js/delegate/ObjectValue/console）
+ * ∪ 本包类型源（dom/text/html/fc/forEach/createSignal/memo/addEffect/createContext），
+ * 与运行时 createBridgeGlobals() 的名字集合对应；本包覆盖同名项。
  */
 export function createBridgeGlobalsTypes(
   services?: LangiumCoreServices,
 ): Map<string, TypeInfo> | undefined {
-  return loadGlobalsTypesFromSource(bridgeTypesSource, services)
+  const core = coreBridgeGlobals(services)
+  const bridge = loadGlobalsTypesFromSource(bridgeTypesSource, services)
+  return mergeGlobalsTypes(core, bridge)
 }

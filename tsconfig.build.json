@@ -8,6 +8,9 @@
             "path": "./packages/language/tsconfig.test.json"
         },
         {
+            "path": "./packages/ooc-mve-bridge/tsconfig.json"
+        },
+        {
             "path": "./packages/cli/tsconfig.json"
         },
         {

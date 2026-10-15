@@ -21,7 +21,7 @@ import {
   mergeGlobalsTypes,
   type OocConfig,
 } from './diagnostics-config.js'
-import { resolveModuleName } from './module-path.js'
+import { extnameOf, isPackageRef, resolveModuleName } from './module-path.js'
 
 /**
  * Register custom validation checks.
@@ -105,6 +105,7 @@ export class ObjectOrientedCValidator {
     accept: ValidationAcceptor,
   ): void {
     this.checkCircularImports(model, accept)
+    this.checkImportExists(model, accept)
     // 每次新建，避免不同文档之间的类型定义互相污染。
     // 有 services 时注入 #import 解析器：跨模块 typedef/模块结果类型可见（需要完整工作区）。
     const importResolver = this.services
@@ -178,6 +179,41 @@ export class ObjectOrientedCValidator {
     }
 
     visit(model, rootPath)
+  }
+
+  /**
+   * #import 目标存在性检查：只查 OOC 模块（无扩展名或 .ooc）。
+   * 跳过：@pkg 包引用（IDE 无包感知 FS，存在性交给 CLI/运行时）、
+   * .ts/.js 等宿主依赖（不解析不产码，存在性交给打包器）。
+   * 工作区已加载文档或磁盘上存在文件均视为存在。
+   */
+  private checkImportExists(
+    model: Parameters<ObjectOrientedCTypeChecker['checkModel']>[0],
+    accept: ValidationAcceptor,
+  ): void {
+    if (!this.services || !model.$document) return
+    const documents = this.services.shared.workspace.LangiumDocuments
+    const fs = this.services.shared.workspace.FileSystemProvider
+    const extensions = this.services.LanguageMetaData.fileExtensions
+    const fromPath = model.$document.uri.path
+    for (const statement of model.expressions) {
+      if (statement.$type !== 'ImportStatement') continue
+      if (isPackageRef(statement.path)) continue
+      const resolved = resolveModuleName(statement.path, fromPath, extensions)
+      const ext = extnameOf(resolved)
+      if (ext && !extensions.includes(ext)) continue
+      if (documents.getDocument(URI.file(resolved))) continue
+      if (fs.existsSync(URI.file(resolved))) continue
+      this.wrap(accept)(
+        'error',
+        `找不到模块 '${statement.path}'（解析为 ${resolved}）`,
+        {
+          node: statement,
+          property: 'path',
+          data: diagnosticData('moduleNotFound'),
+        },
+      )
+    }
   }
 
   checkObjectDef(model: ObjectDef, accept: ValidationAcceptor): void {

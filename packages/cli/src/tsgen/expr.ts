@@ -137,7 +137,11 @@ function typeNameCode(tn: any): string {
   }
   const name = n
   const args = (tn.typeArgs || []).map((a: any) => typeCode(a)).join(', ')
-  return `${name}${args ? `<${args}>` : ''}`
+  // `ns#Name` 命名空间类型：值侧是默认导入（模块对象），不能当类型命名空间用。
+  // esm 头部按 ns 用点补发 `import * as ns$ns from '<同一模块>'`（OOC 标识符不含
+  // `$`，别名必不与用户绑定相撞），这里引用 `ns$ns.Name`。
+  const qualified = typeof tn.ns === 'string' && tn.ns ? `${tn.ns}$ns.` : ''
+  return `${qualified}${name}${args ? `<${args}>` : ''}`
 }
 
 /** 对象定义：ObjectDef → __createObject([...])，成员按解释器 runtime.ts 语义编译。 */

@@ -32,6 +32,7 @@
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
+        "ooc-mve-bridge": "0.0.1",
         "chalk": "~5.6.2",
         "commander": "~14.0.3"
     },

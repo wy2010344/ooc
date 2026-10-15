@@ -8,6 +8,9 @@
     "references": [
         {
             "path": "../language/tsconfig.src.json"
+        },
+        {
+            "path": "../ooc-mve-bridge/tsconfig.json"
         }
     ],
     "include": [
