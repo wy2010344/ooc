@@ -52,7 +52,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 
 - **语法**：`packages/language/src/object-oriented-c.langium`。改语法后用 `langium:generate` 重新生成 AST。
 - **运行时 = 原生 JS 对象**（`interpreter/runtime.ts`）：
-  - `{ ... }` 编译为普通 JS 对象。对象成员三种写法，按形状分流：`=` 常量绑定（`cached = 1+2`）——惰性求值**一次**缓存，JS 侧是 getter 直读；`=> expr`（MethodAll 单行）与 `{ ... }` 方法体——**零参（无泛型）是属性成员**，每次**读取**重新求值/执行（JS 侧 getter），返回函数值（lambda）时原样返回、绝不隐式调用；**带参（或带泛型）是方法**，每次调用执行（JS 侧函数）。因此「跟随信号、事件」等动态属性必须写 `=>`，纯常量写 `=` 更省。带 typeParams 的零参方法保持方法函数（d.ts 渲染 `f<T>()`，TS 属性不能泛型）。
+  - `{ ... }` 编译为普通 JS 对象。对象成员三种写法，按形状分流：`=` 常量绑定（`cached = 1+2`）——惰性求值**一次**缓存，JS 侧是 getter 直读；`=> expr`（MethodAll 单行）与 `{ ... }` 方法体——**零参（无泛型）是属性成员**，每次**读取**重新求值/执行（JS 侧 getter），返回函数值（lambda）时原样返回、绝不隐式调用；**带参（或带泛型）是方法**，每次调用执行（JS 侧函数）。因此「跟随信号、事件」等动态属性必须写 `=>`；**纯字面量常量必须写 `=`**（零参成员体只返回 str/num/bool/nil 时写 `{ 'x' }` / `=> 'x'` 会被 validator 以 `constMethodBody` 报 error——绑定一次缓存更省，meta「call=事件、bind=常量」也才准确）。带 typeParams 的零参方法保持方法函数（d.ts 渲染 `f<T>()`，TS 属性不能泛型）。
   - **对象无继承**（已移除原型链，`{ ... }` 只烧录自己的成员）。复用走 `withDefault`（宿主端 delegate 全局：把 parts 展平成链、包兜底 Proxy，spec 的方法优先，未知消息按链转发到 defaults）。**没有 methodNotFound 魔法**：语言不认这个名字；要拦截未知消息就显式包兜底 Proxy——OOC 侧 `js proxy 对象 (name, ...args => 转发)`，宿主侧 `proxyCatchAll(target, handler)`，get trap 把未命中的消息交给 `handler(name, ...args)`（this 绑定原对象）；没包的对象发未知消息直接抛 `OocMethodNotFoundError`。currentScope 伪对象同样由 Proxy 实现。
   - **签名方法（无 body）**：`area(radius: number): number;` 这种**没有函数体**的方法是纯类型契约——运行时不烧录（meta 只在类型层），调用落在实现方法（有 body 的那个）上；签名必须声明返回类型；签名之间返回类型不同不告警（TS 式豁免）。改全局 AST 遍历时，方法体字段在 `MethodAll.body`（MethodBody 上），不是 `method.expressions`。
   - 方法体内 `this` 就是**接收消息的对象**（receiver）；`#guard` 是方法体内的分支链（if/else-if/else），与方法派发无关——同层不存在同名重载，一个名字只对应一个成员。

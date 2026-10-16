@@ -44,8 +44,8 @@ Card = fc apply [ctx, title, content =>
     preview(ctx){
         ctx addDestroy [console log 'app 预览关闭';];
 
-        circleArea = (area calc { kind { 'circle' }, radius { 5 } });
-        squareArea = (area calc { kind { 'square' }, side { 4 } });
+        circleArea = (area calc { kind = 'circle', radius = 5 });
+        squareArea = (area calc { kind = 'square', side = 4 });
         mathResult = (math add 2 3);
         greeting = (hello greet 'World');
 

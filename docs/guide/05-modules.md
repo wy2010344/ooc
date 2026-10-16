@@ -50,12 +50,12 @@ strings = #import '@base';
 // geometry.ooc
 Circle #type { kind: 'circle', radius: number };
 Box #type { width: number, height: number };
-{ make: Circle { { kind { 'circle' }, radius { 3 } } } }
+{ make: Circle { { kind = 'circle', radius = 3 } } }
 
 // main.ooc
 geom = #import 'geometry.ooc';
 c: geom#Circle = geom make;
-b: geom#Box = { width { 10 }, height { 20 } };
+b: geom#Box = { width = 10, height = 20 };
 ```
 
 - 通过 `模块名#类型名`（命名空间形式）引用类型
@@ -72,7 +72,7 @@ b: geom#Box = { width { 10 }, height { 20 } };
 // geometry.ooc
 Circle #type { kind: 'circle', radius: number };
 Box #type { width : number, height: number };
-factory = { make: Circle { { kind { 'circle' }, radius { 3 } } } };
+factory = { make: Circle { { kind = 'circle', radius = 3 } } };
 
 // main.ooc：只导入需要的类型和值
 #import { Circle, factory } 'geometry.ooc';
@@ -81,7 +81,7 @@ c: Circle = factory make;
 // 多类型 + 别名
 #import { Circle as C, Box } 'geometry.ooc';
 c: C = factory make;
-b: Box = { width { 10 }, height { 20 } };
+b: Box = { width = 10, height = 20 };
 ```
 
 ### 类型导入（path 之后）
@@ -116,7 +116,7 @@ c: C = factory make;
 // lib.ooc
 Point #type { x: number };
 scale = 2;
-factory = { make { { x { 1 } } } };
+factory = { make { { x = 1 } } };
 factory
 ```
 
@@ -124,7 +124,7 @@ factory
 // app.ooc
 geom = #import './lib';
 #import { scale, factory } './lib';
-{ demo { 0 } }
+{ demo = 0 }
 ```
 
 ```ts

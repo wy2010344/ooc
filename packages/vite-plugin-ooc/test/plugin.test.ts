@@ -104,7 +104,7 @@ test('.ooc load：命名/类型导入按类型与值分类发射（真 ES named 
     path.join(namedDir, 'lib.ooc'),
     `Point #type { x: number };
 scale = 2;
-factory = { p { { x { 42 } } } };
+factory = { p { { x = 42 } } };
 factory
 `,
   )
@@ -139,7 +139,7 @@ test('.ooc load：宿主依赖就是普通 import（.ts），不再是 globals �
   )
   const src = `#import { storage } './host.ts';
 counter = storage ref 0;
-{ bump { 1 } }
+{ bump = 1 }
 `
   const hostApp = path.join(hostDir, 'host.ooc')
   fs.writeFileSync(hostApp, src)

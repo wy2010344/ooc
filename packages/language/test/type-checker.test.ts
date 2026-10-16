@@ -192,7 +192,7 @@ describe('类型检查（warning）', () => {
   test('返回类型注解检查', async () => {
     const diags = await diagnostics(`
         calc = {
-            get: number { 'not a number' }
+            get: number = 'not a number'
         }
     `)
     expect(messages(diags).join('\n')).toContain('类型不匹配')
@@ -321,8 +321,8 @@ describe('类型检查（warning）', () => {
   test('同名实现重复定义报错', async () => {
     const diags = await diagnostics(`
         obj = {
-            fun { 1 },
-            fun { 'x' }
+            fun = 1,
+            fun = 'x'
         }
     `)
     expect(messages(diags).join('\n')).toContain("重复定义")
@@ -332,12 +332,12 @@ describe('类型检查（warning）', () => {
     const diags = await diagnostics(`
         config = {
             cache => {
-                ttl => 3600,
-                enabled => true
+                ttl = 3600,
+                enabled = true
             },
             logging => {
-                level => 'info',
-                output => 'console'
+                level = 'info',
+                output = 'console'
             }
         }
     `)
@@ -466,7 +466,7 @@ describe('字面量类型与可区分联合', () => {
   test('判别方法返回字面量：对象字面量符合 typedef', async () => {
     const diags = await diagnostics(`
         Circle #type { kind: 'circle', radius: number };
-        c: Circle = { kind { 'circle' }, radius { 3 } }
+        c: Circle = { kind = 'circle', radius = 3 }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -474,7 +474,7 @@ describe('字面量类型与可区分联合', () => {
   test('判别方法返回非对应字面量告警', async () => {
     const diags = await diagnostics(`
         Circle #type { kind: 'circle', radius: number };
-        c: Circle = { kind { 'square' }, radius { 3 } }
+        c: Circle = { kind = 'square', radius = 3 }
     `)
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
@@ -535,8 +535,8 @@ describe('字面量类型与可区分联合', () => {
 
   test('JSON 标签联合：联合引用对象变量，公共方法无告警', async () => {
     const diags = await diagnostics(`
-        cat = { type => 'cat', meow => 'miao' };
-        dog = { type => 'dog', bowwow => 'bark' };
+        cat = { type = 'cat', meow = 'miao' };
+        dog = { type = 'dog', bowwow = 'bark' };
         pet: cat | dog = dog;
         pet type
     `)
@@ -545,8 +545,8 @@ describe('字面量类型与可区分联合', () => {
 
   test('JSON 标签联合：未判别调用分支专属方法告警', async () => {
     const diags = await diagnostics(`
-        cat = { type => 'cat', meow => 'miao' };
-        dog = { type => 'dog', bowwow => 'bark' };
+        cat = { type = 'cat', meow = 'miao' };
+        dog = { type = 'dog', bowwow = 'bark' };
         pet: cat | dog = dog;
         pet meow
     `)
@@ -555,8 +555,8 @@ describe('字面量类型与可区分联合', () => {
 
   test('JSON 标签联合：#guard 判别后可访问分支专属方法', async () => {
     const diags = await diagnostics(`
-        cat = { type => 'cat', meow => 'miao' };
-        dog = { type => 'dog', bowwow => 'bark' };
+        cat = { type = 'cat', meow = 'miao' };
+        dog = { type = 'dog', bowwow = 'bark' };
         say = {
         speak(p: cat | dog) {
             #guard (p type) == 'cat';
@@ -573,8 +573,8 @@ describe('字面量类型与可区分联合', () => {
 
   test('对象变量声明为联合后判别：未判别时公共类型方法可调', async () => {
     const diags = await diagnostics(`
-        cat = { type => 'cat', meow => 'miao' };
-        dog = { type => 'dog', bowwow => 'bark' };
+        cat = { type = 'cat', meow = 'miao' };
+        dog = { type = 'dog', bowwow = 'bark' };
         pet: cat | dog = dog;
         getTag = { read(p: cat | dog) { p type } }
     `)
@@ -593,7 +593,7 @@ describe('泛型', () => {
   test('泛型实例化正确无警告', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, set(x: T) };
-        b: Box<number> = { get { 42 }, set(x) { x } };
+        b: Box<number> = { get = 42, set(x) { x } };
         b get
     `)
     expect(messages(diags)).toEqual([])
@@ -602,7 +602,7 @@ describe('泛型', () => {
   test('泛型实例化类型不符告警', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T };
-        b: Box<number> = { get { 'x' } }
+        b: Box<number> = { get = 'x' }
     `)
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
@@ -610,7 +610,7 @@ describe('泛型', () => {
   test('泛型方法调用参数检查', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, set(x: T) };
-        b: Box<number> = { get { 42 }, set(x) { x } };
+        b: Box<number> = { get = 42, set(x) { x } };
         b set 'str'
     `)
     expect(messages(diags).join('\n')).toContain('调用参数不匹配')
@@ -619,7 +619,7 @@ describe('泛型', () => {
   test('泛型缺少类型参数告警', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T };
-        b: Box = { get { 1 } }
+        b: Box = { get = 1 }
     `)
     expect(messages(diags).join('\n')).toContain('缺少类型参数')
   })
@@ -627,7 +627,7 @@ describe('泛型', () => {
   test('多参数泛型', async () => {
     const diags = await diagnostics(`
         Pair #type<A, B> { first: A, second: B };
-        p: Pair<number, string> = { first { 1 }, second { 'x' } }
+        p: Pair<number, string> = { first = 1, second = 'x' }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -635,7 +635,7 @@ describe('泛型', () => {
   test('泛型参数个数不匹配告警', async () => {
     const diags = await diagnostics(`
         Pair #type<A, B> { first: A, second: B };
-        p: Pair<number> = { first { 1 }, second { 2 } }
+        p: Pair<number> = { first = 1, second = 2 }
     `)
     expect(messages(diags).join('\n')).toContain('类型参数')
   })
@@ -643,7 +643,7 @@ describe('泛型', () => {
   test('非泛型类型带参数告警', async () => {
     const diags = await diagnostics(`
         Point #type { x: number };
-        p: Point<number> = { x { 1 } }
+        p: Point<number> = { x = 1 }
     `)
     expect(messages(diags).join('\n')).toContain('不是泛型')
   })
@@ -652,10 +652,10 @@ describe('泛型', () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T };
         Pair #type<A, B> { first: A, second: B };
-        inner = { get { 1 } };
+        inner = { get = 1 };
         p: Pair<Box<number>, string> = {
             first { inner },
-            second { 'x' }
+            second = 'x'
         }
     `)
     expect(messages(diags)).toEqual([])
@@ -675,7 +675,7 @@ describe('上下文类型回填', () => {
   test('泛型注解回填方法参数：方法体内直接使用无警告', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, set(x: T) };
-        b: Box<number> = { get { 42 }, set(x) { x + 1 } }
+        b: Box<number> = { get = 42, set(x) { x + 1 } }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -683,7 +683,7 @@ describe('上下文类型回填', () => {
   test('回填后参数按声明类型检查', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, set(x: T) };
-        b: Box<number> = { get { 42 }, set(x) { x = 'str' } }
+        b: Box<number> = { get = 42, set(x) { x = 'str' } }
     `)
     expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
   })
@@ -706,7 +706,7 @@ describe('上下文类型回填', () => {
   test('显式参数注解优先于回填', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, set(x: T) };
-        b: Box<number> = { get { 42 }, set(x: string) { x } }
+        b: Box<number> = { get = 42, set(x: string) { x } }
     `)
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
@@ -826,7 +826,7 @@ describe('跨模块 #import 类型', () => {
     const diags = await checkModule(
       'demo3.ooc',
       `types = #import 'types';
-       p: Point = { x { 1 }, y { 2 } }`,
+       p: Point = { x = 1, y = 2 }`,
     )
     expect(messages(diags)).toEqual([])
   })
@@ -836,7 +836,7 @@ describe('跨模块 #import 类型', () => {
     const diags = await checkModule(
       'demo4.ooc',
       `types = #import 'types2';
-       p: Point = { x { 'bad' }, y { 2 } }`,
+       p: Point = { x = 'bad', y = 2 }`,
     )
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
@@ -845,7 +845,7 @@ describe('跨模块 #import 类型', () => {
     await loadImport(
       'geom',
       `Circle #type { area: number, radius: number };
-       { make: Circle { { area { 1 }, radius { 2 } } } }`,
+       { make: Circle { { area = 1, radius = 2 } } }`,
     )
     const diags = await checkModule(
       'ns-demo1.ooc',
@@ -861,7 +861,7 @@ describe('跨模块 #import 类型', () => {
     const diags = await checkModule(
       'ns-demo2.ooc',
       `geom = #import 'geom2';
-       c: geom#Circle = { area { 'x' } };
+       c: geom#Circle = { area = 'x' };
        c`,
     )
     expect(messages(diags).join('\n')).toContain('类型不匹配')
@@ -918,12 +918,12 @@ describe('命名 #import', () => {
     await loadImport('shapes', `
         Circle #type { radius: number };
         Square #type { side: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'named-import1.ooc',
       `#import { Circle } 'shapes';
-       c: Circle = { radius { 1 } };
+       c: Circle = { radius = 1 };
        c`,
     )
     expect(messages(diags)).toEqual([])
@@ -933,12 +933,12 @@ describe('命名 #import', () => {
     await loadImport('shapes2', `
         Circle #type { radius: number };
         Square #type { side: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'named-import2.ooc',
       `#import { Circle } 'shapes2';
-       s: Square = { side { 4 } }`,
+       s: Square = { side = 4 }`,
     )
     expect(messages(diags).join('\n')).toContain('未知类型')
   })
@@ -946,12 +946,12 @@ describe('命名 #import', () => {
   test('命名导入：类型别名导入', async () => {
     await loadImport('shapes3', `
         Circle #type { radius: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'named-import3.ooc',
       `#import { Circle as Circle2D } 'shapes3';
-       c: Circle2D = { radius { 1 } };
+       c: Circle2D = { radius = 1 };
        c`,
     )
     expect(messages(diags)).toEqual([])
@@ -961,12 +961,12 @@ describe('命名 #import', () => {
     await loadImport('m5', `
         Circle #type { radius: number };
         scale = 2;
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'named-import4.ooc',
       `#import { Circle, scale } 'm5';
-       c: Circle = { radius { 1 } };
+       c: Circle = { radius = 1 };
        (c radius) * scale`,
     )
     expect(messages(diags)).toEqual([])
@@ -976,13 +976,13 @@ describe('命名 #import', () => {
     await loadImport('shapes4', `
         Circle #type { radius: number };
         Square #type { side: number };
-        { circle: Circle { { radius { 1 } } }, square: Square { { side { 2 } } } }
+        { circle: Circle { { radius = 1 } }, square: Square { { side = 2 } } }
     `)
     const diags = await checkModule(
       'named-import5.ooc',
       `#import { Circle, Square } 'shapes4';
-       c: Circle = { radius { 1 } };
-       s: Square = { side { 2 } };
+       c: Circle = { radius = 1 };
+       s: Square = { side = 2 };
        c`,
     )
     expect(messages(diags)).toEqual([])
@@ -991,12 +991,12 @@ describe('命名 #import', () => {
   test('命名导入：导入不存在的导出告警', async () => {
     await loadImport('shapes5', `
         Circle #type { radius: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'named-import6.ooc',
       `#import { Square } 'shapes5';
-       c: Circle = { radius { 1 } };
+       c: Circle = { radius = 1 };
        c`,
     )
     expect(messages(diags).join('\n')).toContain('不存在')
@@ -1020,12 +1020,12 @@ describe('类型导入与命名导入共存', () => {
     await loadImport('tShapes', `
         Circle #type { radius: number };
         Square #type { side: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'type-import1.ooc',
       `shapes = #import 'tShapes' { Circle };
-       c: Circle = { radius { 1 } };
+       c: Circle = { radius = 1 };
        c`,
     )
     expect(messages(diags)).toEqual([])
@@ -1034,12 +1034,12 @@ describe('类型导入与命名导入共存', () => {
   test('类型导入：类型别名', async () => {
     await loadImport('tShapes2', `
         Circle #type { radius: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'type-import2.ooc',
       `shapes = #import 'tShapes2' { Circle as C };
-       c: C = { radius { 1 } };
+       c: C = { radius = 1 };
        c`,
     )
     expect(messages(diags)).toEqual([])
@@ -1048,12 +1048,12 @@ describe('类型导入与命名导入共存', () => {
   test('类型导入：不存在的类型告警', async () => {
     await loadImport('tShapes3', `
         Circle #type { radius: number };
-        { make: Circle { { radius { 1 } } } }
+        { make: Circle { { radius = 1 } } }
     `)
     const diags = await checkModule(
       'type-import3.ooc',
       `shapes = #import 'tShapes3' { Square };
-       c: Circle = { radius { 1 } };
+       c: Circle = { radius = 1 };
        c`,
     )
     expect(messages(diags).join('\n')).toContain('不存在')
@@ -1062,7 +1062,7 @@ describe('类型导入与命名导入共存', () => {
   test('命名导入与类型导入可同时存在（分列 path 两侧）', async () => {
     await loadImport('tBoth', `
         Circle #type { radius: number };
-        factory = { make: Circle { { radius { 1 } } } };
+        factory = { make: Circle { { radius = 1 } } };
         factory
     `)
     const diags = await checkModule(
@@ -1128,7 +1128,7 @@ describe('方法层泛型', () => {
   test('方法泛型：推断不出时退回 any，不误报参数不匹配', async () => {
     const diags = await diagnostics(`
         wrap = {
-            make<T>: T { nil }
+                make<T>: T { nil }
         };
         w: string = wrap make;
         w
@@ -1274,7 +1274,7 @@ describe('typedef 方法级泛型', () => {
         list = {
             make<T>(b: Box<T>): T { b value }
         };
-        r: number = list make { value { 42 } };
+        r: number = list make { value = 42 };
         r
     `)
     expect(messages(diags)).toEqual([])
@@ -1286,7 +1286,7 @@ describe('typedef 方法级泛型', () => {
         list = {
             make<T>(b: Box<T>): T { b value }
         };
-        n: number = list make { value { 'x' } };
+        n: number = list make { value = 'x' };
         n
     `)
     expect(messages(diags).join('\n')).toContain('类型不匹配')
@@ -1295,7 +1295,7 @@ describe('typedef 方法级泛型', () => {
   test('泛型实例化保留方法级泛型签名', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, map<U>(f: U): U };
-        b: Box<number> = { get { 42 }, map(f) { f } };
+        b: Box<number> = { get = 42, map(f) { f } };
         r: string = b map 'x';
         r
     `)
@@ -1307,7 +1307,7 @@ describe('typedef 方法级泛型', () => {
         Box #type<T> { get: T };
         Util #type { open<U>(b: Box<U>): U };
         u: Util = { open(b) { b get } };
-        n: number = u open { get { 42 } };
+        n: number = u open { get = 42 };
         n
     `)
     expect(messages(diags)).toEqual([])
@@ -1317,13 +1317,13 @@ describe('typedef 方法级泛型', () => {
     await loadImport(
       'geom4',
       `Point #type { x: number };
-       { origin: Point { { x { 0 } } } }`,
+       { origin: Point { { x = 0 } } }`,
     )
     const diags = await checkModule(
       'ns-demo6.ooc',
       `g = #import 'geom4';
        p: g#Point = g origin;
-       q: g#Point = { x { 1 } };
+       q: g#Point = { x = 1 };
        p x`,
     )
     expect(messages(diags)).toEqual([])
@@ -1377,8 +1377,8 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       'wd-demo1.ooc',
       `Cat #type { meow: string };
        Dog #type { greet: string };
-       defaults: Dog = { greet => 'hi' };
-       spec: Cat = { meow => 'miao' };
+       defaults: Dog = { greet = 'hi' };
+       spec: Cat = { meow = 'miao' };
        w = delegate withDefault spec defaults;
        g: string = w greet;
        m: string = w meow;
@@ -1392,8 +1392,8 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       'wd-demo2.ooc',
       `Cat #type { meow: string };
        Dog #type { greet: string };
-       defaults: Dog = { greet => 'hi' };
-       spec: Cat = { meow => 'miao' };
+       defaults: Dog = { greet = 'hi' };
+       spec: Cat = { meow = 'miao' };
        w = delegate withDefault spec defaults;
        x: string = w greet;
        x`,
@@ -1407,8 +1407,8 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       'wd-demo3.ooc',
       `Cat #type { meow: string };
        Dog #type { greet: string };
-       defaults: Dog = { greet => 'hi' };
-       spec: Cat = { meow => 'miao' };
+       defaults: Dog = { greet = 'hi' };
+       spec: Cat = { meow = 'miao' };
        w = delegate withDefault spec defaults;
        w bark`,
     )
@@ -1421,8 +1421,8 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       'wd-demo4.ooc',
       `Cat #type { meow: string };
        Dog #type { greet: string };
-       defaults: Dog = { greet => 'hi' };
-       spec: Cat = { meow => 'miao' };
+       defaults: Dog = { greet = 'hi' };
+       spec: Cat = { meow = 'miao' };
        w = delegate withDefault spec defaults;
        n: number = w greet;
        n`,
@@ -1484,7 +1484,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       const diags = await diagnostics(`
           calc = {
               area: number,
-              area { 42 }
+              area = 42
           }
       `)
       expect(messages(diags)).toEqual([])
@@ -1494,7 +1494,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       const diags = await diagnostics(`
           calc = {
               area: number,
-              area { 42 }
+              area = 42
           };
           `)
       expect(messages(diags)).toEqual([])
@@ -1504,7 +1504,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       const diags = await diagnostics(`
           calc = {
               area: number,
-              area { 42 }
+              area = 42
           };
           s: string = calc area
       `)
@@ -1516,7 +1516,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
           calc = {
               area: number,
               area: string,
-              area { 1 }
+              area = 1
           }
       `)
       expect(messages(diags).join('\n')).not.toContain('返回类型不一致')
@@ -1553,7 +1553,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
                   0
               }
           };
-          shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
+          shape: Circle | Square = { kind = 'circle', radius = 3 };
           r: number = area area shape
       `)
       expect(messages(diags)).toEqual([])
@@ -1571,7 +1571,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
                   (s side) * (s side)
               }
           };
-          shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
+          shape: Circle | Square = { kind = 'circle', radius = 3 };
           r: number = area area shape
       `)
       expect(messages(diags)).toEqual([])
@@ -1658,7 +1658,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
                   nil
               }
           };
-          shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
+          shape: Circle | Square = { kind = 'circle', radius = 3 };
           r: number | string = area area shape;
           bad: string = area area shape
       `)

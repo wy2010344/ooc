@@ -186,7 +186,7 @@ test('命名导入：跨模块绑定顶层声明的值', async (t) => {
   await fs.writeFile(
     path.join(dir, 'lib.ooc'),
     `Point #type { x: number };
-make = { p { { x { 42 } } } };
+make = { p { { x = 42 } } };
 make
 `,
     'utf-8',
@@ -210,7 +210,7 @@ test('纯 ES 产物形态：顶层声明 export、默认导出 = 最后一条表
   const { dir } = await compileSource('shape', `
 Point #type { x: number };
 scale = 2;
-factory = { make { { x { 1 } } } };
+factory = { make { { x = 1 } } };
 factory
 `)
   const code = await fs.readFile(path.join(dir, 'shape.ts'), 'utf8')

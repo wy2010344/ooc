@@ -20,10 +20,10 @@
 
 // 6. typeArgCount：类型参数数量不匹配
 // Box #type<T> { get: T };
-// bad: Box<number, string> = { get { 1 } };
+// bad: Box<number, string> = { get = 1 };
 
 // 7. missingTypeArg：缺少类型参数
-// bad: Box = { get { 1 } };
+// bad: Box = { get = 1 };
 
 // === 调用与分支类 ===
 
@@ -35,7 +35,7 @@
 // obj = { fun(a: number) { #guard a; a #else; nil } };
 
 // 10. partialUnionMessage：联合类型成员专属方法未判别
-// c: Circle | Square = { kind { 'circle' }, radius { 3 } };
+// c: Circle | Square = { kind = 'circle', radius = 3 };
 // bad = { calc(s: Circle | Square) { s radius } };
 
 // 10b. unionUncovered：可区分联合判别分支覆盖不全（漏掉成员；#else 不算判别）
@@ -56,7 +56,7 @@
 // Point #type { y: number };
 
 // 13. duplicateMethod / duplicateParam：重复定义
-// obj = { fun { 1 }, fun { 2 } };
+// obj = { fun = 1, fun = 2 };
 // bad = [a, a => a];
 
 // === 变量与赋值类 ===

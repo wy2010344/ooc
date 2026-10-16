@@ -125,6 +125,7 @@ export const DIAGNOSTIC_CODES = {
   typeNotFound: 'typeNotFound',
   circularImport: 'circularImport',
   moduleNotFound: 'moduleNotFound',
+  constMethodBody: 'constMethodBody',
   extendsValueType: 'extendsValueType',
   invalidCast: 'invalidCast',
   unionUncovered: 'unionUncovered',

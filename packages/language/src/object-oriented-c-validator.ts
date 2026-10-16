@@ -22,6 +22,7 @@ import {
   type OocConfig,
 } from './diagnostics-config.js'
 import { extnameOf, isPackageRef, resolveModuleName } from './module-path.js'
+import { checkConstMethodBodies } from './member-lint.js'
 
 /**
  * Register custom validation checks.
@@ -232,6 +233,8 @@ export class ObjectOrientedCValidator {
       }
     })
     checkMemberNameUniqueness(model.methods, this.wrap(accept), '对象')
+    // 零参成员只返回纯字面量 → 必须写 '=' 常量绑定（语法层禁止，见 member-lint）
+    checkConstMethodBodies(model.methods, this.wrap(accept))
   }
 
   checkLambdaDef(lambda: LambdaDef, accept: ValidationAcceptor): void {

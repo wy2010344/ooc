@@ -117,12 +117,12 @@ describe('Validating', () => {
     document = await parse(`
             config = {
                 cache => {
-                    ttl => 3600,
-                    enabled => true
+                    ttl = 3600,
+                    enabled = true
                 },
                 logging => {
-                    level => 'info',
-                    output => 'console'
+                    level = 'info',
+                    output = 'console'
                 }
             };
         `)

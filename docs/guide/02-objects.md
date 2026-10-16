@@ -29,7 +29,7 @@ config = {
         r = this radius;
         r * r * 3.14
     },
-    radius => 2
+    radius => base div 5
 };
 config area        // → 12.56
 ```
@@ -40,7 +40,7 @@ config area        // → 12.56
 
 成员按签名分流（消息写法不变，都是空格发消息）：
 
-- **属性成员**：绑定（`x = 值`）与零参成员（`kind { 'circle' }`、`radius => 2`）。读取即返回值——零参成员每次读取重新执行方法体（`=>` 的"每次调用重算"语义变成"每次读取重算"，事件/跟随信号不受影响）；带 `@{ }` / `=` 的绑定仍惰性求值一次并缓存。
+- **属性成员**：绑定（`x = 值`）与零参成员（`kind { shapeName }`、`radius => side * 2`）。读取即返回值——零参成员每次读取重新执行方法体（`=>` 的"每次调用重算"语义变成"每次读取重算"，事件/跟随信号不受影响）；带 `@{ }` / `=` 的绑定仍惰性求值一次并缓存。**纯字面量常量必须直接写绑定**（`kind = 'circle'`，写成 `{ 'circle' }` / `=> 'circle'` 会被 validator 以 `constMethodBody` 报错——字面量恒定，用绑定一次缓存更省，meta 反射「call=事件、bind=常量」也更准确）。
 - **方法**：带参数的成员（`add(a, b) => ...`），以及带类型参数的零参方法（TS 侧要保持 `f<T>()` 可调用形态）。发消息时执行。
 
 属性成员的值可以是 lambda：读取拿到 lambda 本体（不会被隐式执行），要调用再显式 `apply`：
@@ -148,8 +148,8 @@ calc = {
 OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `withDefault` 委托（宿主端 `delegate` 全局）：spec 的方法优先，未知消息按 defaults 顺序查找。
 
 ```ooc
-defaults = { speak => 'voice', bark => 'wang' };
-spec = { fly => 'fly' };
+defaults = { speak = 'voice', bark = 'wang' };
+spec = { fly = 'fly' };
 w = delegate withDefault spec defaults;
 
 w fly      // 'fly'（spec 自有）
@@ -159,7 +159,7 @@ w speak    // 'voice'（转给 defaults）
 spec 与 defaults 同名时 spec 优先：
 
 ```ooc
-spec2 = { speak => 'wang' };
+spec2 = { speak = 'wang' };
 w2 = delegate withDefault spec2 defaults;
 w2 speak   // 'wang'
 ```

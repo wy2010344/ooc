@@ -5,16 +5,16 @@ Box #type<T> {
 };
 
 intBox: Box<number> = {
-    get { 42 },
+    get = 42,
     set(x) { x }
 };
 intBox get;
 
 strBox: Box<string> = {
-    get { 'ooc' },
+    get = 'ooc',
     set(x) { x }
 };
 strBox get;
 
 // 实例化类型不符会告警（取消注释看波浪线）
-// bad: Box<number> = { get { 'not a number' } }
+// bad: Box<number> = { get = 'not a number' }

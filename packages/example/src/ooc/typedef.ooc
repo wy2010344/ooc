@@ -18,10 +18,10 @@ p dist;
 // ===== typedef 组合（无继承：交集 & 合并形状） =====
 Animal #type { speak: string };
 Dog #type { speak: string, bark: string };
-d: Dog = { speak { 'wang' }, bark { 'bow' } };
+d: Dog = { speak = 'wang', bark = 'bow' };
 
 // 类型交集：同一值同时满足两个形状（替代继承的「形状合并」，无隐式链）
 Named #type { label: string };
-tagged: Animal & Named = { speak { 'wang' }, label { 'round' } };
+tagged: Animal & Named = { speak = 'wang', label = 'round' };
 
 (d speak) + ' ' + (tagged label)

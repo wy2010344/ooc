@@ -43,7 +43,7 @@ area = {
         nil                               // 末尾兜底
     }
 };
-area calc { kind { 'circle' }, radius { 3 } }   // 28.26
+area calc { kind = 'circle', radius = 3 }   // 28.26
 ```
 
 - 判别测试支持 `==` 与 `!=`（`#guard (s kind) != 'circle'` 收窄为其余成员）
@@ -85,7 +85,7 @@ area = {
         nil
     }
 };
-shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
+shape: Circle | Square = { kind = 'circle', radius = 3 };
 r: number | string = area calc shape   // number | string，正确
 bad: string = area calc shape          // 警告：可能命中 number 分支
 ```
@@ -97,7 +97,7 @@ bad: string = area calc shape          // 警告：可能命中 number 分支
 ```ooc
 Box #type<T> { get: T, set(x: T) };
 
-b: Box<number> = { get { 42 }, set(x) { x } };
+b: Box<number> = { get = 42, set(x) { x } };
 b get    // 42
 ```
 
@@ -123,7 +123,7 @@ s: string = c wrap 42            // 警告：推断出 T=number，赋给 string
 ```
 
 - 方法泛型参数只在方法签名内可见，方法体内可用（`y: T = x`）
-- 参数里的嵌套泛型会从实参对象反推：`make<T>(b: Box<T>): T` 传入 `{ value { 42 } }` 时，从 `Box<T>` 的 `value: T` 与实参的 `value: number` 反推 `T=number`
+- 参数里的嵌套泛型会从实参对象反推：`make<T>(b: Box<T>): T` 传入 `{ value = 42 }` 时，从 `Box<T>` 的 `value: T` 与实参的 `value: number` 反推 `T=number`
 - 推断不出的占位按 `any` 处理（"未声明又不能推断，退回 any"），不误报
 - 泛型 typedef 实例化后，其上的方法级泛型签名保留，可继续独立推断
 
@@ -135,7 +135,7 @@ s: string = c wrap 42            // 警告：推断出 T=number，赋给 string
 Box #type<T> { get: T, set(x: T) };
 
 // set(x) 的参数 x 自动回填为 number，方法体内可直接运算
-b: Box<number> = { get { 42 }, set(x) { x + 1 } }
+b: Box<number> = { get = 42, set(x) { x + 1 } }
 ```
 
 - 显式参数注解优先于回填；回填后参数照常参与重新赋值、方法调用等类型检查
@@ -162,10 +162,10 @@ p run [x => x + 1]             // lambda 回调：x 自动是 number
 
 ```ooc
 Animal #type { speak: string };
-animal = { speak => 'voice' };
+animal = { speak = 'voice' };
 
-dog: Animal = { ...animal, bark => 'wang' };   // 通过
-bad: Animal = { bark => 'wang' };              // 警告：缺少 speak
+dog: Animal = { ...animal, bark = 'wang' };   // 通过
+bad: Animal = { bark = 'wang' };              // 警告：缺少 speak
 ```
 
 类型不符时给出 warning 诊断，代码仍可正常运行。

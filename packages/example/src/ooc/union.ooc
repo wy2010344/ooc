@@ -15,7 +15,7 @@ area = {
     }
 };
 
-c: Circle = { kind { 'circle' }, radius { 3 } };
+c: Circle = { kind = 'circle', radius = 3 };
 area calc c;
 
 // 未判别直接访问专属成员会触发 partialUnionMessage warning
@@ -41,5 +41,5 @@ areas = {
         nil
     }
 };
-shape: Circle | Square = { kind { 'circle' }, radius { 3 } };
+shape: Circle | Square = { kind = 'circle', radius = 3 };
 areas desc shape

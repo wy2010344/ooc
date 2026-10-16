@@ -163,7 +163,7 @@ test('formatValue：宿主对象展开；OOC 定义对象按元信息展示', as
   const r = await runNote(
     engine,
     '展示',
-    "o = { a => 1, name = 'x', cb(m) => m + 1 };\no\n",
+    "k = 1;\no = { a => k, name = 'x', cb(m) => m + 1 };\no\n",
   )
   const so = formatValue(r.value as never)
   assert.ok(so.includes('name: x'), `bind 显示缓存值, 实际: ${so}`)
@@ -420,7 +420,7 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表�
 
 test('ObjectValue 反射：OOC 定义值可读元信息', async () => {
   const engine = createEngine(notes)
-  const r = await runNote(engine, '反射', 'p = {a => 1, b = 2};\np\n')
+  const r = await runNote(engine, '反射', 'k = 1; p = {a => k, b = 2};\np\n')
   assert.equal(r.error, null, r.error ?? '')
   const meta = ObjectValue.metaOf(r.value)
   assert.ok(meta, 'OOC 定义值应带元信息')

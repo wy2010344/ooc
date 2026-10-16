@@ -11,7 +11,7 @@ StyledContainer = [className, children =>
 // 创建按钮组件
 Button = [label, onClick =>
     (dom button {
-        className => 'rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600',
+        className = 'rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600',
         onClick(e){ onClick apply e }
     }
         (text apply label)
@@ -21,7 +21,7 @@ Button = [label, onClick =>
 // 创建输入框组件
 Input = [value, onValueChange =>
     (dom input {
-        className => 'rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none',
+        className = 'rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none',
         value => value,
         onValueChange(v){ onValueChange apply v }
     })

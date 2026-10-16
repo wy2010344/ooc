@@ -21,9 +21,9 @@ size = {
 size check 200;
 size check 5;
 
-animal = { speak => 'voice' };
+animal = { speak = 'voice' };
 // 无继承：对象直接携带全部方法（复用与兜底交给 withDefault 委托）
-dog = { speak => 'voice', bark => 'wang' };
+dog = { speak = 'voice', bark = 'wang' };
 dog speak;
 dog bark;
 

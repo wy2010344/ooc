@@ -19,7 +19,7 @@ Card = fc apply [ctx, title, count =>
 // 事件绑方法调用：onClick(e){ addItem apply e } / onClick(e){ delFirst apply e }
 // 注意先快照 newItem = (newName get) 再清空信号：行对象 {name => newItem} 是渲染时才取值的，
 // 若直接 {name => (newName get)}，同批冲刷里会读到已清空的值。
-addItem = [e => xs = list get; newItem = (newName get); list set (xs / toSpliced 0 0 {name => newItem, done => false}); newName set ''];
+addItem = [e => xs = list get; newItem = (newName get); list set (xs / toSpliced 0 0 {name => newItem, done = false}); newName set ''];
 delFirst = [list get / toSpliced 0 1 | list set];
 
 {

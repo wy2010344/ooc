@@ -22,7 +22,7 @@ test('.ts 产物含 typedef（属性形态），不再写同名 .d.ts', async ()
   const { ts: tsPath, dir } = await compileSource('typed', `
 Point #type { x: number, y: number };
 Box #type <T> { value: T };
-origin = { x { 0 }, y { 0 } };
+origin = { x = 0, y = 0 };
 scale = 2;
 origin
 `)
@@ -51,7 +51,7 @@ test('命名空间类型 math#Circle：值走默认导入，类型位补 ns$ns �
   await fs.writeFile(
     path.join(dir, 'math.ooc'),
     `Circle #type { x: number, y: number };
-origin = { x { 0 }, y { 0 } };
+origin = { x = 0, y = 0 };
 origin
 `,
     'utf-8',
