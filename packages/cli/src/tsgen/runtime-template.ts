@@ -32,32 +32,38 @@ export const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
     : a && typeof a.has == 'function' ? a.has(v)
     : a === v,
 }
-export type OOCEntry = {
-  type: 'bind' | 'mutable' | 'call'
-  name: string
-  /** bind/mutable 的惰性 thunk：首次访问时调用求值；call 的实现函数 */
-  fn?: (...args: any[]) => any
-  /** call 的属性成员标记（零参无泛型）：__createObject 挂 getter，读取即执行 */
-  prop?: boolean
-  /** 惰性求值标记与缓存（首次访问时写入） */
-  lazyDone?: boolean
-  lazy?: any
-}
+// 「方法函数」标记键：与解释器（object-oriented-c-language 的 OOC_METHOD）同源——
+// Symbol.for 全局注册表让编译产物与宿主桥接层（如 dom.ts）读到同一符号。
+// 「=>」方法编译成的函数附带此标记，运行时/宿主据此区分「方法」与「lambda 值」。
+export const OOC_METHOD: unique symbol = Symbol.for('ooc:method')
+export type OOCEntry =
+  /** 字面量绑定：构造期求值一次，直接写数据属性 */
+  | { type: 'value'; name: string; value: any }
+  /** 计算绑定：惰性求值一次并缓存（getter） */
+  | { type: 'bind'; name: string; fn: () => any }
+  /** 方法（「=>」/带参）：数据函数 + OOC_METHOD 标记，发消息即调用 */
+  | { type: 'call'; name: string; fn: (...args: any[]) => any }
+  /** 转发属性（「<=」）：数据函数 + 标记，发消息转发给委托对象的 apply */
+  | { type: 'mutable'; name: string; fn: (...args: any[]) => any }
 // 展开参数辅助：'...expr' 求值为数组则摊平，否则整体作单参（与解释器语义一致）
 export function __spread(value: any): any[] {
   return Array.isArray(value) ? value : [value]
 }
-// 反射元信息键：与解释器（object-oriented-c-language 的 OOC_META）同源——
-// 全局符号注册表 Symbol.for 让编译产物与宿主桥接层（如 ObjectValue.metaOf）
-// 读到同一份元信息，宿主据此区分事件回调（call）与常量绑定（bind）。
-export const OOC_META: unique symbol = Symbol.for('ooc:meta')
-export const OOC_EMPTY_OBJECT = {}
-Object.defineProperty(OOC_EMPTY_OBJECT, OOC_META, { enumerable: false, value: new Map() })
+// 转发属性「<=」的构造器：惰性求值委托对象一次并缓存，之后本 key 上的一切消息
+// 原样转发给委托对象的 apply（消息名不传，只传实参）。
+export function __mutable(getDelegate: () => any): any {
+  let done = false
+  let d: any
+  return function (this: any) {
+    if (!done) { done = true; d = getDelegate.call(this) }
+    return __send(d, 'apply', Array.from(arguments))
+  }
+}
 export function __send(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') return o.apply(o, args)
-  // descriptor 优先：属性成员（getter）单次读取、结果原样返回（可为 lambda，绝不
-  // 二次 apply——lambda 保留语义的关键）；数据属性带参写入、无参读取；数据函数按
-  // 方法 apply。无 own descriptor（原型链方法 / Proxy / 宿主内建）走下方回退链。
+  // 自有 descriptor 决定成员形态：getter＝计算绑定（取值，读一次缓存）；带 OOC_METHOD
+  // 标记的数据函数＝方法（调用）；其余数据函数＝宿主方法（调用）；数据非函数＝字面量
+  // 绑定（只读）/宿主属性（带参且可写才写入，否则读取）。无 own descriptor 走下方回退链。
   const desc = o == null || (typeof o !== 'object' && typeof o !== 'function')
     ? undefined
     : Object.getOwnPropertyDescriptor(o, value)
@@ -66,8 +72,11 @@ export function __send(o: any, value: string, args: any[]): any {
       if (args.length && desc.set) { desc.set.call(o, args[0]); return o[value] }
       return desc.get ? desc.get.call(o) : undefined
     }
-    if (typeof desc.value === 'function') return desc.value.apply(o, args)
-    if (args.length) o[value] = args[0]
+    if (typeof desc.value === 'function') {
+      // 数据函数＝OOC 方法（带标记）或宿主方法 → 调用
+      return desc.value.apply(o, args)
+    }
+    if (args.length && desc.writable) o[value] = args[0]
     return o[value]
   }
   const fun = o?.[value]
@@ -83,53 +92,34 @@ export function __send(o: any, value: string, args: any[]): any {
   throw new Error('OOC 方法未找到: ' + String(o) + ' . ' + value + '(' + args.map((a) => String(a)).join(', ') + ')')
 }
 export function __createObject(entries: OOCEntry[]): any {
-  if (entries.length === 0) return OOC_EMPTY_OBJECT
+  if (entries.length === 0) return {}
   const obj: Record<string, unknown> = {}
-  const groups = new Map<string, OOCEntry[]>()
   for (const e of entries) {
-    let list = groups.get(e.name)
-    if (!list) groups.set(e.name, (list = []))
-    list.push(e)
-  }
-  // 与解释器 objectValue 一致：把定义表当作反射元信息烧录（不可枚举），
-  // 宿主/桥接层可经 ObjectValue.metaOf 判断类型（call=事件回调、bind=常量）
-  Object.defineProperty(obj, OOC_META, { enumerable: false, value: groups })
-  groups.forEach((methods, name) => {
-    // 名字唯一（校验器保证）：每个 key 只有一个成员，直接派发，不再按参数数量匹配。
-    // bind 挂 getter（惰性求值一次缓存）；call 且 prop（零参属性成员）挂 getter
-    // 读取即执行方法体（值可为 lambda，原样返回）；mutable 为转发函数；其余为方法函数。
-    const pair = methods[0]
-    if (pair.type === 'bind') {
-      Object.defineProperty(obj, name, {
+    // 同名成员派发取首个定义（唯一性由校验器保证）：已挂载的名字跳过后续定义，
+    // 否则 defineProperty 会因不可重定义而抛错。
+    if (Object.prototype.hasOwnProperty.call(obj, e.name)) continue
+    if (e.type === 'value') {
+      // 字面量绑定 → 只读数据属性（构造期写值一次，常量不因带参消息被改写）
+      Object.defineProperty(obj, e.name, { enumerable: true, writable: false, value: e.value })
+      continue
+    }
+    if (e.type === 'bind') {
+      let done = false
+      let cached: any
+      Object.defineProperty(obj, e.name, {
         enumerable: true,
         get() {
-          if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
-          return pair.lazy
+          if (!done) { done = true; cached = e.fn!.call(this) }
+          return cached
         },
       })
-      return
+      continue
     }
-    if (pair.type === 'call' && pair.prop) {
-      Object.defineProperty(obj, name, {
-        enumerable: true,
-        get() { return pair.fn!.call(this) },
-      })
-      return
-    }
-    Object.defineProperty(obj, name, {
-      enumerable: true,
-      value() {
-        const args = Array.from(arguments)
-        if (pair.type === 'mutable') {
-          // 转发属性同样惰性：首次发消息时求值委托对象并缓存
-          if (!('lazyDone' in pair)) { pair.lazyDone = true; pair.lazy = pair.fn!.call(this) }
-          return __send(pair.lazy, 'apply', args)
-        }
-        // call：#guard 分支已编译进 fn（if/else if 链），直接调用
-        return pair.fn!.apply(this, args)
-      },
-    })
-  })
+    // call / mutable：数据函数 + OOC_METHOD 标记（供运行时/宿主区分方法与 lambda）
+    const fn = e.fn!
+    Object.defineProperty(fn, OOC_METHOD, { value: true })
+    Object.defineProperty(obj, e.name, { enumerable: true, value: fn })
+  }
   return obj
 }
 `

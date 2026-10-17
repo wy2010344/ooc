@@ -1,9 +1,9 @@
-import { readOocMeta, sendMessage, type OocMeta } from './runtime.js'
+import { sendMessage } from './runtime.js'
 import { proxyCatchAll } from './proxy.js'
 import { OocMethodNotFoundError } from './errors.js'
 
 /**
- * 宿主注入的 JS 全局对象（storage/js/ObjectValue/delegate），供 OOC 源码直接按名引用。
+ * 宿主注入的 JS 全局对象（storage/js/delegate），供 OOC 源码直接按名引用。
  * 浏览器 demo（packages/example/src/main.ts）与语言包单元测试共用这一份，
  * 保证行为一致。
  *
@@ -137,17 +137,4 @@ function chainWrap(entries: unknown[]): unknown {
   })
   receiverHolder.v = wrapped
   return wrapped
-}
-
-/**
- * ObjectValue：语言定义值的反射桥接。不改语言语义（鸭子类型派发），
- * 只提供「判断是不是 OOC 定义对象、读取其元信息」的能力。
- * 元信息是对象构造时由 runtime 烧录的（OOC_META Symbol 键），语言内消息不可见，
- * 业务值无法伪造。lambda 仍是 JS 函数，不带这种元信息（isDefined 返回 false）。
- */
-export const ObjectValue = {
-  /** x 的元信息：{ members: 本层定义的消息表 }，非语言对象为 nil */
-  metaOf(x: unknown): OocMeta | undefined {
-    return readOocMeta(x)
-  },
 }

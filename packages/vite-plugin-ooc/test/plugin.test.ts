@@ -7,7 +7,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { oocPlugin, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
 import { modelToTs, OOC_RUNTIME_MODULE } from 'object-oriented-c-cli'
-import { ObjectValue, createObjectOrientedCServices } from 'object-oriented-c-language'
+import { createObjectOrientedCServices } from 'object-oriented-c-language'
 import { URI } from 'langium'
 import { NodeFileSystem } from 'langium/node'
 import * as ts from 'typescript'
@@ -201,7 +201,7 @@ test('非 .ooc/.runtime id 不打扰：resolveId/load 返回 undefined', () => {
   }
 })
 
-test('反射契约：编译产物 __createObject 的对象可被 ObjectValue.metaOf 读取（call=事件、bind=常量）', async () => {
+test('方法标记契约：__createObject 的 call 成员带 OOC_METHOD 标记，value 成员为数据属性', async () => {
   // 把共享 runtime 模板转成 JS（同 vite-plugin 的做法），run 一次 __createObject
   const js = ts
     .transpileModule(OOC_RUNTIME_MODULE, {
@@ -212,19 +212,18 @@ test('反射契约：编译产物 __createObject 的对象可被 ObjectValue.met
     'data:text/javascript;base64,' + Buffer.from(js).toString('base64')
   )
   const obj = mod.__createObject([
-    { type: 'call', name: 'onClick', fn: (e: any) => e + 1, arity: 1, rest: false },
-    { type: 'bind', name: 'className', value: 'btn' },
+    { type: 'call', name: 'onClick', fn: (e: any) => e + 1 },
+    { type: 'value', name: 'className', value: 'btn' },
   ])
-  const meta = ObjectValue.metaOf(obj)
-  if (!meta || Object.prototype.toString.call(meta) !== '[object Map]') {
-    throw new Error(`编译产物对象应携带可读元信息，实际 ${meta}`)
+  // call → 带 OOC_METHOD 标记的数据函数（方法/事件，宿主据此区分方法与 lambda 值）
+  if (typeof obj.onClick !== 'function') throw new Error('onClick 应是函数')
+  if (!obj.onClick[mod.OOC_METHOD]) {
+    throw new Error('onClick 应带 OOC_METHOD 标记')
   }
-  const onClick = meta.get('onClick')?.[0]
-  const className = meta.get('className')?.[0]
-  if (onClick?.type !== 'call') throw new Error('onClick 应反射为 call（事件回调）')
-  if (className?.type !== 'bind') throw new Error('className 应反射为 bind（常量）')
-  // 空对象也识别为 OOC 定义值（{} 有元信息）
-  if (!ObjectValue.metaOf(mod.__createObject([]))) {
-    throw new Error('空对象 {} 也应带元信息')
+  // value → 纯数据属性
+  if (obj.className !== 'btn') throw new Error('className 应是数据属性值 btn')
+  // 空对象 {} 构造成功，无自有成员
+  if (Object.keys(mod.__createObject([])).length !== 0) {
+    throw new Error('空对象 {} 不应有自有成员')
   }
 })

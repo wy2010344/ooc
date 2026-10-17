@@ -3,7 +3,7 @@ import {
   createTypeCheckAction,
   delegate,
   js,
-  ObjectValue,
+  OOC_METHOD,
   storage,
 } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
@@ -95,14 +95,14 @@ export function createVirtualFs(
 
 /**
  * 宿主桥接。OOC 源码可以直接按名引用这些对象：
- *   storage / js / delegate / ObjectValue  —— 语言包内置（ref / throw / new / withDefault / 反射）。
+ *   storage / js / delegate —— 语言包内置（ref / throw / new / withDefault）。
  *   循环（loop apply/repeat）是 base 包 OOC 实现（#import '@base/loop'），不再桥接。
  *   fc / dom / html / text / createContext / forEach  —— 预览渲染（详见 src/lib/preview/）：
  *     组件包装：fc apply [ctx,...]；元素：dom.div 属性对象 子组件...；
  *     动态文本：text apply <字符串或信号 getter>；HTML 片段：html apply ...；
  *     forEach apply {列表提供者, 渲染}（内部委托 mve renderForEach，无需自取 ctx）。
- *     属性分流按元信息：call 成员（`=>` 方法/事件/信号 getter）交给 mve 当函数属性，
- *     其余（bind/mutable）构造时一次性读值作为常量属性。
+ *     属性分流按 descriptor + 方法标记：带 OOC_METHOD 标记的函数＝方法（绑接收者），
+ *     getter＝计算绑定（读一次），其余＝字面量常量/值（原样透传）。
  *   createSignal / memo / addEffect  —— 响应式原语直接复用 wy-helper，不再自研平行实现。
  *     signal 是 { get() / set() }；渲染期被读取的信号变化后，所在区域自动重建。
  *     批处理调度默认 MessageChannel，测试环境由 test/preload-batch.mjs 置空
@@ -118,9 +118,6 @@ export function createGlobals() {
     js,
     // 委托组合桥：delegate withDefault spec defaults...（spec 优先，未知按链查找）
     delegate,
-    // 反射桥接：ObjectValue metaOf x —— 读 OOC 定义值的元信息（构造时烧录，
-    // 语言内消息不可见、不可伪造）；非定义值返回 undefined
-    ObjectValue,
     fc,
     createContext,
     dom,
@@ -146,7 +143,7 @@ export function createEngine(
     createGlobals(),
   )
   // Route A：全局类型注册表 = 各宿主包自持类型源合并（createBridgeGlobalsTypes：
-  // language 内置 storage/js/delegate/ObjectValue/console ∪ ooc-mve-bridge 视图与信号），
+  // language 内置 storage/js/delegate/console ∪ ooc-mve-bridge 视图与信号），
   // 让类型检查看到 dom/createSignal 等桥接对象的真实形状
   const typeCheck = createTypeCheckAction(
     { fileSystemProvider: () => fs },
@@ -159,12 +156,13 @@ export type Engine = ReturnType<typeof createEngine>
 
 /**
  * 把解释器返回值格式化为可读文本（对象递归展开绑定值）。
- * - OOC 定义对象（ObjectValue.isDefined）按元信息展示：bind/mutable 无参读缓存值
- *   （bind 构造时求值一次恒返回缓存，安全无副作用）；call（`=>` 方法/事件/guard）
- *   只标 (方法)——绝不调用，因为调用会执行方法体副作用（如 onClick 改信号）。
- * - 宿主对象退回 for-in 逐键展开（get/set 等原生方法也会被展示为值，属既有行为）。
+ * - 成员按 descriptor + 方法标记分流：带 OOC_METHOD 标记的函数＝方法（只标 (方法)，
+ *   绝不调用——调用会执行方法体副作用，如 onClick 改信号）；getter＝计算绑定（读取
+ *   一次，惰性缓存零副作用）；其余＝字面量常量/lambda 值，安全求值展示。
+ * - 宿主对象的无标记函数（get 等）无参调用可读到值，带参/报错退化为 (方法)。
+ * - 用 seen 集合防环（宿主对象可能自引用）。
  */
-export function formatValue(value: Value): string {
+export function formatValue(value: Value, seen: Set<object> = new Set()): string {
   if (value === null || value === undefined) {
     return 'nil'
   }
@@ -175,44 +173,37 @@ export function formatValue(value: Value): string {
   if (typeof value !== 'object') {
     return String(value)
   }
+  if (seen.has(value as object)) {
+    return '(循环)'
+  }
+  seen.add(value as object)
+  const obj = value as Record<string, unknown>
   const lines: string[] = []
-  // OOC 定义对象：元信息驱动，调用安全的才求值，否则标 (方法)
-  const meta = ObjectValue.metaOf(value)
-  if (meta) {
-    meta.forEach((entries) => {
-      const head = entries[0]
-      // 首位定义优先，与消息分发同语义；bind/mutable 的 meta 条目直接挂着
-      // 缓存值（bind 恒返构造值、mutable 为活引用），读它零副作用；
-      // call（`=>` 方法/事件/guard）绝不调用，否则会执行方法体副作用（如改信号）
-      let rendered: string
-      if (head.type === 'call') {
+  for (const key of Object.keys(obj)) {
+    const desc = Object.getOwnPropertyDescriptor(obj, key)
+    const raw = desc ? desc.value : obj[key]
+    let rendered: string
+    if (desc && (desc.get || desc.set)) {
+      // 计算绑定（getter）：惰性一次求值缓存，读它零副作用
+      rendered = formatValue(obj[key] as Value, seen)
+    } else if (typeof raw === 'function') {
+      const fn = raw as ((...a: unknown[]) => unknown) & Record<symbol, unknown>
+      if (fn[OOC_METHOD]) {
+        // OOC 方法/转发器：绝不调用（可能有副作用）
         rendered = '(方法)'
       } else {
-        // bind/mutable 的 value 是惰性 getter：读它才求值并缓存，零副作用
-        rendered = formatValue(head.value as Value)
+        // 宿主方法（get 等）：无参调用读值，带参/报错退化为 (方法)
+        try {
+          rendered = formatValue(fn.call(value) as Value, seen)
+        } catch {
+          rendered = '(方法)'
+        }
       }
-      lines.push(`  ${head.name}: ${rendered}`)
-    })
-    return `{\n${lines.join('\n')}\n}`
-  }
-  // 宿主对象（ref/fc/宿主数组等）：退化 for-in 展开，保留既有可读性
-  for (const key in value as Record<string, unknown>) {
-    const item = (value as Record<string, unknown>)[key]
-    let rendered: string
-    if (typeof item === 'function') {
-      // 宿主方法（get 等）无参调用可读到值；带参/报错退化为 (方法)。
-      // OOC 定义对象不会走到这里（上面已按元信息短路）。
-      try {
-        rendered = formatValue(item.call(value))
-      } catch {
-        rendered = '(方法)'
-      }
-    } else if (item && typeof item === 'object') {
-      rendered = '(对象)'
     } else {
-      rendered = JSON.stringify(item)
+      rendered = formatValue(raw as Value, seen)
     }
     lines.push(`  ${key}: ${rendered}`)
   }
+  seen.delete(value as object)
   return `{\n${lines.join('\n')}\n}`
 }

@@ -199,7 +199,7 @@ config
 
 /**
  * 创建完整引擎全局类型（Route A loader，可传给 createObjectOrientedCServices /
- * createTypeCheckAction 作注册表）：language 内置桥接（storage/js/delegate/ObjectValue/console）
+ * createTypeCheckAction 作注册表）：language 内置桥接（storage/js/delegate/console）
  * ∪ 本包类型源（dom/text/html/fc/forEach/createSignal/memo/addEffect/createContext），
  * 与运行时 createBridgeGlobals() 的名字集合对应；本包覆盖同名项。
  */

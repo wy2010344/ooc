@@ -3,7 +3,7 @@ import { renderFDom, renderHtmlContent, renderTextContent } from 'mve-dom'
 import type { GetValue } from 'wy-helper'
 
 import { fc } from './fc.js'
-import { ObjectValue } from 'object-oriented-c-language'
+import { OOC_METHOD } from 'object-oriented-c-language'
 
 //元素组件：第一个参数是属性对象，其余是子组件（DComponent）。
 //调用时在 build 窗口内执行（this=StateHolder），经 renderFDom 挂到当前 holder。
@@ -22,28 +22,28 @@ export type TagFactory = (
 //不依赖语言级 methodNotFound——methodNotFound 让位给 JS Proxy 的动态派发。
 const makeTagFn = (tag: string): TagFactory => {
   return function (arg: any, ...children: DComponent[]) {
-    //这里在 build 窗口已由调用方执行，属性按元信息分流
+    //这里在 build 窗口已由调用方执行，属性按 descriptor + 方法标记分流
     return function (this: StateHolderWithNode<Node, readonly Node[]>) {
       const to: Record<string, unknown> = {}
-      const meta = ObjectValue.metaOf(arg)
-      if (meta) {
-        meta.forEach(function (value, key) {
-          const v = value[0]
-          if (v.type == 'call') {
-            // descriptor 分流：属性成员（getter，零参）每次读取重算（等价旧的
-            // 每次调用），返回值（可为 lambda）原样透传给 mve；带参方法函数保持
-            // bind（mve 按 SyncFun 调用，事件实参正常传入）
-            const desc = Object.getOwnPropertyDescriptor(arg, key)
-            if (desc && desc.get) {
-              to[key] = () => arg[key]
-            } else {
-              to[key] = arg[key].bind(arg)
-            }
+      if (arg && typeof arg === 'object') {
+        for (const key of Object.keys(arg)) {
+          const desc = Object.getOwnPropertyDescriptor(arg, key)
+          if (!desc) continue
+          if (desc.get || desc.set) {
+            // 计算绑定（getter）：惰性一次缓存，读一次（常量语义）
+            to[key] = arg[key]
+          } else if (
+            typeof desc.value === 'function' &&
+            (desc.value as Record<symbol, unknown>)[OOC_METHOD]
+          ) {
+            // OOC 方法/转发器：绑到接收者。零参方法 → GetValue（每次读重算）；
+            // 带参方法 → 事件处理器（mve 传入事件实参）
+            to[key] = desc.value.bind(arg)
           } else {
-            // 常量值（bind getter），构造时读一次
+            // 字面量绑定值 / lambda 值 / 宿主属性：原样透传
             to[key] = arg[key]
           }
-        })
+        }
       }
       return renderFDom(tag as any, {
         ...to,

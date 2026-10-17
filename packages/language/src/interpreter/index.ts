@@ -2,6 +2,7 @@
 export { type OocObject, type Value, sendMessage } from './runtime.js'
 export { createInterpretAction, createTypeCheckAction } from './host.js'
 export type { Globals } from './scope.js'
-export { ObjectValue, delegate, js, storage } from './bridges.js'
+export { delegate, js, storage } from './bridges.js'
+export { OOC_METHOD } from '../member-kind.js'
 export { proxyCatchAll } from './proxy.js'
 export { OocCircularImportError, OocMethodNotFoundError } from './errors.js'

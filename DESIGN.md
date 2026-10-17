@@ -64,13 +64,13 @@
 - **不做 TS 式可辨识联合**（tag 字段 = 把类型信息降级成数据再用结构反推身份）。身份应先天自知（`isKindOf` / `isA` 消息）。
 - 联合必覆盖所有情况：str 走 str、num 走 num、lambda 走 lambda、plainObject 走兜底（或抛「没有定义该方法」）。
 - **plainObject 最多一个参与联合**：联合里每个成员必须不可混淆地可判别。值类靠 `typeof`、类实例靠类身份；plainObject 无身份 → 配额最多一个，作为兜底成员。这是对「无身份区域」的诚实封顶。
-- 静态判别走 `TypeInfo`（`unionOf`/`isSubtype`），运行时判别 = 发送消息（发送即判别），两处都不依赖 `OOC_META`。
+- 静态判别走 `TypeInfo`（`unionOf`/`isSubtype`），运行时判别 = 发送消息（发送即判别），两处都不依赖元信息反射（运行时只按 descriptor + 方法标记派发）。
 
-## 8. 消息名参数化（ObjectValue send）
+## 8. 消息名参数化（js send）
 
 - `send` 是 Smalltalk `perform:` 的等价物，符合消息哲学。但它同时是静态分析的逃逸阀：消息名变运行时值后，completion/hover/findReferences 全栈都要退化为 unknown。
-- **现不引入**，等真实用例（事件转发、动态键绑定）出现再挂 `ObjectValue send obj name args`，一行桥的事，不预支 LSP 全栈成本。
-- 若引入，命名语义化（挂反射桥上），不裸暴露运行时内部 `sendMessage` 函数。
+- **现不引入**，等真实用例（事件转发、动态键绑定）出现再挂 `js send obj name args`，一行桥的事，不预支 LSP 全栈成本。
+- 若引入，命名语义化（挂 js 桥上），不裸暴露运行时内部 `sendMessage` 函数。
 
 ## 9. 元模型
 

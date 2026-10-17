@@ -6,10 +6,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ObjectValue, sendMessage } from 'object-oriented-c-language'
+import { OOC_METHOD, sendMessage } from 'object-oriented-c-language'
 import { createRoot } from 'mve-dom'
 import type { StateHolderWithNode } from 'mve-core'
 import { createEngine, formatValue } from '../src/lib/engine.js'
+
+/** 是否为带 OOC_METHOD 标记的方法函数（替代已移除的 ObjectValue 反射） */
+function isMethod(v: unknown): boolean {
+  return (
+    typeof v === 'function' &&
+    Boolean((v as unknown as Record<symbol, unknown>)[OOC_METHOD])
+  )
+}
 import type { LibModules } from '../src/lib/lib-modules.js'
 import { PREVIEW_DEMO, TODO_DEMO } from '../src/demos/index.js'
 import { DEMO_NOTES } from '../src/demos/index.js'
@@ -150,7 +158,7 @@ test('语法错误被拦截为 error', async () => {
   assert.ok(r.error != null, '语法错误应写入 error')
 })
 
-test('formatValue：宿主对象展开；OOC 定义对象按元信息展示', async () => {
+test('formatValue：宿主对象展开；OOC 对象按标记/descriptor 展示', async () => {
   const v = { a: 1 } as any
   v.b = function () {
     return 2
@@ -199,8 +207,10 @@ test('preview 导出可识别，holder addNode/addDestroy 生效', async () => {
       '};\nobj\n',
   )
   assert.equal(r.error, null, r.error ?? '')
-  const meta = ObjectValue.metaOf(r.value)
-  assert.ok(meta?.has('preview'), '导出对象应带 preview 方法')
+  assert.ok(
+    isMethod((r.value as Record<string, unknown>).preview),
+    '导出对象应带 preview 方法',
+  )
 
   const unmount = mountDoc()
   try {
@@ -273,7 +283,10 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
     const engine = createEngine(notes)
     const r = await runNote(engine, '预览.ooc', PREVIEW_DEMO)
     assert.equal(r.error, null, r.error ?? '')
-    assert.ok(ObjectValue.metaOf(r.value)?.has('preview'), '演示导出应带 preview')
+    assert.ok(
+      isMethod((r.value as Record<string, unknown>).preview),
+      '演示导出应带 preview',
+    )
 
     const box = makeFakeEl('box')
     const dispose = mountInto(box, (holder) => {
@@ -337,7 +350,10 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表�
     const engine = createEngine(notes)
     const r = await runNote(engine, '待办清单.ooc', TODO_DEMO)
     assert.equal(r.error, null, r.error ?? '')
-    assert.ok(ObjectValue.metaOf(r.value)?.has('preview'), '演示导出应带 preview')
+    assert.ok(
+      isMethod((r.value as Record<string, unknown>).preview),
+      '演示导出应带 preview',
+    )
 
     const box = makeFakeEl('box')
     const dispose = mountInto(box, (holder) => {
@@ -418,17 +434,22 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表�
   }
 })
 
-test('ObjectValue 反射：OOC 定义值可读元信息', async () => {
+test('对象成员运行时形态：字面量数据属性 + 标记方法', async () => {
   const engine = createEngine(notes)
-  const r = await runNote(engine, '反射', 'k = 1; p = {a => k, b = 2};\np\n')
+  const r = await runNote(engine, '形态', 'k = 1; p = {a => k, b = 2};\np\n')
   assert.equal(r.error, null, r.error ?? '')
-  const meta = ObjectValue.metaOf(r.value)
-  assert.ok(meta, 'OOC 定义值应带元信息')
-  assert.equal(meta!.get('a')?.[0].type, 'call')
-  assert.equal(meta!.get('b')?.[0].type, 'bind')
-  assert.equal(sendMessage(r.value, 'a', []), 1, 'call 成员仍可发消息调用')
-  assert.equal(sendMessage(r.value, 'b', []), 2, 'bind 成员返回缓存值')
-  assert.equal(ObjectValue.metaOf(42), undefined, '非定义值无元信息')
+  const obj = r.value as Record<string, unknown>
+  // a 是零参方法 → 带 OOC_METHOD 标记的数据函数
+  assert.ok(isMethod(obj.a), 'a 应是带标记的方法函数')
+  // b 是纯字面量绑定 → 数据属性（非函数）
+  assert.equal(obj.b, 2)
+  assert.equal(sendMessage(r.value, 'a', []), 1, 'a 发消息调用返回 k')
+  assert.equal(sendMessage(r.value, 'b', []), 2, 'b 返回数据属性值')
+  // 宿主值无标记
+  assert.equal(
+    (42 as unknown as Record<symbol, unknown>)[OOC_METHOD],
+    undefined,
+  )
 })
 
 test('宿主.ooc demo：storage ref + loop repeat 可跑（loop 从 base 包 #import）', async () => {

@@ -15,7 +15,7 @@ import {
   createPackageAwareFileSystem,
   createTypeCheckAction,
   delegate,
-  ObjectValue,
+  OOC_METHOD,
   OocCircularImportError,
   OocMethodNotFoundError,
   sendMessage,
@@ -342,15 +342,17 @@ describe('OOC Interpreter', () => {
     ).rejects.toThrow()
   })
 
-  test('对象即 JS 对象：零参成员为属性直读，带参成员为方法函数', async () => {
+  test('对象即 JS 对象：字面量绑定为数据属性，成员为方法函数', async () => {
     const result = await interpreter.interpret(`
             obj = { value = 42, f { 'f' }, add(x) => x + 1 };
             obj
         `)
-    // bind 与零参 call 都是属性：JS 侧直读值（getter 每次读取重算）
+    // 字面量绑定 → 数据属性，JS 直读值
     expect(result.value).toBe(42)
-    expect(result.f).toBe('f')
-    // 带参成员仍是方法函数
+    // 零参成员是方法：JS 直读拿到函数本体，发消息才执行
+    expect(typeof result.f).toBe('function')
+    expect(sendMessage(result, 'f', [])).toBe('f')
+    // 带参成员也是方法函数
     expect(typeof result.add).toBe('function')
     expect(result.add(1)).toBe(2)
     expect(Object.keys(result)).toEqual(['value', 'f', 'add'])
@@ -378,13 +380,15 @@ describe('OOC Interpreter', () => {
     expect(bindImpl).toBe(42)
   })
 
-  test('lambda 保留：JS 直读 obj.handler 是 lambda 本体（非执行结果）', async () => {
+  test('lambda 保留：零参方法体返回 lambda，读取不二次 apply', async () => {
     const result = await interpreter.interpret(`
             obj = { handler => [x => x + 1] };
             obj
         `)
-    expect(typeof result.handler).toBe('function')
-    expect(result.handler(41)).toBe(42)
+    // 零参成员是方法：发消息执行方法体，返回 lambda 本体（不是 lambda 执行结果）
+    const lambda = sendMessage(result, 'handler', [])
+    expect(typeof lambda).toBe('function')
+    expect(sendMessage(lambda, 'apply', [41])).toBe(42)
   })
 
   test('方法体内 this 引用自身字段', async () => {
@@ -979,9 +983,10 @@ describe('OOC #import 模块', () => {
        loop`,
       '/proj/demo.ooc',
     )
-    const meta = ObjectValue.metaOf(result)
-    expect(meta instanceof Map).toBe(true)
-    expect([...meta!.keys()]).toContain('repeat')
+    // base/loop 模块导出对象带 repeat 方法（带 OOC_METHOD 标记的数据函数）
+    expect(
+      (result as Record<string, unknown>).repeat instanceof Function,
+    ).toBe(true)
   })
 
   test('包入口 @pkg 默认解析 index.ooc', async () => {
@@ -1088,60 +1093,57 @@ describe('除法运算', () => {
   })
 })
 
-describe('ObjectValue 元信息反射', () => {
-  test('JS 侧：定义对象带元信息，可读本层成员表（带缓存值）且不可伪造', async () => {
-    const result = await interpreter.interpret(`
-        p = {a => 1, b(x) => x};
-        c = { d = 2, e(v) => v };
+describe('对象成员运行时形态（标记 + descriptor，无反射）', () => {
+  test('字面量绑定=数据属性（构造期一次），计算绑定=getter（惰性一次）', async () => {
+    const result = (await interpreter.interpret(`
+        c = { d = 2, s = 'x', b = true, z = nil, v = 1 + 2 };
         c
-    `)
-    const meta = ObjectValue.metaOf(result)
-    expect(meta instanceof Map).toBe(true)
-    // 本层成员：d（bind 惰性）、e（call）
-    expect([...meta!.keys()]).toEqual(['d', 'e'])
-    const d = meta!.get('d')![0]
-    expect(d.type).toBe('bind')
-    // bind 是惰性绑定：meta 上只带 AST/作用域，不存求值后的缓存值
-    expect((d as { lazy: unknown }).lazy).not.toBe(undefined)
-    expect(meta!.get('e')![0].type).toBe('call')
+    `)) as Record<string, unknown>
+    expect(Object.keys(result)).toEqual(['d', 's', 'b', 'z', 'v'])
+    // 纯字面量：直接写数据属性（非 getter）
+    expect(Object.getOwnPropertyDescriptor(result, 'd')!.get).toBeUndefined()
+    expect(result.d).toBe(2)
+    expect(result.s).toBe('x')
+    expect(result.b).toBe(true)
+    expect(result.z).toBe(null)
+    // 计算式：getter，惰性求值读取
+    expect(typeof Object.getOwnPropertyDescriptor(result, 'v')!.get).toBe(
+      'function',
+    )
+    expect(result.v).toBe(3)
   })
 
-  test('同名成员：运行时按定义序并列分组，派发取首个定义（唯一性由校验器保证）', async () => {
+  test('方法（零参/带参）是带 OOC_METHOD 标记的数据函数，发消息即调用', async () => {
+    const result = (await interpreter.interpret(`
+        p = { a => 1, b(x) => x };
+        p
+    `)) as Record<string, unknown>
+    expect(typeof result.a).toBe('function')
+    expect((result.a as Record<symbol, unknown>)[OOC_METHOD]).toBe(true)
+    expect((result.b as Record<symbol, unknown>)[OOC_METHOD]).toBe(true)
+    expect(sendMessage(result, 'a', [])).toBe(1)
+    expect(sendMessage(result, 'b', [7])).toBe(7)
+  })
+
+  test('同名成员：派发取首个定义（唯一性由校验器保证）', async () => {
     const eq = await interpreter.interpret(`
         eq = { equal(a, b) => 1, equal(a) => 2 };
         eq
     `)
-    const mix = await interpreter.interpret(`
-        mix = { x = 1, x(v) => v };
-        mix
-    `)
-    // 元信息按定义序并列（宿主可遍历），派发取首个定义
-    const equalEntries = ObjectValue.metaOf(eq)!.get('equal')!
-    expect(equalEntries.length).toBe(2)
-    expect(equalEntries.every((m) => m.type === 'call')).toBe(true)
     expect(sendMessage(eq, 'equal', [1, 2])).toBe(1)
     expect(sendMessage(eq, 'equal', [9])).toBe(1)
-    // 同名 x：bind 在前 + call 在后，两条并列
-    const xEntries = ObjectValue.metaOf(mix)!.get('x')!
-    expect(xEntries.map((m) => m.type)).toEqual(['bind', 'call'])
-    // bind 在最前：忽略参数，命中即返回缓存值
-    expect(sendMessage(mix, 'x', [])).toBe(1)
-    expect(sendMessage(mix, 'x', [5])).toBe(1)
   })
 
   test('签名方法（无 body）不烧录运行时行为，实现方法正常履职', async () => {
-    const result = await interpreter.interpret(`
+    const result = (await interpreter.interpret(`
         calc = {
             area: number,
             area { 42 }
         };
         calc
-    `)
-    // 签名方法只在类型层有用：元信息里只有实现方法一条
-    const meta = ObjectValue.metaOf(result)!
-    expect([...meta.keys()]).toEqual(['area'])
-    expect(meta.get('area')!.length).toBe(1)
-    expect(meta.get('area')![0].type).toBe('call')
+    `)) as Record<string, unknown>
+    // 签名方法只在类型层有用：运行期只有实现方法一条
+    expect(Object.keys(result)).toEqual(['area'])
     expect(sendMessage(result, 'area', [])).toBe(42)
   })
 
@@ -1150,7 +1152,7 @@ describe('ObjectValue 元信息反射', () => {
         calc = { area: number };
         calc
     `)
-    expect([...ObjectValue.metaOf(result)!.keys()]).toEqual([])
+    expect(Object.keys(result as object)).toEqual([])
     expect(() => sendMessage(result, 'area', [])).toThrow()
   })
 
@@ -1175,41 +1177,24 @@ describe('ObjectValue 元信息反射', () => {
     expect(sendMessage(result, 'count', [5, 6])).toBe(11)
   })
 
-  test('空对象 {} 是语言定义值，元信息为空 Map', async () => {
+  test('空对象 {} 是语言定义值，无自有成员', async () => {
     const result = await interpreter.interpret(`{}`)
-    const meta = ObjectValue.metaOf(result)
-    expect(meta instanceof Map).toBe(true)
-    expect(meta!.size).toBe(0)
+    expect(Object.keys(result as object)).toEqual([])
   })
 
-  test('lambda 仍是 JS 函数，不带元信息', async () => {
+  test('lambda 是 JS 函数，但不带 OOC_METHOD 标记', async () => {
     const result = await interpreter.interpret(`[x => x]`)
     expect(typeof result).toBe('function')
-    expect(ObjectValue.metaOf(result)).toBeUndefined()
+    expect((result as Record<symbol, unknown>)[OOC_METHOD]).toBeUndefined()
   })
 
-  test('宿主 JS 值（数组/字符串/数字）不是语言定义值', async () => {
-    const arr = await interpreter.interpret(`(Array of)`)
-    expect(ObjectValue.metaOf(arr)).toBeUndefined()
-    const str = await interpreter.interpret(`'x'`)
-    expect(ObjectValue.metaOf(str)).toBeUndefined()
-    const num = await interpreter.interpret(`3`)
-    expect(ObjectValue.metaOf(num)).toBeUndefined()
-  })
-
-  test('OOC 侧：ObjectValue 桥接对象可直接发消息', async () => {
-    const withBridge = createInterpretAction(EmptyFileSystem, { ObjectValue })
-    // metaOf 返回 Map：get 'a' 取同名定义列表（1 条）
-    const one = await withBridge.interpret(`
-        m = ObjectValue metaOf {a => 1, b => 2};
-        m get 'a' / length
-    `)
-    expect(one).toBe(1)
-    // lambda / 宿主值不是语言定义值，metaOf 返回 nil（undefined）
-    const fn = await withBridge.interpret(`ObjectValue metaOf [x => x]`)
-    expect(fn).toBeUndefined()
-    const host = await withBridge.interpret(`ObjectValue metaOf (Array of)`)
-    expect(host).toBeUndefined()
+  test('宿主 JS 值（数组/字符串/数字）不是语言定义对象', async () => {
+    const arr = (await interpreter.interpret(
+      `(Array of)`,
+    )) as Record<symbol, unknown>
+    expect(arr[OOC_METHOD]).toBeUndefined()
+    expect(await interpreter.interpret(`'x'`)).toBe('x')
+    expect(await interpreter.interpret(`3`)).toBe(3)
   })
 
   test('js send：薄原语动态派发', async () => {

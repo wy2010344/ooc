@@ -216,7 +216,7 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
 
   const body = [...bridges, ...bodyLines].join('\n')
   // 只 import 本模块真正用到的 runtime 辅助（不触发 example 的 noUnusedLocals）
-  const usedRuntime = ['__send', '__createObject', '__spread']
+  const usedRuntime = ['__send', '__createObject', '__spread', '__mutable']
     .map((name) =>
       new RegExp(`\\b${name}\\(`).test(bodyLines.join('\n')) ? name : null,
     )

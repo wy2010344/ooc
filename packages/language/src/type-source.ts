@@ -14,8 +14,8 @@ import type { TypeInfo } from './type-system.js'
  * 复用 collectConfigGlobals 管线解析，不引入新的解析路径。
  */
 
-/** 语言内置桥接的类型源：storage / js / ObjectValue / delegate / console（运行时实现见 interpreter/bridges.ts，console 是自由全局） */
-export const coreBridgeTypesSource = `// 语言内置桥接类型源（storage / js / ObjectValue / delegate / console）
+/** 语言内置桥接的类型源：storage / js / delegate / console（运行时实现见 interpreter/bridges.ts，console 是自由全局） */
+export const coreBridgeTypesSource = `// 语言内置桥接类型源（storage / js / delegate / console）
 // 运行时实现见 interpreter/bridges.ts，这里只声明类型（签名方法不落地）。
 Ref #type {
     get: any,
@@ -37,10 +37,6 @@ delegate = {
     withDefault(...all): any
 };
 
-ObjectValue = {
-    metaOf(value): any
-};
-
 console = {
     log(...args): any,
     error(...args): any
@@ -51,7 +47,6 @@ config = {
         storage = storage,
         js = js,
         delegate = delegate,
-        ObjectValue = ObjectValue,
         console = console
     }
 };
@@ -79,7 +74,7 @@ export function loadGlobalsTypesFromSource(
   return collectConfigGlobalsFromText(source, services ?? loadServices())
 }
 
-/** 语言内置桥接类型（storage/js/ObjectValue）的快捷 loader */
+/** 语言内置桥接类型（storage/js/delegate/console）的快捷 loader */
 export function coreBridgeGlobals(
   services?: LangiumCoreServices,
 ): Map<string, TypeInfo> | undefined {

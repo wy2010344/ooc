@@ -1,4 +1,4 @@
-import { emptyMap, groupToMap } from 'wy-helper'
+import { OOC_METHOD, literalOfBindBody, literalToValue } from '../member-kind.js'
 import {
   Expression,
   Method,
@@ -27,67 +27,14 @@ import { OocMethodNotFoundError } from './errors.js'
 /** 空对象单例：`{}` 字面量共享同一个实例 */
 const EMPTY_OBJECT: Record<string, unknown> = {}
 
-/**
- * 语言定义值的「元信息」承载符。宿主/桥接层（如 ObjectValue）用它判断值是否
- * OOC 定义对象并读取反射信息。Symbol 键不进 Object.keys/for...in，消息查找按
- * 字符串消息名也不会命中它——元信息对语言内发消息不可见，只能经桥接显式读取。
- */
-export const OOC_META = Symbol.for('ooc:meta')
-
-/** 对象元信息：只含本层定义，无继承。
- *  Map 键是消息名，值是成员定义（bind/mutable/call）列表——名字唯一，每个 key 只有一个成员，
- *  宿主可据 value 字段直接消费（bind 挂缓存值、mutable 挂委托对象、call 挂方法）。
- *  bind / mutable 为惰性值：value 是 getter，首次读取时求值 body 并缓存（bind 恒返构造值、
- *  mutable 为委托对象）；call 的 value 是方法本身，宿主不得擅自调用（可能有副作用）。 */
-/** bind / mutable 的惰性绑定：首次访问时求值 body 并缓存 */
+/** bind / mutable 的惰性绑定：首次访问时求值 body 并缓存（bind 恒返构造值、
+ *  mutable 为委托对象）。纯字面量 bind 不走这里——构造期直接写成数据属性。 */
 type LazyBind = {
   method: MethodBind | MethodBindMutable
   scope: Scope
   done: boolean
   value: unknown
 }
-
-export type OocMeta = Map<
-  string,
-  (
-    | {
-        type: 'bind'
-        name: string
-        lazy: LazyBind
-        readonly value: unknown
-      }
-    | {
-        type: 'mutable'
-        name: string
-        lazy: LazyBind
-        readonly value: unknown
-      }
-    | {
-        type: 'call'
-        name: string
-        value: MethodAll
-      }
-  )[]
->
-
-/** 读值上的元信息；非 OOC 定义值（lambda/宿主值/原始值）返回 undefined */
-export function readOocMeta(v: unknown): OocMeta | undefined {
-  if (v && typeof v == 'object') {
-    return (v as Record<symbol, unknown>)[OOC_META] as OocMeta | undefined
-  }
-  return undefined
-}
-
-/** 创建元信息：非枚举挂到对象上，构造时烧录、事后不可伪造 */
-function attachMeta(target: object, members: OocMeta): void {
-  Object.defineProperty(target, OOC_META, {
-    enumerable: false,
-    value: members,
-  })
-}
-
-// 空对象也烧录元信息：`{}` 同样是语言定义值（members 为空）
-attachMeta(EMPTY_OBJECT, emptyMap)
 
 // 定义值类型
 export type Value = number | string | boolean | null | OocObject
@@ -104,9 +51,6 @@ export function getObjDefineName(n: MethodDefName) {
   }
 }
 export type OocObject = object
-function getName(n: { name: string }) {
-  return n.name
-}
 
 /** 执行一个方法体：把参数（含 rest）绑进作用域后逐条求值表达式，返回最后一条的值。
  *  OOC 对象方法与原生 JS 函数型 lambda（见 evaluate.ts createLambdaValue）共用，
@@ -159,109 +103,80 @@ export function objectValue(methods: Method[], scope: Scope) {
     return EMPTY_OBJECT
   }
   // 直接新建普通对象 {}，保留 Object.prototype，JS 侧 toString/拼接等原生能力可用。
-  const obj = {}
-  const meta = groupToMap(
-    methods.map((method) => {
-      switch (method.$type) {
-        case 'MethodBind':
-          // 惰性求值：首次读这个 key 时才算，结果缓存（this 绑定到本对象）
-          return {
-            type: 'bind' as const,
-            name: getObjDefineName(method.name),
-            lazy: { method, scope, done: false, value: undefined as unknown },
-            // 宿主经 metaOf 读元信息时按需求值（getter 惰性，读它才绑定 this）
-            get value() {
-              return lazyValue(this as { lazy: LazyBind })
-            },
-          }
-        case 'MethodBindMutable':
-          // 转发属性同样惰性：首次发消息时求值委托对象并缓存
-          return {
-            type: 'mutable' as const,
-            name: getObjDefineName(method.name),
-            lazy: { method, scope, done: false, value: undefined as unknown },
-            get value() {
-              return lazyValue(this as { lazy: LazyBind })
-            },
-          }
-        default:
-          // 签名方法（无 body）是纯书写期类型契约，运行时无行为，不烧录
-          if (method.$type == 'MethodAll' && !method.body) {
-            return undefined
-          }
-          return {
-            type: 'call' as const,
-            name: getObjDefineName(method.name),
-            value: method,
-          }
-      }
-    }).filter((item) => item !== undefined),
-    getName,
-  )
-  // 惰性绑定：首次访问时求值 body 并缓存（多语句块的最后一条是值）
-  const lazyValue = (pair: {
-    lazy: LazyBind
-  }): unknown => {
-    if (pair.lazy.done) {
-      return pair.lazy.value
+  const obj: Record<string, unknown> = {}
+  // 计算绑定/mutable 的惰性求值：首次访问时求值 body 并缓存（this 绑定到本对象）
+  const lazyValue = (bind: LazyBind): unknown => {
+    if (bind.done) {
+      return bind.value
     }
-    const body = pair.lazy.method.bindBody
-    const s = addScope(pair.lazy.scope, 'this', obj)
-    pair.lazy.value = isBindBlock(body)
+    const body = bind.method.bindBody
+    const s = addScope(bind.scope, 'this', obj)
+    bind.value = isBindBlock(body)
       ? runBody(body.bindStmts, s)
       : interpretExpression(body.expression, s)
-    pair.lazy.done = true
-    return pair.lazy.value
+    bind.done = true
+    return bind.value
   }
-  attachMeta(obj, meta)
-  meta.forEach(function (methods, name) {
-    // 名字唯一（校验器保证）：每个 key 只有一个成员，直接派发，不再按参数数量匹配。
-    // bind 挂 getter（惰性求值一次缓存）；call 按成员形状分流——
-    // 零参无泛型（属性成员）挂 getter 读取即执行方法体（值可为 lambda，原样返回），
-    // 带参/泛型保持方法函数（d.ts 需渲染 f<T>() 可调用形态）；mutable 仍为转发函数。
-    const pair = methods[0]
-    if (pair.type === 'bind') {
-      Object.defineProperty(obj, name, {
-        enumerable: true,
-        get() {
-          return lazyValue(pair)
-        },
-      })
-      return
+  // 字面量绑定 → 数据属性（构造期求值一次，语义恒定）。定为只读：常量不因
+  // 发消息带参而被改写（与旧 getter 行为一致）。
+  const writeValue = (name: string, value: unknown) => {
+    Object.defineProperty(obj, name, {
+      enumerable: true,
+      writable: false,
+      value,
+    })
+  }
+  // 方法属性 + OOC_METHOD 标记（宿主据此区分「方法」与「lambda 值」）
+  const writeMethod = (name: string, fn: (...args: unknown[]) => unknown) => {
+    Object.defineProperty(fn, OOC_METHOD, { value: true })
+    Object.defineProperty(obj, name, { enumerable: true, value: fn })
+  }
+  for (const method of methods) {
+    const name = getObjDefineName(method.name)
+    // 同名成员派发取首个定义（唯一性由校验器保证）：已挂载的名字跳过后续定义，
+    // 否则 defineProperty 会因不可重定义而抛错。签名方法（无 body）不挂载，
+    // 故不会挡住同名的实现方法。
+    if (name === undefined || Object.prototype.hasOwnProperty.call(obj, name)) {
+      continue
     }
-    if (pair.type === 'call') {
-      const method = pair.value
-      if (
-        method.params.length === 0 &&
-        !method.restParam &&
-        method.typeParams.length === 0
-      ) {
+    switch (method.$type) {
+      case 'MethodBind': {
+        // 纯字面量绑定 → 构造期求值一次写成数据属性；计算绑定 → getter 惰性一次缓存
+        const lit = literalOfBindBody(method.bindBody)
+        if (lit) {
+          writeValue(name, literalToValue(lit))
+          break
+        }
+        const bind: LazyBind = { method, scope, done: false, value: undefined }
         Object.defineProperty(obj, name, {
           enumerable: true,
           get() {
-            return runGuardedBody(method, scope, this, [])
+            return lazyValue(bind)
           },
         })
-        return
+        break
       }
-      Object.defineProperty(obj, name, {
-        enumerable: true,
-        value() {
-          const args = Array.from(arguments) as unknown[]
-          return runGuardedBody(method, scope, this, args)
-        },
-      })
-      return
+      case 'MethodBindMutable': {
+        // 转发属性：本 key 上的一切消息原样转发给委托对象的 apply
+        //（消息名不传给 apply，只传实参），委托对象惰性求值一次缓存。
+        const bind: LazyBind = { method, scope, done: false, value: undefined }
+        writeMethod(name, function (this: unknown) {
+          return sendMessage(lazyValue(bind), 'apply', Array.from(arguments))
+        })
+        break
+      }
+      default: {
+        // 签名方法（无 body）是纯书写期类型契约，运行时无行为，不烧录
+        if (method.$type === 'MethodAll' && !method.body) {
+          break
+        }
+        const m = method as MethodAll
+        writeMethod(name, function (this: unknown) {
+          return runGuardedBody(m, scope, this, Array.from(arguments))
+        })
+      }
     }
-    Object.defineProperty(obj, name, {
-      enumerable: true,
-      value() {
-        // mutable 转发属性：本 key 上的一切消息原样转发给委托对象的 apply
-        //（消息名不传给 apply，只传实参）。
-        return sendMessage(lazyValue(pair), 'apply', Array.from(arguments))
-      },
-    })
-  })
+  }
   return obj
 }
 
@@ -364,10 +279,12 @@ export function sendMessage(o: any, value: string, args: any[]): any {
       return desc.get ? desc.get.call(o) : undefined
     }
     if (typeof desc.value === 'function') {
+      // 数据函数＝OOC 方法（带 OOC_METHOD 标记）或宿主方法 → 调用。lambda 值不会
+      // 以数据属性出现（绑定里的 lambda 走 getter），故这里 apply 对两者都安全。
       return desc.value.apply(o, args)
     }
-    // 数据非函数属性：带参写入，否则读取（宿主对象语义）
-    if (args.length) {
+    // 数据非函数属性：带参且可写才写入，否则读取（常量/只读属性忽略实参）
+    if (args.length && desc.writable) {
       o[value] = args[0]
     }
     return o[value]

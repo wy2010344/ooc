@@ -255,7 +255,7 @@ arr = Array of 1 2 3;
   }
 })
 
-test('lambda 保留：零参属性成员返回 lambda 本体，__send 读取不二次 apply', async (t) => {
+test('lambda 保留：成员返回 lambda 本体，读取不二次 apply', async (t) => {
   const { ts: tsPath, dir } = await compileSource('lam', `
 obj = { handler => [x => x + 1], inc = [x => x + 2] };
 obj
@@ -271,7 +271,28 @@ obj
   const inc = rt.__send(mod.default, 'inc', [])
   if (typeof inc !== 'function') throw new Error('inc 应为 lambda 函数本体')
   if (rt.__send(inc, 'apply', [41]) !== 43) throw new Error('apply 显式调用应得 43')
-  // JS 直读也是 lambda 本体
-  if (typeof mod.default.handler !== 'function') throw new Error('JS 直读应为函数本体')
-  if (mod.default.handler(1) !== 2) throw new Error('JS 直调 lambda 应得 2')
+  // JS 直读：bind 成员（getter）是 lambda 本体；零参 call 成员是方法本体（调用才执行）
+  if (typeof mod.default.inc !== 'function') throw new Error('JS 直读 inc 应为 lambda 本体')
+  if (mod.default.inc(41) !== 43) throw new Error('JS 直调 inc lambda 应得 43')
+  const viaMethod = mod.default.handler()
+  if (typeof viaMethod !== 'function') throw new Error('handler 调用应返回 lambda 本体')
+  if (viaMethod(1) !== 2) throw new Error('返回的 lambda 直调应得 2')
+})
+
+test('转发属性 <=：编译成 __mutable 转发器，消息原样转发给委托 apply', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('fwd', `
+delegate = { apply(a, b) => a + b };
+obj = { count <= delegate };
+obj
+`)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  const rt = await loadRuntime(dir)
+  // count 是转发属性：发消息 -> 委托对象 apply(3, 4) = 7
+  if (rt.__send(mod.default, 'count', [3, 4]) !== 7) {
+    throw new Error('<= 应把消息转发给委托对象的 apply')
+  }
+  if (rt.__send(mod.default, 'count', [5, 6]) !== 11) {
+    throw new Error('<= 委托对象惰性求值一次后持续可用')
+  }
 })

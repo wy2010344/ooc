@@ -2,6 +2,21 @@
 // PiplingExpression 按 right 类型分派（级联 '/'、管道 '|'、中缀）。所有消息统一走 __send。
 import type { Expression, Message, Primary } from 'object-oriented-c-language'
 import { isTypeRef } from './util.js'
+import { literalOfBindBody, type PrimitiveLiteral } from 'object-oriented-c-language'
+
+/** 纯字面量 → TS 代码（绑定数据属性值） */
+function literalCode(lit: PrimitiveLiteral): string {
+  switch (lit.kind) {
+    case 'str':
+      return JSON.stringify(lit.value)
+    case 'num':
+      return String(lit.value)
+    case 'bool':
+      return lit.value ? 'true' : 'false'
+    case 'nil':
+      return 'null'
+  }
+}
 
 function primaryCode(p: Primary): string {
   switch (p.$type) {
@@ -156,16 +171,29 @@ export function objectDefCode(obj: any): string {
 function methodCode(m: any): string | null {
   const name = methodName(m.name)
   switch (m.$type) {
-    // bind / mutable 是惰性绑定：编译成 thunk（首次调用求值并缓存），
-    // 值可以是单表达式或 @{ 多条语句 } 块（块内可局部赋值、最后一条是值）。
-    case 'MethodBind':
-    case 'MethodBindMutable': {
-      const type = m.$type === 'MethodBind' ? 'bind' : 'mutable'
+    // 绑定：纯字面量 → 数据属性值（构造期求值一次）；计算式 → thunk（首次求值并
+    // 缓存，getter）。计算式可为单表达式或 @{ 多条语句 } 块。
+    case 'MethodBind': {
+      const lit = literalOfBindBody(m.bindBody)
+      if (lit) {
+        return `{ type: 'value', name: ${JSON.stringify(name)}, value: ${literalCode(lit)} }`
+      }
       const body = m.bindBody
-      const fn = body && body.$type === 'BindBlock'
-        ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
-        : `function(){ return ${expressionCode(body.expression)} }`
-      return `{ type: '${type}', name: ${JSON.stringify(name)}, fn: ${fn} }`
+      const fn =
+        body && body.$type === 'BindBlock'
+          ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
+          : `function(){ return ${expressionCode(body.expression)} }`
+      return `{ type: 'bind', name: ${JSON.stringify(name)}, fn: ${fn} }`
+    }
+    // 转发属性 <=：__mutable(getDelegate) 惰性求值委托对象一次并缓存，之后本 key
+    // 上的一切消息原样转发给委托对象的 apply（消息名不传，只传实参）。
+    case 'MethodBindMutable': {
+      const body = m.bindBody
+      const delegate =
+        body && body.$type === 'BindBlock'
+          ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
+          : `function(){ return ${expressionCode(body.expression)} }`
+      return `{ type: 'mutable', name: ${JSON.stringify(name)}, fn: __mutable(${delegate}) }`
     }
     default: {
       const body = m.body
@@ -174,16 +202,12 @@ function methodCode(m: any): string | null {
       // #guard 分支链（preBranch 是 else 兜底，guardBranches 顺序判别）编译成
       // if / else if / else 链，命中块执行完即 return
       const guards = body.guardBranches ?? []
-      const fn = guards.length > 0
-        ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
-        : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
-      // 零参无泛型 = 属性成员：__createObject 挂 getter 读取即执行（判据同解释器，
-      // 不能用 fn.length——rest 参数会误判）
-      const prop =
-        (m.params?.length ?? 0) === 0 &&
-        !m.restParam &&
-        (m.typeParams?.length ?? 0) === 0
-      return `{ type: 'call', name: ${JSON.stringify(name)}${prop ? ', prop: true' : ''}, fn: ${fn} }`
+      const fn =
+        guards.length > 0
+          ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
+          : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
+      // 零参/带参统一为方法函数（数据函数 + 运行时打 OOC_METHOD 标记）
+      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn} }`
     }
   }
 }

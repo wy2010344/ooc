@@ -15,7 +15,6 @@ const ALL_NAMES = [
   'storage',
   'js',
   'delegate',
-  'ObjectValue',
   'console',
   // ooc-mve-bridge 视图层
   'dom',

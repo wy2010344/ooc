@@ -17,31 +17,7 @@ import type { ValidationAcceptor } from 'langium'
 import type { Method } from './generated/ast.js'
 import { extractMethodDefName } from './completion-type-utils.js'
 import { diagnosticData } from './diagnostics-config.js'
-
-/** 纯原始字面量 → 建议的 '=' 右侧写法文本（用于错误消息给出可直接替换的改写） */
-function literalText(node: unknown): string | undefined {
-  const n = node as { $type?: string; value?: unknown } | undefined
-  switch (n?.$type) {
-    case 'Str':
-      return `'${String(n.value)}'`
-    case 'Num':
-      return String(n.value)
-    case 'Bool':
-      return String(n.value)
-    case 'Nil':
-      return 'nil'
-    default:
-      return undefined
-  }
-}
-
-/** 语句位的表达式剥包：只认「无消息的 MessageOrChain → 纯字面量」，其余保守放过 */
-function literalOf(stmt: unknown): string | undefined {
-  const s = stmt as { $type?: string; message?: unknown; primary?: unknown } | undefined
-  if (s?.$type !== 'MessageOrChain') return undefined
-  if (s.message) return undefined // 有消息调用，不是纯常量
-  return literalText(s.primary)
-}
+import { literalOfExpression, literalToText } from './member-kind.js'
 
 /** 零参成员只返回纯字面量 → error：改用 '=' 常量绑定 */
 export function checkConstMethodBodies(
@@ -58,13 +34,13 @@ export function checkConstMethodBodies(
     if (body.guardBranches?.length || body.elseBranch) continue // 有分支逻辑
     const stmts = body.stmts ?? []
     if (stmts.length !== 1) continue // 多语句：不是「只返回常量」
-    const lit = literalOf(stmts[0])
+    const lit = literalOfExpression(stmts[0])
     if (lit === undefined) continue
     const name = extractMethodDefName(method.name)
     if (!name) continue
     accept(
       'error',
-      `零参成员 '${name}' 只返回常量，应使用 '=' 常量绑定：${name} = ${lit}`,
+      `零参成员 '${name}' 只返回常量，应使用 '=' 常量绑定：${name} = ${literalToText(lit)}`,
       {
         node: method,
         property: 'name',

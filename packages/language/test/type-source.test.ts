@@ -49,7 +49,7 @@ interface MethodsOwner {
 }
 
 describe('loadGlobalsTypesFromSource', () => {
-  test('language 内置类型源：storage/js/delegate/ObjectValue/console 全部解析出来', () => {
+  test('language 内置类型源：storage/js/delegate/console 全部解析出来', () => {
     const globals = loadGlobalsTypesFromSource(coreBridgeTypesSource)
     expect(globals).toBeTypeOf('object')
     const storage = globals!.get('storage') as MethodsOwner
@@ -58,7 +58,7 @@ describe('loadGlobalsTypesFromSource', () => {
     expect(storage.methods.get('ref')?.[0].returns?.name).toBe('Ref')
     expect(globals!.has('js')).toBe(true)
     expect(globals!.has('delegate')).toBe(true)
-    expect(globals!.has('ObjectValue')).toBe(true)
+    expect(globals!.has('ObjectValue')).toBe(false)
     expect(globals!.has('console')).toBe(true)
   })
 

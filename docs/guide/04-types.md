@@ -23,7 +23,7 @@ Value: Number | string
 
 ## 字面量类型与可区分联合
 
-字面量类型（`'circle'` / `42` / `true`）是 TS 风格可区分联合的基础：对象类型的判别成员（零参属性，如 `kind`）声明返回字面量，联合成员按判别收窄。typedef 里零参成员渲染为**属性形态**（`kind: 'circle'`，与 TS 判别字段一致），`.ts` 产物里的 `export type` 同样是属性直读。
+字面量类型（`'circle'` / `42` / `true`）是 TS 风格可区分联合的基础：对象类型的判别成员（如 `kind`）声明为字面量类型字段，联合成员按判别收窄。typedef 里成员渲染为**属性形态**（`kind: 'circle'`，与 TS 判别字段一致），`.ts` 产物里的 `export type` 同样是属性直读；运行期对象用常量绑定实现（`kind = 'circle'`）。
 
 ```ooc
 Circle #type { kind: 'circle', radius: number };
