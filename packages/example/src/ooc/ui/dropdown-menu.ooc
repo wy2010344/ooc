@@ -33,7 +33,9 @@ DropdownMenu = [props, ...children =>
         (floating $ {
                 reference = [ref],
                 placement = place,
-                className = cls
+                className = cls,
+                onDismiss = [close $],
+                dismissIgnore = [ref]
             } ...children) $ ctx
     ];
     lastClose set c;

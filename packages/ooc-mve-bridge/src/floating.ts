@@ -23,6 +23,10 @@ export interface FloatingProps {
   offset?: number
   /** 弹层最小宽度跟随参照元素（Select 用） */
   matchWidth?: boolean
+  /** 点外部 / Esc 时回调（菜单、Select 用）；弹层销毁时自动解绑 */
+  onDismiss?: () => void
+  /** dismiss 时忽略的元素（触发按钮：点它不该先关再被自身 click 重开） */
+  dismissIgnore?: () => Element | null | undefined
   className?: string | (() => string)
 }
 
@@ -67,6 +71,25 @@ export function floating(props: FloatingProps, ...children: DComponent[]) {
     node.style.position = 'absolute'
     node.style.left = '0px'
     node.style.top = '0px'
+
+    // 点外部 / Esc 关闭：注册在 document 上，先于打开事件之后生效（打开手势的 pointerdown 早已派发完）
+    const onDismiss = props.onDismiss
+    if (onDismiss) {
+      const onDown = (e: PointerEvent) => {
+        const t = e.target as Node | null
+        if (t && (node.contains(t) || props.dismissIgnore?.()?.contains(t))) return
+        onDismiss()
+      }
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onDismiss()
+      }
+      document.addEventListener('pointerdown', onDown)
+      document.addEventListener('keydown', onKey)
+      ctx?.addDestroy(() => {
+        document.removeEventListener('pointerdown', onDown)
+        document.removeEventListener('keydown', onKey)
+      })
+    }
 
     const ref = resolveReference(props)
     if (!ref) {

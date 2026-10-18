@@ -38,7 +38,8 @@ Select = fc $ [ctx, props =>
 
     closeNow = {
         $ {
-            #guard (open $);
+            // 注意：连写的 #guard 是 if / else-if（命中即返回），所以「置 false」必须写在 #guard 之前，
+            // 否则开着的状态下第一条命中就返回，pop 永远不会被关掉。
             open $ false;
             #guard (closeRef $);
             c = (closeRef $);
@@ -52,7 +53,9 @@ Select = fc $ [ctx, props =>
                 reference = [(triggerEl $)],
                 placement = 'bottom-start',
                 matchWidth = true,
-                className = '${selectContentBase} ${p className}'
+                className = '${selectContentBase} ${p className}',
+                onDismiss = [closeNow $],
+                dismissIgnore = [(triggerEl $)]
             }
                 (forEach $ {
                     forEach(block){ (p options) forEach [o, i => block $ (o value) o] },

@@ -32,7 +32,8 @@ ContextMenu = [props, ...children =>
         ctx provide CtxMenuCtx { close { close $ } };
         (floating $ {
                 point = [{ x = px, y = py }],
-                className = cls
+                className = cls,
+                onDismiss = [close $]
             } ...children) $ ctx
     ];
     lastClose set c;
