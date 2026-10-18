@@ -21,6 +21,10 @@ Ref #type {
     update(fn): any
 };
 
+Callable #type {
+    $(...args): any
+};
+
 dom = {
     div(props): Component => js any,
     span(props): Component => js any,
@@ -41,36 +45,40 @@ dom = {
 };
 
 text = {
-    apply(content): Component => js any,
+    $(content): Component => js any,
     bind(content): Component => js any
 };
 
 html = {
-    apply(source): Component => js any
+    $(source): Component => js any
 };
 
 fc = {
-    apply(fn): Component => js any
+    $(fn): Component => js any
 };
 
 forEach = {
-    apply(region): Component => js any
+    $(region): Component => js any
 };
 
 createSignal = {
-    apply(initial): Signal => js any
+    $(initial): Signal => js any
+};
+
+multiBind = {
+    $(holder): Callable => js any
 };
 
 memo = {
-    apply(fn): Signal => js any
+    $(fn): Signal => js any
 };
 
 addEffect = {
-    apply(fn): any => js any
+    $(fn): any => js any
 };
 
 createContext = {
-    apply(...args): any => js any
+    $(...args): any => js any
 };
 
 storage = {
@@ -93,6 +101,7 @@ config = {
         fc = fc,
         forEach = forEach,
         createSignal = createSignal,
+        multiBind = multiBind,
         memo = memo,
         addEffect = addEffect,
         createContext = createContext,

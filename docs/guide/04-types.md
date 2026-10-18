@@ -146,11 +146,11 @@ b: Box<number> = { get = 42, set(x) { x + 1 } }
 方法调用的实参里如果直接写匿名对象或 lambda，且被调用方法的对应参数是对象类型（回调），实参内的参数也会按回调签名自动回填：
 
 ```ooc
-Callback #type { apply(x: number) };
+Callback #type { $(x: number) };
 Processor #type { run(cb: Callback) };
 
-p: Processor = { run(cb) { cb apply 1 } };
-p run { apply(x) { x * 2 } }   // 匿名回调对象：x 自动是 number
+p: Processor = { run(cb) { cb $ 1 } };
+p run { $(x) { x * 2 } }   // 匿名回调对象：x 自动是 number
 p run [x => x + 1]             // lambda 回调：x 自动是 number
 ```
 

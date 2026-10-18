@@ -38,7 +38,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 - **对象 =「名字 → 行为」的映射**——没有属性与方法的二元；`=` 缓存绑定、`<=` 可变带参、方法体，都是落在名字上的同一种东西。
 - **消息发送是唯一动词**；一切选择都只在消息圈里发生。
 - **`#guard` = 方法体内的条件分支**：逐条 `#guard cond; 语句` 判别，命中即执行该段并返回；全不命中落入 `#else; 语句`（无 `#else` 则返回 nil）。`#guard` 之前的语句先执行（赋值进作用域、表达式求值），条件与分支引用它们。它不是同名重载，一个名字只有一个成员。
-- **lambda = 只有一个 `apply` 方法的匿名对象**（语法糖，同像）。
+- **lambda = 只有一个 `$` 方法的匿名对象**（语法糖，同像）。
 - **类型注解 = 书写期装饰**：只服务 LSP 的诊断/补全/重构，解释器运行时完全无视——duck typing 是本义，不是妥协。运行与类型检查是两条独立分支（见下）。
 
 **演进自查闸门**：一切新语法必须能按规则翻译成上述元的组合（即「缩写」）。若某个想法无法翻译——编译器的类型驱动、多层类继承、注解携带运行行为——它不是缩写而是**新引擎**，立项前必须论证「非它不可」，否则一律缓做、宁缺毋滥。判断方法：遇到「这样更好写」的冲动时，先把新写法翻译回元语言看它是不是同一件事的另一个名字。
@@ -46,21 +46,21 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 已知诱惑清单（讨论过、暂缓）：
 
 - **参数类型「自动守卫」**：本质是 `#guard (值 typeof 基础类型)` 的缩写，可选；代价是「类型注解开始携带运行行为」，从此持续拉向静态型语言的引力，得不偿失，缓做。
-- **重新引入继承（classExtend / `{ ...base }` 原型合并）**：对象继承已整体移除——「路由、层、链」塞进最简的元，与 guard 路由耦合引出大量角落语义。复用与兜底交给 `withDefault` 委托（宿主端 delegate 全局：spec 优先，未知消息按链转发到 defaults），够用，不做。
+- **重新引入继承（classExtend / `{ ...base }` 原型合并）**：对象继承已整体移除——「路由、层、链」塞进最简的元，与 guard 路由耦合引出大量角落语义。复用与兜底交给 `merge` 委托（宿主端 merge 全局：前面对象优先，未知消息按链转发到 defaults），够用，不做。
 
 ## 架构要点
 
 - **语法**：`packages/language/src/object-oriented-c.langium`。改语法后用 `langium:generate` 重新生成 AST。
 - **运行时 = 原生 JS 对象**（`interpreter/runtime.ts`）：
   - `{ ... }` 编译为普通 JS 对象。对象成员按形状分流：`=` 常量绑定——**纯字面量**（str/num/bool/nil）直接写数据属性（构造期写值一次），**计算式**是 getter（惰性求值一次并缓存）；`=> expr`（MethodAll 单行）与 `{ ... }` 方法体都是**方法**——编译成带内部标记（`OOC_METHOD`）的数据函数，每次**调用**执行（零参成员也是方法：发消息 `obj m` 才执行，JS 直读 `obj.m` 拿到函数本体）；方法体返回函数值（lambda）时原样返回、绝不隐式调用。因此「跟随信号、事件」等属性必须写 `=>`；**纯字面量常量必须写 `=`**（零参方法体只返回 str/num/bool/nil 时写 `{ 'x' }` / `=> 'x'` 会被 validator 以 `constMethodBody` 报 error——绑定一次缓存更省，宿主也才能按「数据属性＝常量、标记函数＝方法」准确分流）。带 typeParams 的零参方法同样是方法函数（d.ts 渲染 `f<T>()`，TS 属性不能泛型）。
-  - **对象无继承**（已移除原型链，`{ ... }` 只烧录自己的成员）。复用走 `withDefault`（宿主端 delegate 全局：把 parts 展平成链、包兜底 Proxy，spec 的方法优先，未知消息按链转发到 defaults）。**没有 methodNotFound 魔法**：语言不认这个名字；要拦截未知消息就显式包兜底 Proxy——OOC 侧 `js proxy 对象 (name, ...args => 转发)`，宿主侧 `proxyCatchAll(target, handler)`，get trap 把未命中的消息交给 `handler(name, ...args)`（this 绑定原对象）；没包的对象发未知消息直接抛 `OocMethodNotFoundError`。currentScope 伪对象同样由 Proxy 实现。
+  - **对象无继承**（已移除原型链，`{ ... }` 只烧录自己的成员）。复用走 `merge`（宿主端 merge 全局：把 parts 展平成链、包兜底 Proxy，前面对象的方法优先，未知消息按链转发到 defaults）。**没有 methodNotFound 魔法**：语言不认这个名字；要拦截未知消息就显式包兜底 Proxy——OOC 侧 `js proxy 对象 (name, ...args => 转发)`，宿主侧 `proxyCatchAll(target, handler)`，get trap 把未命中的消息交给 `handler(name, ...args)`（this 绑定原对象）；没包的对象发未知消息直接抛 `OocMethodNotFoundError`。currentScope 伪对象同样由 Proxy 实现。
   - **签名方法（无 body）**：`area(radius: number): number;` 这种**没有函数体**的方法是纯类型契约——运行时不烧录（签名只作类型层契约），调用落在实现方法（有 body 的那个）上；签名必须声明返回类型；签名之间返回类型不同不告警（TS 式豁免）。改全局 AST 遍历时，方法体字段在 `MethodAll.body`（MethodBody 上），不是 `method.expressions`。
   - 方法体内 `this` 就是**接收消息的对象**（receiver）；`#guard` 是方法体内的分支链（if/else-if/else），与方法派发无关——同层不存在同名重载，一个名字只对应一个成员。
-  - 消息派发顺序（`sendMessage`/`__send`）：**own descriptor 优先**——访问器（getter/setter）单次读取、结果原样返回（函数值也不二次 apply，lambda 保留语义）；数据函数按方法 apply；数据属性带参写/无参读 → 无 own descriptor 再走回退链：原型链方法/`o?.[value]` 函数 apply → `value in o` 读写 → `numDef` → `objectDefine` → 抛「没有定义该方法」。兜底转发不在派发链里——在包了兜底 Proxy 的对象上，未知消息由 get trap 在派发前截走。
+  - 消息派发顺序（`sendMessage`/`__send`）：**own descriptor 优先**——访问器（getter/setter）单次读取、结果原样返回（函数值也不二次调用，lambda 保留语义）；数据函数按方法调用；数据属性带参写/无参读 → 无 own descriptor 再走回退链：原型链方法/`o?.[value]` 函数调用 → `value in o` 读写 → `numDef` → `objectDefine` → 抛「没有定义该方法」。兜底转发不在派发链里——在包了兜底 Proxy 的对象上，未知消息由 get trap 在派发前截走。
   - **类型注解纯装饰**：`type-checker.ts`（~1400 行）实现联合类型、字面量、可区分联合 guard 收窄、泛型实例化、上下文类型回填。**方法体内 `#guard` 分支链按同一参数判别时做覆盖枚举**（缺联合成员报 `unionUncovered`：无 `#else` 兜底是 error、有则 warning；判别分支之间返回类型豁免一致性；分支按 else-if 链在「前序条件为假」的基准上收窄）；联合实参调用返回分支聚合类型。**类型检查与运行是独立分支**：解释器（`interpreter/host.ts` 的 `createInterpretAction`）从不因类型诊断而中断，只拦语法错误；类型检查走 IDE/LSP 校验，或 `interpreter/host.ts` 的 `createTypeCheckAction`（CLI `type-check` 指令用）。
 - **模块**：`.ooc` 文件最后一条表达式是导出值；`#import` 相对路径解析（`module-path.ts` 纯字符串实现，Node/浏览器一致）；**包引用**用 `'@name'` / `'@name/sub'` 前缀 → 解析为 `/ooc-pkg/<name>/<file>`（`@name` 默认取 `ooc.json` 的 `entry`，即 `index.ooc`），由 `package-fs.ts` 的包感知 FileSystemProvider 重定向到 `.ooc_modules/` 真实目录（CLI `ooc install` 负责安装）——base 标准库即经此发布（`@base/loop` 等）。
-- **运算符无优先级**（左结合、同优先级），需要先算就加括号；`//` 是注释不是除法，除法用消息形式：`12 div 3`；`/` 是级联符。级联/管道可消括号：`(x at i)` 可写 `x/ at i`（`/` 是独立 token，无空格连写也合法）；管道 `v | f apply` 把 `v` 作为 `f` 的首参插入（thread-first），等价 `f apply v`——右侧必须是一条消息链，单消息要写 `| f apply`；`v | p -> 表达式`（NamedExpression）把 `v` 绑到参数 `p`。**级联 + 管道可以在同一个表达式里**（左嵌套：`x = a b/ c|f apply` ⇔ `f apply ((a b) c)`）。要小心的其实是「无括号实参」：实参列表按空格拆成多个 Primary，`text bind et value/ done|statusOf apply` 里 `et`、`value` 会被当成两个实参，`value` 变成裸标识符去作用域查找 → 报 `not found define for value`；应把整条管道表达式用括号包住作单个实参：`text bind (et value/ done|statusOf apply)`。
-- **数组直接用 JS 生态**：`Array` 是 globalThis 全局对象，`(Array of)` 造普通数组（含空数组）；不可变改数据用数组原生 `toSpliced`：`arr / toSpliced 1 0 {...}`（返回新数组，旧数组不动）。playground 还有：`text bind <值/λ>` 派生文本（读到的信号一变就原地重写节点，适合纯文本派生）；列表级重建用区域组件 `forEach apply {...}`（内部走 Ctx.renderForEach，无需自取 ctx）；**受控输入**：`dom input value => 只读 λ`（显示值，λ 读信号自动跟随）+ `onValueChange(v) => 信号 set v`（受控写回——onValueChange 是**带参方法**，宿主把输入框新值作为第一个参数传入，成员体直接引用参数名 v，像 onClick 一样干净）。读当前输入直接 `signal get`，不再 `ui get '选择器'` 去 querySelector 强读（textarea/select 的 value、input 的 checked 同理，checked 是单向显示，勾选状态翻转用 onClick 驱动信号）。
+- **运算符无优先级**（左结合、同优先级），需要先算就加括号；`//` 是注释不是除法，除法用消息形式：`12 div 3`；`/` 是级联符。级联/管道可消括号：`(x at i)` 可写 `x/ at i`（`/` 是独立 token，无空格连写也合法）；管道 `v | f $` 把 `v` 作为 `f` 的首参插入（thread-first），等价 `f $ v`——右侧必须是一条消息链，单消息要写 `| f $`；`v | p -> 表达式`（NamedExpression）把 `v` 绑到参数 `p`。**级联 + 管道可以在同一个表达式里**（左嵌套：`x = a b/ c|f $` ⇔ `f $ ((a b) c)`）。要小心的其实是「无括号实参」：实参列表按空格拆成多个 Primary，`text bind et value/ done|statusOf $` 里 `et`、`value` 会被当成两个实参，`value` 变成裸标识符去作用域查找 → 报 `not found define for value`；应把整条管道表达式用括号包住作单个实参：`text bind (et value/ done|statusOf $)`。**`$` 也是中缀运算符**（同加减乘除、左结合）：消息链后直接接 `$` 即直接调用，无需前置 `/`（`close get $ false` ≡ `close get / $ false`），右侧接 0~N 个实参（可省：`x get $` 零参；`h get $ 1 2 3` 三参）。
+- **数组直接用 JS 生态**：`Array` 是 globalThis 全局对象，`(Array of)` 造普通数组（含空数组）；不可变改数据用数组原生 `toSpliced`：`arr / toSpliced 1 0 {...}`（返回新数组，旧数组不动）。playground 还有：`text bind <值/λ>` 派生文本（读到的信号一变就原地重写节点，适合纯文本派生）；列表级重建用区域组件 `forEach $ {...}`（内部走 Ctx.renderForEach，无需自取 ctx）；**受控输入**：`dom input value => 只读 λ`（显示值，λ 读信号自动跟随）+ `onValueChange(v) => 信号 set v`（受控写回——onValueChange 是**带参方法**，宿主把输入框新值作为第一个参数传入，成员体直接引用参数名 v，像 onClick 一样干净）。读当前输入直接 `signal get`，不再 `ui get '选择器'` 去 querySelector 强读（textarea/select 的 value、input 的 checked 同理，checked 是单向显示，勾选状态翻转用 onClick 驱动信号）。
 - **作用域**：`KVPair` 链式作用域；未定义标识符回退到 `globalThis`（浏览器/Node 通用），因此能裸用 `Math`、`Object`。
 
 ## 常用任务
@@ -70,7 +70,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 - **加内置运算符** → `library/num.ts` 或 `library/object.ts` 加方法，同步 `type-system.ts` 的 `builtinMethods` 签名
 - **加诊断规则** → `type-checker.ts` 中 `accept('warning', ..., data: diagnosticData(code))`，code 注册进 `diagnostics-config.ts` 的 `DIAGNOSTIC_CODES`
 - **跑类型检查** → IDE 里由 LSP 实时校验；命令行用 `ooc type-check <file>`（返回诊断，有 error 级则 exit 1）
-- **浏览器运行** → 用 `EmptyFileSystem`；Node 读文件/`#import` 用 `NodeFileSystem`。宿主桥接对象 `storage`（可变 cell）、`js`（`throw` 抛错 / `new` 实例化 JS 类 / `fn` 把 OOC lambda 包装成真 JS 函数）由语言包导出（`interpreter/bridges.ts`），浏览器 demo（`main.ts`）与 `test/examples.test.ts` 共用同一份；`loop`（`apply`=遵守真值的 while、`repeat`=恰好 n 次）是 base 包 OOC 实现（`#import '@base/loop'`），不再桥接。`console`、`Math` 等 JS 全局走 `globalThis` 回退，无需注入。宿主侧调用 lambda 直接当 JS 函数调用（lambda 就是真 JS 函数，`sendMessage` 对函数接收者的 `apply` 消息特判为直接调用；`fn(x)` 或 `fn apply x` 皆可）。
+- **浏览器运行** → 用 `EmptyFileSystem`；Node 读文件/`#import` 用 `NodeFileSystem`。宿主桥接对象 `storage`（可变 cell）、`js`（`throw` 抛错 / `new` 实例化 JS 类 / `fn` 把 OOC lambda 包装成真 JS 函数）由语言包导出（`interpreter/bridges.ts`），浏览器 demo（`main.ts`）与 `test/examples.test.ts` 共用同一份；`loop`（`$`=遵守真值的 while、`repeat`=恰好 n 次）是 base 包 OOC 实现（`#import '@base/loop'`），不再桥接。`console`、`Math` 等 JS 全局走 `globalThis` 回退，无需注入。宿主侧调用 lambda 直接当 JS 函数调用（lambda 就是真 JS 函数，`sendMessage` 对函数接收者的 `$` 调用特判为直接调用；`fn(x)` 或 `fn $ x` 皆可）。
 - **编译给打包器** → `ooc build <entry> -o <dir>` / `ooc compile <file> -d <dir>` 把整棵 `.ooc` 依赖图编译成**纯 ES 模块**（`cli/src/tsgen/esm.ts`，两命令同一套产物）：所有顶层声明都 `export`、`#import` 编译成与 TS import 等价的真 ES import、模块在 ES 导入时按依赖顺序自动执行，产物与源码几乎一一对应；typedef 以 `export type` 进产物（不旁挂 `.d.ts`——TS 解析同名 `.ts` 优先）。共享产物只有 `_ooc_runtime.ts`（`__send`/`__createObject`，按需 import）。**宿主依赖没有特殊待遇**：视图/信号/storage 等就是普通 TS 模块，OOC 侧 `#import { dom, createSignal } './bridge.ts'` 显式导入（`.ts` 依赖不解析不产码，类型导入走 `import type`、值走真 ESM named import 指向源文件；`@pkg` 与无扩展名相对路径都支持 `.ooc`→`.ts` 回退）；浏览器全局（window/document/console）本来就是自由标识符，无需注入。**globals 注入已在 codegen 侧移除**（`_ooc_globals.ts`/`virtual:ooc-globals`/`__globalsOf`/`--globals` 全删）；解释器路径（`createInterpretAction`、playground 笔记本）暂留「宿主对象注入」这套运行时 API，OOC demo 源码里仍是裸名。vite 走 `vite-plugin-ooc`（无磁盘中间产物）。
 
 ## 注意
@@ -78,6 +78,6 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 - **除法键只有 `div`**（`12 div 3`）；`'/'` 已从 number 方法表移除（`/` 是级联符），`//` 是单行注释（`SL_COMMENT`），`MessageInfixRight` 不再声明 `'//'` 中缀。
 - **事件属性必须 `=>`**：`=` 在对象构造时求值一次，事件写成 `onClick = ...` 会永远用构造时的值（比如空 input）；跟随信号、需要每次取值的属性同理。
 - **信号要感知变化需新引用**：改数组要 `xs / toSpliced ...` 返回新数组再 `list set`；原地 `push`/`splice` 不会触发重渲染。
-- **单参数 λ 应用可提前做管道**：`et index|remove apply` ⇔ `remove apply (et index)`。
+- **单参数 λ 应用可提前做管道**：`et index|remove $` ⇔ `remove $ (et index)`。
 - 测试/构建的 toolchain 必须能用纯 JS（或 esbuild 这种子进程可执行文件）跑：任何 dlopen 原生 `.node` 的库（vitest4/rolldown、vite/rollup、SWC 等）在 Android/Termux 都不可用，别引入。
 - 本项目使用了 `.agents/skills/langium/SKILL.md`（由 `skills-lock.json` 记录的已安装 Langium skill），涉及 Langium 机制细节时阅读它。

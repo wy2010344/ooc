@@ -1,20 +1,40 @@
-import { AstNode, CstNode, isCompositeCstNode, isLeafCstNode } from 'langium'
+import {
+  AstNode,
+  AstUtils,
+  CstNode,
+  isCompositeCstNode,
+  isLeafCstNode,
+  URI,
+} from 'langium'
 import { DefaultDefinitionProvider } from 'langium/lsp'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
   isAssignment,
+  isImportStatement,
   isMethodAll,
   isRef,
 } from './generated/ast.js'
-import { LocationLink } from 'vscode-languageserver'
+import { LocationLink, Range } from 'vscode-languageserver'
+import {
+  PACKAGE_URI_PREFIX,
+  dirnameOf,
+  joinPath,
+  resolveModuleName,
+} from './module-path.js'
+
+/** 目标文件起始位置（跳到文件头即可，不定位到具体符号）。 */
+const FILE_START_RANGE: Range = {
+  start: { line: 0, character: 0 },
+  end: { line: 0, character: 0 },
+}
 
 /**
- * OOC 跳转定义提供者
- * 支持跳转到变量定义
+ * OOC 跳转定义提供�?
+ * 支持跳转到变量定义，以及 #import 路径跳到目标模块文件�?
  */
 export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider {
 
-  constructor(services: ObjectOrientedCServices) {
+  constructor(private readonly services: ObjectOrientedCServices) {
     super(services)
   }
 
@@ -41,7 +61,67 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
       }
     }
 
+    // #import 路径 → 跳到目标模块文件
+    const importLink = this.collectImportLink(sourceCstNode)
+    if (importLink) {
+      links.push(importLink)
+    }
+
     return links
+  }
+
+  /**
+   * 光标落在 #import 的路径字符串上时，解析出目标文件并返回跳转链接。
+   * 相对路径按导入文件所在目录解析；@pkg 包引用从导入文件所在目录向上找
+   * .ooc_modules/<pkg>（与 CLI ooc install 的落盘位置一致）。
+   */
+  private collectImportLink(sourceCstNode: any): LocationLink | undefined {
+    if (!isLeafCstNode(sourceCstNode)) return undefined
+    const statement = sourceCstNode.astNode
+    if (!statement || !isImportStatement(statement)) return undefined
+    // 路径 token 是语句里唯一的字符串字面量（去掉首尾引号后等于 statement.path）
+    const rawText: string = sourceCstNode.text
+    if (rawText.length < 2) return undefined
+    const quote = rawText[0]
+    if ((quote !== "'" && quote !== '"') || rawText[rawText.length - 1] !== quote) {
+      return undefined
+    }
+    if (rawText.slice(1, -1) !== statement.path) return undefined
+
+    const doc = AstUtils.getDocument(statement)
+    const extensions = this.services.LanguageMetaData.fileExtensions
+    const resolved = resolveModuleName(statement.path, doc.uri.path, extensions)
+    const targetUri = this.resolveImportUri(resolved, doc.uri.path)
+    if (!targetUri) return undefined
+
+    return {
+      originSelectionRange: sourceCstNode.range,
+      targetUri: targetUri.toString(),
+      targetRange: FILE_START_RANGE,
+      targetSelectionRange: FILE_START_RANGE,
+    }
+  }
+
+  /** 把解析出的模块路径转成真实文件 URI；找不到返回 undefined。 */
+  private resolveImportUri(resolved: string, fromPath: string): URI | undefined {
+    const documents = this.services.shared.workspace.LangiumDocuments
+    const fs = this.services.shared.workspace.FileSystemProvider
+    const known = (uri: URI) => !!documents.getDocument(uri) || fs.existsSync(uri)
+
+    if (resolved.startsWith(PACKAGE_URI_PREFIX + '/')) {
+      const rest = resolved.slice(PACKAGE_URI_PREFIX.length + 1)
+      let dir = dirnameOf(fromPath)
+      while (dir) {
+        const candidate = URI.file(joinPath(dir, `.ooc_modules/${rest}`))
+        if (known(candidate)) return candidate
+        const parent = dirnameOf(dir)
+        if (parent === dir) break
+        dir = parent
+      }
+      return undefined
+    }
+    const uri = URI.file(resolved)
+    return known(uri) ? uri : undefined
   }
 
   /**

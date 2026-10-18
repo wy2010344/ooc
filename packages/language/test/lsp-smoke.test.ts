@@ -199,7 +199,7 @@ test('LSP: Hover 转发属性（<=）显示转发说明', async () => {
 
   await expect({
     text:
-      'd = { apply(x) { x } };\n      ' +
+      'd = { $(x) { x } };\n      ' +
       'obj = {\n        ' +
       IDX +
       'name <= d\n      };',
@@ -209,8 +209,19 @@ test('LSP: Hover 转发属性（<=）显示转发说明', async () => {
   })
 })
 
-test('LSP: Hover 零参成员显示属性形态（判别字段）', async () => {
+test('LSP: Hover `$` 记法归一（显示 $ 成员）', async () => {
   const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  await expect({
+    text: 'obj = { $(x) { x } };\n      obj ' + IDX + '$ 42;',
+    indexMarker: IDX,
+    index: 0,
+    hover: /\$|方法/,
+  })
+})
+
+test('LSP: Hover 零参成员显示属性形态（判别字段）', async () => {  const services = createObjectOrientedCServices(EmptyFileSystem)
   const expect = expectHover(services.ObjectOrientedC)
 
   await expect({
@@ -517,6 +528,19 @@ test('LSP: References 应能在使用处查找', async () => {
   })
 })
 
+test('LSP: References 把 `$` 归一（$ 定义能找到 $ 调用）', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectFindReferences(services.ObjectOrientedC)
+
+  await expect({
+    text: 'obj = { ' + IDX + '$(x) { x } }; obj ' + RSTART + '$' + REND + ' 1;',
+    indexMarker: IDX,
+    rangeStartMarker: RSTART,
+    rangeEndMarker: REND,
+    includeDeclaration: true,
+  })
+})
+
 // ========== Definition Provider 测试 ==========
 
 test('LSP: Definition 应能跳转到变量定义', async () => {
@@ -532,6 +556,49 @@ test('LSP: Definition 应能跳转到变量定义', async () => {
     index: 0,
     rangeIndex: 0,
   })
+})
+
+// #import 路径跳转：跨文件，目标 range 不在源文本里，故直接用 Provider API 断言 targetUri。
+test('LSP: Definition 应能从 #import 路径跳转到目标模块', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  const targetUri = URI.file('/ooc/defs.ooc')
+  await parse('x = 1;', { documentUri: targetUri.toString() })
+
+  const source = `#import './defs.ooc';\ny = 2;`
+  const document = await parse(source, {
+    documentUri: URI.file('/ooc/main.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.indexOf("'./defs.ooc'") + 3 // 落在路径字符串内
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length, 1, '应返回一条跳转链接')
+  assert.equal(links![0].targetUri, targetUri.toString())
+})
+
+test('LSP: #import 指向不存在的模块时不跳转', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  const source = `#import './missing.ooc';\ny = 2;`
+  const document = await parse(source, {
+    documentUri: URI.file('/ooc/main.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.indexOf("'./missing.ooc'") + 3
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length ?? 0, 0, '目标不存在时不应返回跳转链接')
 })
 
 // ========== SignatureHelp Provider 测试 ==========

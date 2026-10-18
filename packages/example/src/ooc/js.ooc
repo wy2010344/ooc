@@ -6,7 +6,7 @@ month = d getMonth;
 
 // lambda 本就是原生 JS 函数，可直接传给定时器/事件监听等宿主 API
 cb = [42];
-called = (cb) apply;
+called = (cb) $;
 
 {
     year = year,

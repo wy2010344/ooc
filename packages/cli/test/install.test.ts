@@ -33,7 +33,7 @@ test('本地目录安装：按 ooc.json name 拷贝 .ooc 与 ooc.json', async ()
   const pkgRoot = await makePkgRoot('base', {
     'ooc.json': JSON.stringify({ name: 'base' }),
     'index.ooc': `{ loop = #import 'loop' }`,
-    'loop.ooc': `loop = { apply = fn => fn }`,
+    'loop.ooc': `loop = { $ = fn => fn }`,
   })
   const modulesRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-modules-'))
   const result = await installPackage(pkgRoot, modulesRoot)

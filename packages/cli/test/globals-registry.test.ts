@@ -14,7 +14,7 @@ const ALL_NAMES = [
   // language 内置
   'storage',
   'js',
-  'delegate',
+  'merge',
   'console',
   // ooc-mve-bridge 视图层
   'dom',
@@ -24,6 +24,7 @@ const ALL_NAMES = [
   'forEach',
   // ooc-mve-bridge 响应式
   'createSignal',
+  'multiBind',
   'memo',
   'addEffect',
   'createContext',

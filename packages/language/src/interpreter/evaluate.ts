@@ -19,7 +19,9 @@ import {
   bindMethod,
   runBody,
 } from './runtime.js'
+import { getInfixName } from '../member-kind.js'
 import { addScope, getScope, type Scope } from './scope.js'
+import { templateStringify } from '../template.js'
 
 export type InterpretAction = (name: string, basePath?: string) => Promise<ModuleRun>
 
@@ -162,8 +164,14 @@ export function interpretExpression(e: Expression, scope: Scope): any {
               scope = addScope(scope, rv.param, obj)
               return interpretExpression(rv.expression, scope)
           }
-        default:
-          return sendMessage(obj, r.infix, [interpretPrimary(r.value, scope)])
+        default: {
+          // 中缀：`$` 归一为 apply 消息，可带 0~N 个实参（其余中缀恰好 1 个）
+          const args =
+            r.infix === '$'
+              ? interpretMessageArgs(r.args ?? [], scope)
+              : [interpretPrimary(r.value!, scope)]
+          return sendMessage(obj, getInfixName(r.infix), args)
+        }
       }
   }
 }
@@ -197,11 +205,22 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
     case 'ObjectDef':
       return objectValue(e.methods, scope)
     case 'LambdaDef':
-      // lambda 等价于 { apply(...) { ... } }，合成一个 apply 方法
+      // lambda 等价于 { $ { ... } }，合成一个 apply 方法
       return createLambdaValue(e, scope)
     case 'StID':
       return getStId(e)
     case 'Str':
+      // 含洞的模版字符串：文本段直接拼接，洞段求值后字符串化（nil/undefined → 空串）。
+      if (e.parts.length > 0) {
+        let out = ''
+        for (const part of e.parts) {
+          out +=
+            part.$type === 'TemplateHole'
+              ? templateStringify(interpretExpression(part.expression, scope))
+              : part.value
+        }
+        return out
+      }
       return getStrValue(e)
     case 'CastExpression':
       // 类型断言是静态的，运行时直接返回表达式的值
@@ -214,13 +233,13 @@ export function interpretPrimary(e: Primary, scope: Scope): any {
 /**
  * lambda `[x -> body]` 就像 JS 箭头函数：直接解释成真正的 JS 函数。
  * 这样宿主原生方法（Array.forEach/map 等）天然能调用它，先复用 JS 生态；
- * `fn apply x` 在 sendMessage 里对函数接收者特判为 fn(x)。
+ * `fn $ x` 在 sendMessage 里对函数接收者特判为 fn(x)。
  * 注意：因此 lambda 没有 OOC 对象语义（无原型、无兜底），
- * 需要对象语义时用 `{ apply(x) { ... } }`。
+ * 需要对象语义时用 `{ $(x) { ... } }`。
  */
 function createLambdaValue(e: LambdaDef, scope: Scope): Function {
   // 合成的匿名 apply 方法：只读 params/expressions，供 bindMethod/runBody 使用；
-  // 不需要真实 $container 等链接信息。l
+  // 不需要真实 $container 等链接信息。
   // 箭头式：函数体始终在自己的作用域 + 参数作用域中求值，self 即函数本身
   const fn = function (...args: unknown[]) {
     const s = bindMethod(e, scope, fn, args)

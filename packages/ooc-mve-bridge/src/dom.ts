@@ -77,7 +77,7 @@ function renderChildren(children: any, ctx: any) {
     if (Array.isArray(child)) {
       renderChildren(child, ctx)
     } else if (typeof child === 'string' || typeof child === 'number') {
-      // 字面量字符串/数字直接渲染为文本节点，无需包 text apply
+      // 字面量字符串/数字直接渲染为文本节点，无需包 text $
       renderTextContent(String(child))
     } else {
       child(ctx)
@@ -92,3 +92,8 @@ export const text = fc(function (_ctx, value: string | GetValue<string>) {
 export const html = fc(function (_ctx, value: string | GetValue<string>) {
   renderHtmlContent(value)
 })
+
+// 把一串 DComponent 渲染进当前 holder（供 floating/portal 等自行建元素的桥接复用）。
+export function renderComponents(children: any, ctx: any) {
+  renderChildren(children, ctx)
+}

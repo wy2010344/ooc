@@ -1,6 +1,7 @@
 import type { AstNode, LangiumDocuments, ValidationAcceptor } from 'langium'
 import { AstUtils, URI } from 'langium'
 import { diagnosticData } from './diagnostics-config.js'
+import { APPLY_NAME } from './member-kind.js'
 import {
   isAssignment,
   isBindBlock,
@@ -26,6 +27,7 @@ import {
   isRef,
   isStID,
   isStr,
+  isDollar,
   isTypeDef,
   type Assignment,
   type BindBody,
@@ -450,7 +452,7 @@ export class ObjectOrientedCTypeChecker {
       }
       const objDef = this.unwrapObjectDef(stmt.expression)
       if (objDef) {
-        const t: ObjectTypeInfo = { kind: 'object', methods: new Map() }
+        const t: ObjectTypeInfo = { kind: 'object', name: stmt.name, methods: new Map() }
         env.define(stmt.name, t)
         this.collectObject(objDef, env, accept, t)
         env.define(stmt.name, t)
@@ -743,22 +745,25 @@ export class ObjectOrientedCTypeChecker {
           methodTypeParams.length > 0 ? methodTypeParams : undefined,
       })
     } else if (isMethodBindMutable(method)) {
-      // 转发属性：本 key 的一切消息原样转发给委托对象的 apply 执行，
-      // 因此静态签名 = 委托对象 apply 方法的签名。
+      // 转发属性：本 key 的一切消息原样转发给委托对象的 $ 执行，
+      // 因此静态签名 = 委托对象 $ 方法的签名。
       const delegateType = this.inferBindBody(method.bindBody, env, accept)
-      const applySigs = this.resolveSigs(delegateType, 'apply') ?? []
+      const applySigs = this.resolveSigs(delegateType, APPLY_NAME) ?? []
       if (applySigs.length > 0) {
         for (const s of applySigs) {
           sigs.push({ params: s.params, rest: s.rest, returns: s.returns })
         }
       } else {
-        // 委托对象没有 apply：类型只能给出宽松兜底（参数任意、返回任意）。
-        // 运行时也会抛「没有定义该方法」，故这里同时给出类型提示。
-        accept(
-          'error',
-          `转发目标需要含 apply 方法，委托对象类型为 ${describeType(delegateType)}，其中没有 apply`,
-          { node: method.bindBody, data: diagnosticData('delegateNoApply') },
-        )
+        // 委托对象没有 $：类型只能给出宽松兜底（参数任意、返回任意），运行时按
+        // 实参转发。但类型为 any（未知，如导入的宿主桥返回值）时不报错——无法证明
+        // 其没有 $；只有明确的形态（对象/类型注解）缺 $ 才是真错误。
+        if (delegateType.kind !== 'any') {
+          accept(
+            'error',
+            `转发目标需要可用 $ 调用，委托对象类型为 ${describeType(delegateType)}，其中没有 $`,
+            { node: method.bindBody, data: diagnosticData('delegateNotCallable') },
+          )
+        }
         sigs.push({ params: [], rest: anyType, returns: anyType })
       }
     } else {
@@ -826,7 +831,7 @@ export class ObjectOrientedCTypeChecker {
         continue
       }
       if (isMethodBindMutable(method)) {
-        // 转发属性：签名已在 collectMethod 按委托 apply 记录，
+        // 转发属性：签名已在 collectMethod 按委托的 $ 记录，
         // 这里只为副作用推断委托表达式（复用同一引用不再回填）。
         this.inferBindBody(method.bindBody, bodyEnv, accept)
         continue
@@ -1029,7 +1034,7 @@ export class ObjectOrientedCTypeChecker {
     ) {
       return undefined
     }
-    const value = this.literalOfPrimary(right.value)
+    const value = this.literalOfPrimary(right.value!)
     if (!value) {
       return undefined
     }
@@ -1061,6 +1066,10 @@ export class ObjectOrientedCTypeChecker {
 
   private literalOfPrimary(p: Primary): TypeInfo | undefined {
     if (isStr(p)) {
+      // 含洞的模版字符串不是字面量（不能当可区分联合的判别值）
+      if (p.parts.length > 0) {
+        return undefined
+      }
       return { kind: 'literal', value: p.value }
     }
     if (isNum(p)) {
@@ -1499,7 +1508,14 @@ export class ObjectOrientedCTypeChecker {
       )
     }
     // 中缀
-    const rightType = this.inferPrimary(right.value, env, accept)
+    if (right.infix === '$') {
+      // `left $ a b …`：等价于向 left 发送 APPLY_NAME 消息（0~N 个实参）
+      const argTypes = (right.args ?? []).map((arg) =>
+        arg.spread ? anyType : this.inferPrimary(arg.value, env, accept),
+      )
+      return this.dispatch(left, APPLY_NAME, argTypes, accept, right)
+    }
+    const rightType = this.inferPrimary(right.value!, env, accept)
     return this.inferInfix(left, right.infix, rightType)
   }
 
@@ -1750,8 +1766,8 @@ export class ObjectOrientedCTypeChecker {
         if (!sigs) {
           return anyType
         }
-        // withDefault 库签名（宿主端 delegate）：返回委托交集（任一侧定义即可）
-        if (name === 'withDefault' && args.length >= 2) {
+        // merge 库签名（宿主端 merge.apply）：返回委托交集（任一侧定义即可）
+        if (name === 'apply' && receiver.name === 'merge' && args.length >= 2) {
           return intersectionOf(args, true)
         }
         return this.checkArgs(
@@ -1946,7 +1962,7 @@ export class ObjectOrientedCTypeChecker {
       return t
     }
     if (isLambdaDef(e)) {
-      // 同像性：lambda 就是 { apply(...) { ... } }，类型即只有一个 apply 方法的对象。
+      // 同像性：lambda 就是 { $ { ... } }，类型即只有一个 apply 方法的对象。
       // 参数注解收集为 MethodSig，函数体最后一条表达式推断为返回类型。
       // context 为调用处回调签名时，无注解参数按 apply 签名回填。
       const applySig =
@@ -1996,11 +2012,21 @@ export class ObjectOrientedCTypeChecker {
     if (isRef(p)) {
       return env.lookup(p.value) ?? anyType
     }
-    if (isStr(p) || isStID(p)) {
-      return {
-        kind: 'literal',
-        value: isStr(p) ? p.value : p.value.slice(1),
+    if (isStr(p)) {
+      // 含洞的模版字符串结果恒为 string（洞内表达式仍需检查以报告错误）；
+      // 纯字符串仍是字面量类型。
+      if (p.parts.length > 0) {
+        for (const part of p.parts) {
+          if (part.$type === 'TemplateHole') {
+            this.inferExpression(part.expression, env, accept)
+          }
+        }
+        return stringType
       }
+      return { kind: 'literal', value: p.value }
+    }
+    if (isStID(p)) {
+      return { kind: 'literal', value: p.value.slice(1) }
     }
     if (isComplexPrimary(p)) {
       return this.inferComplexPrimary(p, env, accept)
@@ -2038,6 +2064,10 @@ export class ObjectOrientedCTypeChecker {
     if (isStID(v)) {
       return v.value.slice(1)
     }
+    if (isDollar(v)) {
+      // 定义键写 `$`：与 APPLY_NAME 同一个成员
+      return APPLY_NAME
+    }
     return v.value
   }
 
@@ -2045,6 +2075,10 @@ export class ObjectOrientedCTypeChecker {
     const v = m.name.value
     if (isRef(v)) {
       return v.value
+    }
+    if (isDollar(v)) {
+      // `$` 直接调用：归一为 APPLY_NAME
+      return APPLY_NAME
     }
     if (isStID(v)) {
       return v.value.slice(1)

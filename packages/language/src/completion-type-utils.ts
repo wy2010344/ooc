@@ -1,5 +1,6 @@
 import type { AstNode } from 'langium'
 import { isRef, type Expression, type MethodAll, type Param } from './generated/ast.js'
+import { APPLY_NAME } from './member-kind.js'
 import { describeType, type TypeInfo } from './type-system.js'
 
 /**
@@ -68,6 +69,8 @@ export function extractMethodDefName(nameNode: any): string | undefined {
   if (isRef(innerName)) return innerName.value
   if (innerName.$type === 'StID') return innerName.value.replace(/^"/, '').replace(/"$/, '')
   if (innerName.$type === 'Str') return innerName.value.replace(/^'/, '').replace(/'$/, '')
+  // 定义键写 `$`：与 apply 同一个成员（APPLY_NAME）
+  if (innerName.$type === 'Dollar') return APPLY_NAME
   return undefined
 }
 

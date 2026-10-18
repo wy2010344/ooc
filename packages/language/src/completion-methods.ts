@@ -8,6 +8,7 @@ import {
   isRef,
 } from './generated/ast.js'
 import { describeType } from './type-system.js'
+import { displayMemberName } from './member-kind.js'
 import { findLastIdentifier } from './completion-type-utils.js'
 
 /**
@@ -72,10 +73,11 @@ function getMethodCompletionsFromRef(checker: any, refNode: AstNode): Completion
   if (t?.kind === 'object' && t.methods) {
     for (const [methodName, sigs] of t.methods) {
       const sig = (sigs as any[])[(sigs as any[]).length - 1]
+      const label = displayMemberName(methodName)
       items.push({
-        label: methodName,
+        label,
         kind: CompletionItemKind.Method,
-        detail: sigDetail(methodName, sig),
+        detail: sigDetail(label, sig),
       })
     }
   }
@@ -94,10 +96,11 @@ function getMessageChainCompletions(checker: any, chainNode: AstNode): Completio
       if (t?.kind === 'object' && t.methods) {
         for (const [methodName, sigs] of t.methods) {
           const sig = (sigs as any[])[(sigs as any[]).length - 1]
+          const label = displayMemberName(methodName)
           items.push({
-            label: methodName,
+            label,
             kind: CompletionItemKind.Method,
-            detail: sigDetail(methodName, sig),
+            detail: sigDetail(label, sig),
           })
         }
       }

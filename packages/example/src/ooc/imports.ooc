@@ -70,8 +70,8 @@ circleArea = {
     greenG = green g,
 
     // 浏览器 API
-    // alertResult = showAlert apply 'Hello from OOC!',
-    // title = docTitle apply,
+    // alertResult = showAlert $ 'Hello from OOC!',
+    // title = docTitle $,
 
     // 空对象
     empty = emptyObj,

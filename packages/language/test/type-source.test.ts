@@ -29,7 +29,7 @@ dom = {
 };
 
 text = {
-    apply(content): Component
+    $(content): Component
 };
 
 config = {
@@ -49,7 +49,7 @@ interface MethodsOwner {
 }
 
 describe('loadGlobalsTypesFromSource', () => {
-  test('language 内置类型源：storage/js/delegate/console 全部解析出来', () => {
+  test('language 内置类型源：storage/js/merge/console 全部解析出来', () => {
     const globals = loadGlobalsTypesFromSource(coreBridgeTypesSource)
     expect(globals).toBeTypeOf('object')
     const storage = globals!.get('storage') as MethodsOwner
@@ -57,7 +57,7 @@ describe('loadGlobalsTypesFromSource', () => {
     // storage.ref 的返回类型应解析为 Ref（typedef 注册成功）
     expect(storage.methods.get('ref')?.[0].returns?.name).toBe('Ref')
     expect(globals!.has('js')).toBe(true)
-    expect(globals!.has('delegate')).toBe(true)
+    expect(globals!.has('merge')).toBe(true)
     expect(globals!.has('ObjectValue')).toBe(false)
     expect(globals!.has('console')).toBe(true)
   })
@@ -139,7 +139,7 @@ describe('config.ooc 名字清单解析（Route A）', () => {
       registry,
     ).ObjectOrientedC
     const parse = parseHelper<Model>(services)
-    const doc = await parse('dom customEl { class: 1 } (text apply 1)\n', {
+    const doc = await parse('dom customEl { class: 1 } (text $ 1)\n', {
       documentUri: URI.file('/proj/demo.ooc').toString(),
       validation: true,
     })

@@ -106,10 +106,10 @@ describe('toOocConfig（从解释器返回值转换）', () => {
     expect(toOocConfig({})).toEqual({})
   })
 
-  test('withDefault 模式：兜底 handler 转发到默认配置', () => {
-    // 模拟 withDefault 包装对象（diagnostics 层面）：
+  test('merge 模式：兜底 handler 转发到默认配置', () => {
+    // 模拟 merge 包装对象（diagnostics 层面）：
     // 解释器不再隐式兜底 methodNotFound，宿主对象必须显式包 Proxy 并传 handler
-    // （真实 OOC 配置里的 withDefault 由宿主端 delegate 包成委托包装）。
+    // （真实 OOC 配置里的 merge 由宿主端 merge 包成委托包装）。
     const defaults = {
       typeMismatch: 'warning',
       noImplicitAny: 'off',

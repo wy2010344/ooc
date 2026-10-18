@@ -21,6 +21,8 @@
         "wy-helper": "*"
     },
     "devDependencies": {
+        "@tailwindcss/vite": "^4.1.0",
+        "tailwindcss": "^4.1.0",
         "typescript": "~6.0.2",
         "vite": "^8.2.0",
         "vite-plugin-ooc": "0.0.1"

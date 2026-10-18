@@ -29,6 +29,12 @@ Signal #type {
     update(fn): any
 };
 
+// multiBind 的返回值：无参读、单参写的 lambda（一切消息转发给 $ 调用）。
+// 带 $ 签名，故可作 「x <= multiBind(...)」 的转发委托。
+Callable #type {
+    $(...args): any
+};
+
 dom = {
     a(props, ...children): Component,
     abbr(props, ...children): Component,
@@ -149,35 +155,73 @@ dom = {
 };
 
 text = {
-    apply(content): Component
+    $(content): Component
 };
 
 html = {
-    apply(content): Component
+    $(content): Component
 };
 
 fc = {
-    apply(...args): Component
+    $(...args): Component
 };
 
 forEach = {
-    apply(config): Component
+    $(config): Component
 };
 
 createSignal = {
-    apply(initial): Signal
+    $(initial): Signal
+};
+
+multiBind = {
+    $(holder): Callable
 };
 
 memo = {
-    apply(fn): any
+    $(fn): any
 };
 
 addEffect = {
-    apply(fn): any
+    $(fn): any
 };
 
 createContext = {
-    apply(...args): any
+    $(...args): any
+};
+
+// portal 弹层 + 浮层定位（Dropdown / Select / Dialog / Sheet 用）
+createPop = {
+    $(render): any
+};
+
+renderPop = {
+    $: any
+};
+
+floating = {
+    $(props, ...children): Component
+};
+
+hookTrackSignal = {
+    $(get, set): any
+};
+
+// mve-icons 桥接：图标组件工厂（传入 { className } 返回 Component）
+iconCheck = {
+    $(props): Component
+};
+
+iconChevronDown = {
+    $(props): Component
+};
+
+iconX = {
+    $(props): Component
+};
+
+provideIconContext = {
+    $(holder): any
 };
 
 config = {
@@ -188,9 +232,18 @@ config = {
         fc = fc,
         forEach = forEach,
         createSignal = createSignal,
+        multiBind = multiBind,
         memo = memo,
         addEffect = addEffect,
-        createContext = createContext
+        createContext = createContext,
+        createPop = createPop,
+        renderPop = renderPop,
+        floating = floating,
+        hookTrackSignal = hookTrackSignal,
+        iconCheck = iconCheck,
+        iconChevronDown = iconChevronDown,
+        iconX = iconX,
+        provideIconContext = provideIconContext
     }
 };
 
@@ -199,7 +252,7 @@ config
 
 /**
  * 创建完整引擎全局类型（Route A loader，可传给 createObjectOrientedCServices /
- * createTypeCheckAction 作注册表）：language 内置桥接（storage/js/delegate/console）
+ * createTypeCheckAction 作注册表）：language 内置桥接（storage/js/merge/console）
  * ∪ 本包类型源（dom/text/html/fc/forEach/createSignal/memo/addEffect/createContext），
  * 与运行时 createBridgeGlobals() 的名字集合对应；本包覆盖同名项。
  */

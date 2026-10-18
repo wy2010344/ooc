@@ -9,7 +9,30 @@ export type { ForEachConfig } from './fc.js'
 // 响应式信号 + language 原生原语：OOC 侧直接 import 使用，不需要 globals 注入
 export { createSignal, memo, addEffect } from 'wy-helper'
 export { createContext } from 'mve-core'
-export { storage, js, delegate } from 'object-oriented-c-language'
+export { storage, js, merge } from 'object-oriented-c-language'
+
+// {get,set} 持有者 → 无参读 / 单参写的 lambda
+export { multiBind } from './multi-bind.js'
+export type { Holder } from './multi-bind.js'
+
+// portal 弹层 + 浮层定位（Dropdown / Select / Dialog / Sheet 用）
+export { createPop, renderPop } from './pop.js'
+export type { PopProvide } from './pop.js'
+export { floating } from './floating.js'
+export type { FloatingProps } from './floating.js'
+
+// mve-icons 桥接
+export {
+  createIcon,
+  iconCheck,
+  iconChevronDown,
+  iconX,
+  provideIconContext,
+} from './icons.js'
+export type { IconProps } from './icons.js'
+
+// 响应式订阅（Dialog/Sheet 跟随外部 open 信号）
+export { hookTrackSignal } from 'mve-helper'
 
 // 桥接类型源与 loader（供 OOC 类型检查器解析全局类型，Route A）
 export { createBridgeGlobalsTypes, bridgeTypesSource } from './types.js'

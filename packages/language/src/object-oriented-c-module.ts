@@ -1,4 +1,4 @@
-import { type Module, inject } from 'langium'
+import { type Module, inject, DocumentState } from 'langium'
 import {
   createDefaultModule,
   createDefaultSharedModule,
@@ -24,6 +24,7 @@ import { ObjectOrientedCSignatureHelpProvider } from './object-oriented-c-signat
 import { ObjectOrientedCDefinitionProvider } from './object-oriented-c-definition-provider.js'
 import { ObjectOrientedCReferencesProvider } from './object-oriented-c-references-provider.js'
 import type { TypeInfo } from './type-system.js'
+import { graftTemplates, makeHoleParser } from './template-graft.js'
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -109,6 +110,18 @@ export function createObjectOrientedCServices(
   )
   shared.ServiceRegistry.register(ObjectOrientedC)
   registerValidationChecks(ObjectOrientedC, config)
+  // 模版字符串：parse 后把洞内表达式子解析并挂进 AST（早于索引/链接，故洞内引用可被链接）。
+  const parseHole = makeHoleParser((source) =>
+    ObjectOrientedC.parser.LangiumParser.parse(source),
+  )
+  shared.workspace.DocumentBuilder.onBuildPhase(
+    DocumentState.Parsed,
+    (documents) => {
+      for (const document of documents) {
+        graftTemplates(document.parseResult.value, parseHole)
+      }
+    },
+  )
   if (globalsTypes) {
     ObjectOrientedC.validation.ObjectOrientedCValidator.setRegistry(globalsTypes)
   }

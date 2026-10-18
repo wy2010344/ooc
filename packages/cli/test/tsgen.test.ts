@@ -24,24 +24,24 @@ async function loadRuntime(dir: string): Promise<any> {
   return import(pathToFileURL(path.join(dir, '_ooc_runtime.ts')).href)
 }
 
-// 精简 loop fixture：guard 分支（递归 apply + nil 兜底）+ repeat（JS 字符串生态 forEach）
+// 精简 loop fixture：guard 分支（递归 $ + nil 兜底）+ repeat（JS 字符串生态 forEach）
 const LOOP_SRC = `
 loop = {
-    apply(fn) {
-        #guard fn apply;
-        this apply fn
+    $(fn) {
+        #guard fn $;
+        this $ fn
         #else;
         nil
     },
     repeat(n, fn) {
-        (('x' repeat n) split '') forEach [v, i => fn apply i];
+        (('x' repeat n) split '') forEach [v, i => fn $ i];
         nil
     }
 };
 loop
 `
 
-test('guard 分支循环：apply 至少一次并按真值递归，repeat 恰好 n 次', async (t) => {
+test('guard 分支循环：$ 至少一次并按真值递归，repeat 恰好 n 次', async (t) => {
   const { ts: tsPath, dir } = await compileSource('loop', LOOP_SRC)
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
 
@@ -51,15 +51,42 @@ test('guard 分支循环：apply 至少一次并按真值递归，repeat 恰好 
 
   let count = 0
   rt.__send(loop, 'apply', [() => ++count < 3])
-  if (count !== 3) throw new Error(`apply 循环应跑 3 次，实际 ${count}`)
+  if (count !== 3) throw new Error(`$ 循环应跑 3 次，实际 ${count}`)
 
   let sum = 0
   rt.__send(loop, 'repeat', [4, (i: number) => { sum += i }])
   if (sum !== 6) throw new Error(`repeat 4 次应累加 0..3=6，实际 ${sum}`)
 })
 
-test('#guard 前的语句先执行：赋值进作用域后 guard 链才能引用', async (t) => {
-  const { ts: tsPath, dir } = await compileSource('guardpre', `
+test('$ 直接调用编译为统一消息（宿主成员名 apply）', async (t) => {
+  const { ts: tsPath } = await compileSource('dollar', `
+inc = [x => x + 1];
+obj = { $(x) => x * 3 };
+inc $ (obj $ 4)
+`)
+  const code = await fs.readFile(tsPath, 'utf-8')
+  if (!/__send\(inc, "apply"/.test(code)) throw new Error('$ 应编译成统一 apply 消息')
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  if (mod.default !== 13) throw new Error(`$ 求值应为 13，实际 ${mod.default}`)
+})
+
+test('$ 中缀带多实参编译为统一 apply 消息', async (t) => {
+  const { ts: tsPath } = await compileSource('dollarargs', `
+add = { $(a, b) => a + b };
+obj = { get { add } };
+obj get $ 20 22
+`)
+  const code = await fs.readFile(tsPath, 'utf-8')
+  if (!/"apply",\s*\[20, 22\]/.test(code)) {
+    throw new Error(`$ 中缀应编译成带 [20, 22] 的 apply 消息，实际:\n${code}`)
+  }
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  if (mod.default !== 42) throw new Error(`$ 中缀求值应为 42，实际 ${mod.default}`)
+})
+
+test('#guard 前的语句先执行：赋值进作用域后 guard 链才能引用', async (t) => {  const { ts: tsPath, dir } = await compileSource('guardpre', `
 obj = {
     fun(a) {
         t = a * 2;
@@ -107,7 +134,7 @@ test('跨模块 import + 宿主模块 import：storage ref 与 loop 组合', asy
     `loop = #import './loop';
 host = #import './host.ts';
 n = (host storage) ref 0;
-loop apply [n set ((n get) + 1); (n get) < 5];
+loop $ [n set ((n get) + 1); (n get) < 5];
 { iterations = (n get) }
 `,
     'utf-8',
@@ -231,9 +258,9 @@ factory
 
 test('消息实参 ...array 展开：编译成 __spread，运行语义与解释器一致', async (t) => {
   const { ts: tsPath, dir } = await compileSource('spread', `
-obj = { apply(...xs) { xs } };
+obj = { $(...xs) { xs } };
 arr = Array of 1 2 3;
-{ collect = (obj apply ...arr), mixed = (obj apply 0 ...arr 9) }
+{ collect = (obj $ ...arr), mixed = (obj $ 0 ...arr 9) }
 `)
   const code = await fs.readFile(tsPath, 'utf8')
   if (!/__spread\(/.test(code)) {
@@ -255,7 +282,7 @@ arr = Array of 1 2 3;
   }
 })
 
-test('lambda 保留：成员返回 lambda 本体，读取不二次 apply', async (t) => {
+test('lambda 保留：成员返回 lambda 本体，读取不二次 $', async (t) => {
   const { ts: tsPath, dir } = await compileSource('lam', `
 obj = { handler => [x => x + 1], inc = [x => x + 2] };
 obj
@@ -270,7 +297,7 @@ obj
   // bind 形同理
   const inc = rt.__send(mod.default, 'inc', [])
   if (typeof inc !== 'function') throw new Error('inc 应为 lambda 函数本体')
-  if (rt.__send(inc, 'apply', [41]) !== 43) throw new Error('apply 显式调用应得 43')
+  if (rt.__send(inc, 'apply', [41]) !== 43) throw new Error('$ 显式调用应得 43')
   // JS 直读：bind 成员（getter）是 lambda 本体；零参 call 成员是方法本体（调用才执行）
   if (typeof mod.default.inc !== 'function') throw new Error('JS 直读 inc 应为 lambda 本体')
   if (mod.default.inc(41) !== 43) throw new Error('JS 直调 inc lambda 应得 43')
@@ -279,20 +306,38 @@ obj
   if (viaMethod(1) !== 2) throw new Error('返回的 lambda 直调应得 2')
 })
 
-test('转发属性 <=：编译成 __mutable 转发器，消息原样转发给委托 apply', async (t) => {
+test('转发属性 <=：编译成 __mutable 转发器，消息原样转发给委托 $', async (t) => {
   const { ts: tsPath, dir } = await compileSource('fwd', `
-delegate = { apply(a, b) => a + b };
+delegate = { $(a, b) => a + b };
 obj = { count <= delegate };
 obj
 `)
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
   const mod = await import(pathToFileURL(tsPath).href)
   const rt = await loadRuntime(dir)
-  // count 是转发属性：发消息 -> 委托对象 apply(3, 4) = 7
+  // count 是转发属性：发消息 -> 委托对象 $(3, 4) = 7
   if (rt.__send(mod.default, 'count', [3, 4]) !== 7) {
-    throw new Error('<= 应把消息转发给委托对象的 apply')
+    throw new Error('<= 应把消息转发给委托对象的 $')
   }
   if (rt.__send(mod.default, 'count', [5, 6]) !== 11) {
     throw new Error('<= 委托对象惰性求值一次后持续可用')
+  }
+})
+
+test('模版字符串：编译成 [文本/洞].join("")，运行语义与解释器一致', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('tpl', `
+obj = { greeting(name) { 'hello \${name}! n=\${1 + 2}' } };
+{ msg = (obj greeting 'world') }
+`)
+  const code = await fs.readFile(tsPath, 'utf8')
+  if (!/\]\.join\(''\)/.test(code)) {
+    throw new Error(`模版字符串应编译成 join('')，实际:\n${code}`)
+  }
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  const rt = await loadRuntime(dir)
+  const msg = rt.__send(mod.default, 'msg', [])
+  if (msg !== 'hello world! n=3') {
+    throw new Error(`模版结果应为 'hello world! n=3'，实际 ${msg}`)
   }
 })

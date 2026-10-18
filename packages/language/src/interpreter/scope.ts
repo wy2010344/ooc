@@ -28,7 +28,7 @@ export function getScope(scope: Scope, key: string) {
             return undefined
           }
           // 返回值与旧 methodNotFound(name) 一致：消息调用后拿到原始值，
-          // 值是函数也不二次调用（sendMessage 会对返回的包装函数 apply，
+          // 值是函数也不二次调用（sendMessage 会对返回的包装函数发送 $，
           // 包装函数在这里拿到 getScope 结果并原样返回）。
           return () => getScope(scope, prop)
         },

@@ -12,9 +12,9 @@ StyledContainer = [className, children =>
 Button = [label, onClick =>
     (dom button {
         className = 'rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600',
-        onClick(e){ onClick apply e }
+        onClick(e){ onClick $ e }
     }
-        (text apply label)
+        (text $ label)
     )
 ];
 
@@ -23,6 +23,6 @@ Input = [value, onValueChange =>
     (dom input {
         className = 'rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none',
         value => value,
-        onValueChange(v){ onValueChange apply v }
+        onValueChange(v){ onValueChange $ v }
     })
 ];

@@ -1,7 +1,7 @@
 import {
   createInterpretAction,
   createTypeCheckAction,
-  delegate,
+  merge,
   js,
   OOC_METHOD,
   storage,
@@ -95,12 +95,12 @@ export function createVirtualFs(
 
 /**
  * 宿主桥接。OOC 源码可以直接按名引用这些对象：
- *   storage / js / delegate —— 语言包内置（ref / throw / new / withDefault）。
- *   循环（loop apply/repeat）是 base 包 OOC 实现（#import '@base/loop'），不再桥接。
+ *   storage / js / merge —— 语言包内置（ref / throw / new / merge $）。
+ *   循环（loop $/repeat）是 base 包 OOC 实现（#import '@base/loop'），不再桥接。
  *   fc / dom / html / text / createContext / forEach  —— 预览渲染（详见 src/lib/preview/）：
- *     组件包装：fc apply [ctx,...]；元素：dom.div 属性对象 子组件...；
- *     动态文本：text apply <字符串或信号 getter>；HTML 片段：html apply ...；
- *     forEach apply {列表提供者, 渲染}（内部委托 mve renderForEach，无需自取 ctx）。
+ *     组件包装：fc $ [ctx,...]；元素：dom.div 属性对象 子组件...；
+ *     动态文本：text $ <字符串或信号 getter>；HTML 片段：html $ ...；
+ *     forEach $ {列表提供者, 渲染}（内部委托 mve renderForEach，无需自取 ctx）。
  *     属性分流按 descriptor + 方法标记：带 OOC_METHOD 标记的函数＝方法（绑接收者），
  *     getter＝计算绑定（读一次），其余＝字面量常量/值（原样透传）。
  *   createSignal / memo / addEffect  —— 响应式原语直接复用 wy-helper，不再自研平行实现。
@@ -116,19 +116,19 @@ export function createGlobals() {
   return {
     storage,
     js,
-    // 委托组合桥：delegate withDefault spec defaults...（spec 优先，未知按链查找）
-    delegate,
+    // 合并/兜底桥：merge $ overrides defaults...（overrides 优先，未知按链查找）
+    merge,
     fc,
     createContext,
     dom,
     html,
     text,
-    // 响应式信号：createSignal apply <初值> → { get(), set() }
+    // 响应式信号：createSignal $ <初值> → { get(), set() }
     createSignal,
-    // memo apply <lambda> → 记忆化 signal（lambda 读取的信号变化后重算）
+    // memo $ <lambda> → 记忆化 signal（lambda 读取的信号变化后重算）
     memo,
     addEffect,
-    // 区域组件：forEach apply <区域对象> → 组件（内部委托 mve renderForEach，无需自取 ctx）
+    // 区域组件：forEach $ <区域对象> → 组件（内部委托 mve renderForEach，无需自取 ctx）
     forEach,
   } as const
 }
@@ -143,7 +143,7 @@ export function createEngine(
     createGlobals(),
   )
   // Route A：全局类型注册表 = 各宿主包自持类型源合并（createBridgeGlobalsTypes：
-  // language 内置 storage/js/delegate/console ∪ ooc-mve-bridge 视图与信号），
+  // language 内置 storage/js/merge/console ∪ ooc-mve-bridge 视图与信号），
   // 让类型检查看到 dom/createSignal 等桥接对象的真实形状
   const typeCheck = createTypeCheckAction(
     { fileSystemProvider: () => fs },

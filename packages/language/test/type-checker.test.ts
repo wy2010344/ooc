@@ -349,7 +349,7 @@ describe('真实示例无类型告警', () => {
   test('x.ooc 类型的对象定义不误报', async () => {
     const diags = await diagnostics(`
         obj = {
-            apply(a, ...b) {
+            $(a, ...b) {
                 console log b
             },
             fun(a, b) {
@@ -361,7 +361,7 @@ describe('真实示例无类型告警', () => {
                 console log a "xxxx"
             }
         };
-        obj apply 1 2 3 4;
+        obj $ 1 2 3 4;
         obj fun 9
     `)
     // guard 条件 a > 9 是 boolean，不触发警告；console 是 JS 全局 → any
@@ -381,7 +381,7 @@ describe('真实示例无类型告警', () => {
   test('lambda 推断为函数类型，无多余告警', async () => {
     const diags = await diagnostics(`
         f = [x => x + 1];
-        f apply 41
+        f $ 41
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -393,43 +393,43 @@ describe('真实示例无类型告警', () => {
     expect(messages(diags).join('\n')).toContain("未知类型 'Foo'")
   })
 
-  test('lambda 与 apply 对象双向兼容（同像）', async () => {
+  test('lambda 与 $ 对象双向兼容（同像）', async () => {
     const diags = await diagnostics(`
         f = [x => x + 1];
-        f = { apply(x) { x + 1 } };
-        f apply 1
+        f = { $(x) { x + 1 } };
+        f $ 1
     `)
     expect(messages(diags)).toEqual([])
   })
 
-  test('apply 对象重新赋值为 lambda 无警告（同像）', async () => {
+  test('可调用对象重新赋值为 lambda 无警告（同像）', async () => {
     const diags = await diagnostics(`
-        f = { apply(x) { x + 1 } };
+        f = { $(x) { x + 1 } };
         f = [x => x + 1];
-        f apply 1
+        f $ 1
     `)
     expect(messages(diags)).toEqual([])
   })
 
-  test('lambda 的 apply 调用参数检查生效', async () => {
+  test('lambda 的 $ 调用参数检查生效', async () => {
     const diags = await diagnostics(`
         f = [x: number => x + 1];
-        f apply 'str'
+        f $ 'str'
     `)
     expect(messages(diags).join('\n')).toContain('调用参数不匹配')
   })
 
-  test('lambda 的 apply 调用参数正确无警告', async () => {
+  test('lambda 的 $ 调用参数正确无警告', async () => {
     const diags = await diagnostics(`
         f = [x: number => x + 1];
-        f apply 42
+        f $ 42
     `)
     expect(messages(diags)).toEqual([])
   })
 
-  test('lambda 传给需要 apply 方法的对象参数无告警', async () => {
+  test('lambda 传给需要 $ 方法的对象参数无告警', async () => {
     const diags = await diagnostics(`
-        obj = { call(f) => f apply 42 };
+        obj = { call(f) => f $ 42 };
         obj call [x => x * 2]
     `)
     expect(messages(diags)).toEqual([])
@@ -715,29 +715,29 @@ describe('上下文类型回填', () => {
 describe('回调实参回填', () => {
   test('匿名对象回调参数回填：方法体内直接使用无警告', async () => {
     const diags = await diagnostics(`
-        Callback #type { apply(x: number) };
+        Callback #type { $(x: number) };
         Processor #type { run(cb: Callback) };
-        p: Processor = { run(cb) { cb apply 1 } };
-        p run { apply(x) { x * 2 } }
+        p: Processor = { run(cb) { cb $ 1 } };
+        p run { $(x) { x * 2 } }
     `)
     expect(messages(diags)).toEqual([])
   })
 
   test('匿名对象回调参数回填：参数按声明类型检查', async () => {
     const diags = await diagnostics(`
-        Callback #type { apply(x: number) };
+        Callback #type { $(x: number) };
         Processor #type { run(cb: Callback) };
-        p: Processor = { run(cb) { cb apply 1 } };
-        p run { apply(x) { x = 'str' } }
+        p: Processor = { run(cb) { cb $ 1 } };
+        p run { $(x) { x = 'str' } }
     `)
     expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
   })
 
   test('lambda 回调参数回填', async () => {
     const diags = await diagnostics(`
-        Callback #type { apply(x: number) };
+        Callback #type { $(x: number) };
         Processor #type { run(cb: Callback) };
-        p: Processor = { run(cb) { cb apply 1 } };
+        p: Processor = { run(cb) { cb $ 1 } };
         p run [x => x + 1]
     `)
     expect(messages(diags)).toEqual([])
@@ -745,20 +745,40 @@ describe('回调实参回填', () => {
 
   test('lambda 回调参数回填：参数按声明类型检查', async () => {
     const diags = await diagnostics(`
-        Callback #type { apply(x: number) };
+        Callback #type { $(x: number) };
         Processor #type { run(cb: Callback) };
-        p: Processor = { run(cb) { cb apply 1 } };
+        p: Processor = { run(cb) { cb $ 1 } };
         p run [x => x = 'str']
     `)
     expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
   })
 
+  test('$ 定义键 / 消息 / 中缀都归一为同一成员', async () => {
+    const diags = await diagnostics(`
+        Callback #type { $(x: number) };
+        Processor #type { run(cb: Callback) };
+        p: Processor = { run(cb) { cb $ 1 } };
+        p run { $(x) { x * 2 } }
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('$ 中缀调用实参类型检查', async () => {
+    const diags = await diagnostics(`
+        Adder #type { $(a: number, b: number): number };
+        Holder #type { get: Adder };
+        h: Holder = { get = { $(a, b) { a + b } } };
+        h get $ 1 'x'
+    `)
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
+  })
+
   test('泛型实例化的回调参数回填', async () => {
     const diags = await diagnostics(`
-        Callback #type { apply(x: number) };
+        Callback #type { $(x: number) };
         Box #type<T> { forEach(cb: T) };
-        b: Box<Callback> = { forEach(cb) { cb apply 1 } };
-        b forEach { apply(x) { x * 2 } }
+        b: Box<Callback> = { forEach(cb) { cb $ 1 } };
+        b forEach { $(x) { x * 2 } }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -766,7 +786,7 @@ describe('回调实参回填', () => {
   test('无回调上下文时不回填', async () => {
     const diags = await diagnostics(`
         n = { run(cb) { 1 } };
-        n run { apply(x) { x = 'str' } }
+        n run { $(x) { x = 'str' } }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -1345,10 +1365,10 @@ describe('typedef 方法级泛型', () => {
   })
 })
 
-describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
-  // 类型源声明 delegate 为宿主全局桥（withDefault 返回委托交集）。
-  // 用带 coreBridgeGlobals registry 的独立服务，让 `delegate withDefault ...`
-  // 命中检查器里的 withDefault 特判（D∩S 方法并集）。
+describe('merge 交集类型（宿主端 merge 全局）', () => {
+  // 类型源声明 merge 为宿主全局桥（$ 返回委托交集）。
+  // 用带 coreBridgeGlobals registry 的独立服务，让 `merge $ ...`
+  // 命中检查器里的 merge 特判（D∩S 方法并集）。
   let svc: ReturnType<typeof createObjectOrientedCServices>
   let parseLocal: ReturnType<typeof parseHelper<Model>>
 
@@ -1379,7 +1399,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
        Dog #type { greet: string };
        defaults: Dog = { greet = 'hi' };
        spec: Cat = { meow = 'miao' };
-       w = delegate withDefault spec defaults;
+       w = merge $ spec defaults;
        g: string = w greet;
        m: string = w meow;
        g; m`,
@@ -1394,7 +1414,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
        Dog #type { greet: string };
        defaults: Dog = { greet = 'hi' };
        spec: Cat = { meow = 'miao' };
-       w = delegate withDefault spec defaults;
+       w = merge $ spec defaults;
        x: string = w greet;
        x`,
     )
@@ -1409,7 +1429,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
        Dog #type { greet: string };
        defaults: Dog = { greet = 'hi' };
        spec: Cat = { meow = 'miao' };
-       w = delegate withDefault spec defaults;
+       w = merge $ spec defaults;
        w bark`,
     )
     // 检查器鸭子语义：resolveSigs 未命中返回 any 放行，不做未知消息告警
@@ -1423,7 +1443,7 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
        Dog #type { greet: string };
        defaults: Dog = { greet = 'hi' };
        spec: Cat = { meow = 'miao' };
-       w = delegate withDefault spec defaults;
+       w = merge $ spec defaults;
        n: number = w greet;
        n`,
     )
@@ -1431,12 +1451,12 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
-  describe('转发属性 <=：签名取自委托 apply', () => {
-    test('实参按 apply 参数类型校验，返回类型取自 apply', async () => {
+  describe('转发属性 <=：签名取自委托 $', () => {
+    test('实参按 $ 参数类型校验，返回类型取自 $', async () => {
       const diags = await checkModule(
         'fwd1.ooc',
         `handler = {
-             apply(a: number, b: number): number { a + b }
+             $(a: number, b: number): number { a + b }
          };
          obj = { add <= handler };
          n: number = obj add 1 2;
@@ -1445,11 +1465,11 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       expect(messages(diags)).toEqual([])
     })
 
-    test('实参类型不符告警（按 apply 签名校验）', async () => {
+    test('实参类型不符告警（按 $ 签名校验）', async () => {
       const diags = await checkModule(
         'fwd2.ooc',
         `handler = {
-             apply(a: number): number { a }
+             $(a: number): number { a }
          };
          obj = { echo <= handler };
          s: string = obj echo 5;
@@ -1458,19 +1478,19 @@ describe('withDefault 交集类型（宿主端 delegate 全局）', () => {
       expect(messages(diags).join('\n')).toContain('类型不匹配')
     })
 
-    test('委托对象无 apply 报错', async () => {
+    test('委托对象无 $ 报错', async () => {
       const diags = await checkModule(
         'fwd3.ooc',
         `obj = { value <= 5 };
          obj value`,
       )
-      expect(messages(diags).join('\n')).toContain('需要含 apply')
+      expect(messages(diags).join('\n')).toContain('需要可用 $')
     })
 
-    test('转发目标为含 apply 的变量时无告警', async () => {
+    test('转发目标为含 $ 的变量时无告警', async () => {
       const diags = await checkModule(
         'fwd4.ooc',
-        `h = { apply(x: string): string { x } };
+        `h = { $(x: string): string { x } };
          obj = { name <= h };
          s: string = obj name 'hi';
          s`,
@@ -1731,5 +1751,22 @@ describe('#import 模块存在性检查', () => {
   test('@pkg 包引用不报（IDE 无包感知 FS，交给 CLI/运行时）', async () => {
     const diags = await diagnostics(`b = #import '@base/loop';\nb`)
     expect(messages(diags).join('\n')).not.toContain('找不到模块')
+  })
+})
+
+describe('模版字符串', () => {
+  test('解析无错：文本 + 洞', async () => {
+    const doc = await parse("name = 'world';\nmsg = 'hello ${name}!'")
+    expect(doc.parseResult.parserErrors).toHaveLength(0)
+  })
+
+  test('洞内引用已声明变量：无诊断', async () => {
+    const diags = await diagnostics("name = 'world';\nmsg = 'hello ${name}!'")
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('模版结果类型为 string：赋给 number 报类型错', async () => {
+    const diags = await diagnostics("x = 'v';\nn: number = 'a${x}';\nnil")
+    expect(messages(diags).length).toBeGreaterThan(0)
   })
 })

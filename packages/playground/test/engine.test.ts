@@ -119,9 +119,9 @@ test('Route A：桥接类型注入后 dom/text/storage 类型检查干净', asyn
     engine,
     '桥接',
     // dom 标签带 props + children；text/storage 直发消息
-    "dom div { className: 'box' } (text apply 'hi');\n" +
+    "dom div { className: 'box' } (text $ 'hi');\n" +
       "x = storage ref 1; x / get;\n" +
-      'list = createSignal apply (Array of); list get\n',
+      'list = createSignal $ (Array of); list get\n',
   )
   assert.equal(r.error, null, r.error ?? '')
   assert.deepEqual(
@@ -137,7 +137,7 @@ test('Route A：未知标签宽泛派发（JS Proxy 暴露方法，无需 method
   const r = await runNote(
     engine,
     '宽泛标签',
-    "dom customEl { class: 1 } (text apply 'hi');\n",
+    "dom customEl { class: 1 } (text $ 'hi');\n",
   )
   assert.equal(r.error, null, r.error ?? '')
   assert.deepEqual(r.diagnostics, [], `应有 0 类型诊断，实际: ${JSON.stringify(r.diagnostics)}`)
@@ -201,7 +201,7 @@ test('preview 导出可识别，holder addNode/addDestroy 生效', async () => {
     '// 模块导出带 preview 的对象\n' +
       'obj = {\n' +
       '  preview(ctx){\n' +
-      "    (text apply 'hello') / apply ctx;\n" +
+      "    (text $ 'hello') / $ ctx;\n" +
       '    ctx addDestroy [obj = 1];\n' +
       '  }\n' +
       '};\nobj\n',
@@ -226,12 +226,12 @@ test('preview 导出可识别，holder addNode/addDestroy 生效', async () => {
   }
 })
 
-test('fc apply 生成惰性组件，挂载期执行组件体', async () => {
+test('fc $ 生成惰性组件，挂载期执行组件体', async () => {
   const engine = createEngine(notes)
   const r = await runNote(
     engine,
     '组件',
-    'Comp = fc apply [ctx, a, b => ctx addDestroy [a + b]];\nComp\n',
+    'Comp = fc $ [ctx, a, b => ctx addDestroy [a + b]];\nComp\n',
   )
   assert.equal(r.error, null, r.error ?? '')
   const comp = sendMessage(r.value, 'apply', ['x', 1]) as (
@@ -266,7 +266,7 @@ test('createSignal + JS 数组生态：不可变更新信号列表', async () =>
     // 注：OOC 里 `list get length` 会把 length 解析成 get 的参数（Ref），
     // 运行时报错；读长度须先绑定变量（`xs = list get`）。
     // Array 是 globalThis 全局对象，`(Array of)` 发 of 消息造空数组。
-    'list = createSignal apply (Array of);\n' +
+    'list = createSignal $ (Array of);\n' +
       "xs = list get; list set (xs / toSpliced 0 0 'a');\n" +
       "ys = list get; list set (ys / toSpliced (ys length) 0 'b');\n" +
       'zs = list get; zs length\n',

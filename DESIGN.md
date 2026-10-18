@@ -6,7 +6,7 @@
 ## 1. 核心原理：一切皆是向对象发送消息
 
 - 没有函数调用，只有「给对象发消息」。`calc add 3 4` = 给 `calc` 发 `add` 消息，载荷 `[3, 4]`。
-- 消息是唯一的统治机制。循环、实例化、抛错、类型判断统统以对象方法形式暴露（`loop apply`、`js new`、`js throw`、`==`），不给语言开语法洞。
+- 消息是唯一的统治机制。循环、实例化、抛错、类型判断统统以对象方法形式暴露（`loop $`、`js new`、`js throw`、`==`），不给语言开语法洞。
 - **对象 = 能响应哪些消息的集合**，不是「是什么东西」。类型围绕行为签名组织，而非名义类名。
 
 ## 2. 值类型与对象是第一个分界
@@ -23,18 +23,18 @@
 - 消息派发只认名字，不再看参数数量。
 - 所以 OOC 从不缺类型机制：类型被做成了消息的一部分，运行时自己执法。
 
-## 4. 复用与兜底：withDefault 委托，不继承
+## 4. 复用与兜底：merge 委托，不继承
 
 **OOC 无继承**（曾有的 `{ ...base }` 原型合并已移除——「路由、层、链」塞进最简的元，与 guard 路由耦合引出大量角落语义）。复用与兜底统一收敛到一条唯一路径：
 
-| | 兜底 Proxy + handler（委托/withDefault） |
+| | 兜底 Proxy + handler（委托/merge） |
 | --- | --- |
-| 语义 | 开放世界运行时兜底：spec 方法优先，未知消息按 defaults 顺序转发 |
-| 组合 | `withDefault`（宿主端 delegate 全局）：把 parts 展平成链（spec 优先），包成兜底 Proxy；未命中消息按链顺序查找 |
+| 语义 | 开放世界运行时兜底：前面对象方法优先，未知消息按后面对象顺序转发 |
+| 组合 | `merge $`（宿主端 merge 全局）：把 parts 展平成链（前面对象优先），包成兜底 Proxy；未命中消息按链顺序查找 |
 | this | 委托进 defaults 方法时 this 仍是包装对象（方法体 this 回读继续走整条链，spec 优先） |
 | 静态分析 | defaults 的签名以交集类型（D∩S）合并进包装类型，检查器可分析 |
 
-**结论**：消息查找只留一种兜底——本对象没有的消息 → 抛「没有定义该方法」；要拦截它就把对象显式包成兜底 Proxy（`js proxy 对象 handler`，handler 是 `(name, ...args)` 转发函数；宿主侧对应 `proxyCatchAll(target, handler)`）。没有 methodNotFound 魔法，解释器不做隐式查找。继承曾提供的「结构级复用」降级为 `withDefault` 的显式委托（宿主端 delegate，写进调用面，不做隐式链）。
+**结论**：消息查找只留一种兜底——本对象没有的消息 → 抛「没有定义该方法」；要拦截它就把对象显式包成兜底 Proxy（`js proxy 对象 handler`，handler 是 `(name, ...args)` 转发函数；宿主侧对应 `proxyCatchAll(target, handler)`）。没有 methodNotFound 魔法，解释器不做隐式查找。继承曾提供的「结构级复用」降级为 `merge` 的显式委托（宿主端 merge，写进调用面，不做隐式链）。
 
 ## 5. 类型是字典不是法条（soft typing）
 
@@ -81,6 +81,6 @@
 
 1. 这个特性属于哪条线（值 / 匿名对象 / lambda / 宿主全局）？
 2. 合法性谁执法——运行时 guard（可靠）？还是静态类型（只导航不拦）？
-3. 未知消息谁兜底——兜底 Proxy（`js proxy 对象 handler`，宿主侧 `proxyCatchAll(target, handler)`，转发 `(name, ...args)`；withDefault 委托链路同样由宿主端 delegate 用这套 Proxy 组装）。无隐式继承链，也没有 methodNotFound 魔法名字。
+3. 未知消息谁兜底——兜底 Proxy（`js proxy 对象 handler`，宿主侧 `proxyCatchAll(target, handler)`，转发 `(name, ...args)`；merge 委托链路同样由宿主端 merge 用这套 Proxy 组装）。无隐式继承链，也没有 methodNotFound 魔法名字。
 4. 有没有引入动态名逃逸（`send`）？要不要现在付 LSP 全栈成本？
 5. 状态挂哪个对象——对象字面量绑定（`=`/`=>`）？还是宿主 storage/全局？

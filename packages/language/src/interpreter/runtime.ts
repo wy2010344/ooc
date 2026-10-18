@@ -1,4 +1,4 @@
-import { OOC_METHOD, literalOfBindBody, literalToValue } from '../member-kind.js'
+import { OOC_METHOD, APPLY_NAME, literalOfBindBody, literalToValue } from '../member-kind.js'
 import {
   Expression,
   Method,
@@ -48,6 +48,9 @@ export function getObjDefineName(n: MethodDefName) {
       return v.value.slice(1)
     case 'Str':
       return getStrValue(v)
+    case 'Dollar':
+      // 定义键用 `$`：归一为 APPLY_NAME（同一成员）
+      return APPLY_NAME
   }
 }
 export type OocObject = object
@@ -157,8 +160,8 @@ export function objectValue(methods: Method[], scope: Scope) {
         break
       }
       case 'MethodBindMutable': {
-        // 转发属性：本 key 上的一切消息原样转发给委托对象的 apply
-        //（消息名不传给 apply，只传实参），委托对象惰性求值一次缓存。
+        // 转发属性：本 key 上的一切消息原样转发给委托对象的 $（APPLY_NAME）
+        //（消息名不传给 $，只传实参），委托对象惰性求值一次缓存。
         const bind: LazyBind = { method, scope, done: false, value: undefined }
         writeMethod(name, function (this: unknown) {
           return sendMessage(lazyValue(bind), 'apply', Array.from(arguments))
@@ -224,6 +227,9 @@ export function getMethodCallName({ value }: MethodCallName) {
       return value.value.slice(1)
     case 'Str':
       return getStrValue(value)
+    case 'Dollar':
+      // `$` 直接调用：归一为 APPLY_NAME
+      return APPLY_NAME
     default:
       return value.value
   }
@@ -259,11 +265,11 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
 
 export function sendMessage(o: any, value: string, args: any[]): any {
   if (typeof o == 'function' && value == 'apply') {
-    //lambda需要特殊处理
+    // 函数接收者：lambda 直接当函数调用
     return o.apply(o, args)
   }
   // descriptor 优先：属性成员（getter）单次读取、结果原样返回——即使结果是
-  // lambda 也绝不二次 apply；数据属性带参写入、无参读取；数据函数仍按方法 apply。
+  // lambda 也绝不二次调用；数据属性带参写入、无参读取；数据函数仍按方法调用。
   // 无 own descriptor（原型链方法 / Proxy / 宿主内建）走下方回退链。
   const desc =
     o == null || (typeof o !== 'object' && typeof o !== 'function')
@@ -280,7 +286,7 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     }
     if (typeof desc.value === 'function') {
       // 数据函数＝OOC 方法（带 OOC_METHOD 标记）或宿主方法 → 调用。lambda 值不会
-      // 以数据属性出现（绑定里的 lambda 走 getter），故这里 apply 对两者都安全。
+      // 以数据属性出现（绑定里的 lambda 走 getter），故这里调用对两者都安全。
       return desc.value.apply(o, args)
     }
     // 数据非函数属性：带参且可写才写入，否则读取（常量/只读属性忽略实参）
@@ -300,6 +306,15 @@ export function sendMessage(o: any, value: string, args: any[]): any {
       o[value] = args[0]
     }
     return o[value]
+  }
+  // send：通用消息——把「接收者 + 消息名 + 参数」交回运行时动态派发。
+  // 任意值都可接收：`map send 'key'` ≡ 读取 map 上的 key（等价 JS 的 map[key]）。
+  // 参数约定同 js send：唯一数组参数视为完整参数列表（便于 rest 转发）。
+  if (value === 'send') {
+    const name = args[0]
+    const params =
+      args.length === 2 && Array.isArray(args[1]) ? args[1] : args.slice(1)
+    return sendMessage(o, String(name), params)
   }
   const num = numDef[value as '<']
   if (num) {

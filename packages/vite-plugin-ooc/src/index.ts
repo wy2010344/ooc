@@ -22,7 +22,11 @@ import {
   typeExportNames,
 } from 'object-oriented-c-cli'
 import type { Model } from 'object-oriented-c-language'
-import { createObjectOrientedCServices } from 'object-oriented-c-language'
+import {
+  createObjectOrientedCServices,
+  graftTemplates,
+  makeHoleParser,
+} from 'object-oriented-c-language'
 import { NodeFileSystem } from 'langium/node'
 
 /** 共享运行时虚拟模块 id：各 .ooc 产物从它 import __send/__createObject，bundle 只保留一份。 */
@@ -45,6 +49,10 @@ export type OocPluginOptions = {
 export function oocPlugin(options: OocPluginOptions = {}): Plugin {
   // 共享 langium 服务（只用于 parse 单个 .ooc，不做 linking/validation）
   const services = createObjectOrientedCServices(NodeFileSystem)
+  // 模版字符串：fromString 不经 DocumentBuilder，需在此手动 graft 洞内表达式。
+  const parseHole = makeHoleParser((source) =>
+    services.ObjectOrientedC.parser.LangiumParser.parse(source),
+  )
   let root = process.cwd()
   let modulesDir: string | undefined
 
@@ -57,7 +65,9 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
     if (parseErrors.length > 0) {
       throw new Error(`OOC 语法错误 ${parseErrors[0]}`)
     }
-    return doc.parseResult.value as Model
+    const model = doc.parseResult.value as Model
+    graftTemplates(model, parseHole)
+    return model
   }
 
   /** #import 原值 → 相对当前 .ooc 模块的 ES import 说明符（带扩展名，vite 可直接解析）。 */

@@ -66,6 +66,53 @@ describe('Parsing tests', () => {
     expect(checkDocumentValid(document)).toBeUndefined()
   })
 
+  test('parse $（定义键 / 消息 / 中缀）', async () => {
+    document = await parse(`
+            inc = [x => x + 1];
+            r = inc $ 2;
+            obj = { $(x) => x * 2 };
+            chain = { get { obj } };
+            chain get $ 3;
+            chain get $;
+            chain get $ 1 2 3;
+        `)
+    expect(checkDocumentValid(document)).toBeUndefined()
+    // 消息名位置解析出 Dollar 节点（递归查找，跳过 $container/$refs 等内部字段）
+    const found = (function seek(node: unknown): boolean {
+      if (!node || typeof node !== 'object') return false
+      const n = node as Record<string, unknown>
+      if (n.$type === 'Dollar') return true
+      for (const key of Object.keys(n)) {
+        if (key.startsWith('$')) continue
+        const v = n[key]
+        if (Array.isArray(v)) {
+          if (v.some(seek)) return true
+        } else if (seek(v)) {
+          return true
+        }
+      }
+      return false
+    })(document.parseResult.value)
+    expect(found).toBe(true)
+    // 中缀位置解析出 MessageInfixRight（infix='$'）
+    const hasInfix = (function seek(node: unknown): boolean {
+      if (!node || typeof node !== 'object') return false
+      const n = node as Record<string, unknown>
+      if (n.$type === 'MessageInfixRight' && n.infix === '$') return true
+      for (const key of Object.keys(n)) {
+        if (key.startsWith('$')) continue
+        const v = n[key]
+        if (Array.isArray(v)) {
+          if (v.some(seek)) return true
+        } else if (seek(v)) {
+          return true
+        }
+      }
+      return false
+    })(document.parseResult.value)
+    expect(hasInfix).toBe(true)
+  })
+
   test('parse #import 语句', async () => {
     document = await parse(`
             math = '#import' 'math-lib';

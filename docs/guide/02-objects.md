@@ -44,30 +44,30 @@ config area        // → 12.56
 
 **纯字面量常量必须直接写绑定**（`kind = 'circle'`）：写成 `{ 'circle' }` / `=> 'circle'` 会被 validator 以 `constMethodBody` 报错——字面量恒定，绑定一次写值更省。
 
-方法体返回 lambda 时，读取（发消息）拿到 lambda 本体（不会被隐式执行），要调用再显式 `apply`：
+方法体返回 lambda 时，读取（发消息）拿到 lambda 本体（不会被隐式执行），要调用再显式 `$`：
 
 ```ooc
 obj = { handler => [x => x + 1] };
 h = obj handler;      // 发消息执行方法体，h 是返回的 lambda 本体
-h apply 41            // 42
+h $ 41                // 42
 ```
 
 JS 侧对应形状：字面量绑定是数据属性（`.x` 直读值），计算绑定是 getter（`.x` 读取即求值、函数值原样返回），方法是函数（`.f(args)` 调用；零参方法 `.m()` 调用才执行）。
 
 ## 转发属性
 
-`name <= delegate` 把**名字上的所有消息**原样转发给 `delegate` 的 `apply` 方法执行（消息名不传给 apply，只传实参）：
+`name <= delegate` 把**名字上的所有消息**原样转发给 `delegate` 的 `$` 执行（消息名不传给 `$`，只传实参）：
 
 ```ooc
-double = { apply(v) => v * 2 };
+double = { $(v) => v * 2 };
 box = { value <= double };
 
-box value 21     // 42（→ double apply 21）
-box value        // undefined（→ double apply，无参）
-box value 1 2    // 会按 apply 的形参匹配（这里 apply 只有 1 参，运行时抛「没有定义该方法」）
+box value 21     // 42（→ double $ 21）
+box value        // undefined（→ double $，无参）
+box value 1 2    // 会按 $ 的形参匹配（这里 $ 只有 1 参，运行时抛「没有定义该方法」）
 ```
 
-- 委托对象必须含 `apply`（像 lambda 或可调用对象）；没有时类型检查会报错。
+- 委托对象必须含 `$`（像 lambda 或可调用对象）；没有时类型检查会报错。
 - 名字唯一：`<=` 转发与同名 `=` / 方法体不能共存（重复定义报 `duplicateMethod`）。
 - 实例/模块级可变状态不靠属性写入，改用宿主容器（`storage ref`、signal、数组等）。
 
@@ -86,8 +86,8 @@ calc inc 3       // 8
 ## 剩余参数
 
 ```ooc
-obj = { apply(a, ...rest) { rest } };
-obj apply 1 2 3 4    // [2, 3, 4]
+obj = { $(a, ...rest) { rest } };
+obj $ 1 2 3 4        // [2, 3, 4]
 ```
 
 ## 守卫 #guard
@@ -144,14 +144,14 @@ calc = {
 - 签名方法之间返回类型不同**不告警**（TS 式豁免）；实现方法体与声明不符才告警。
 - **签名方法必须有返回类型**（既无 body 又无返回类型会报错）；**无参方法不写括号**（`f()` 是语法错误，写 `f` 即可）。
 
-## 委托组合 withDefault
+## 委托组合 merge
 
-OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `withDefault` 委托（宿主端 `delegate` 全局）：spec 的方法优先，未知消息按 defaults 顺序查找。
+OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。
 
 ```ooc
 defaults = { speak = 'voice', bark = 'wang' };
 spec = { fly = 'fly' };
-w = delegate withDefault spec defaults;
+w = merge $ spec defaults;
 
 w fly      // 'fly'（spec 自有）
 w speak    // 'voice'（转给 defaults）
@@ -161,11 +161,11 @@ spec 与 defaults 同名时 spec 优先：
 
 ```ooc
 spec2 = { speak = 'wang' };
-w2 = delegate withDefault spec2 defaults;
+w2 = merge $ spec2 defaults;
 w2 speak   // 'wang'
 ```
 
-`withDefault` 的产物也是包装对象，可以再次拼进新链（`e = delegate withDefault c d`），
+`merge $` 的产物也是包装对象，可以再次拼进新链（`e = merge $ c d`），
 已组合的链在组装期展平，原对象（spec/defaults）只读不写，可被多个包装安全共享。
 
 ## 嵌套对象

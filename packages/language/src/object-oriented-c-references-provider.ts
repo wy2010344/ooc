@@ -16,6 +16,7 @@ import {
   type MethodBindMutable,
   type Message,
 } from './generated/ast.js'
+import { APPLY_NAME } from './member-kind.js'
 
 /**
  * OOC 查找引用提供者
@@ -43,14 +44,20 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
     if (!rootNode) return []
 
     const offset = document.textDocument.offsetAt(params.position)
-    const cstNode = CstUtils.findDeclarationNodeAtOffset(rootNode, offset, this.grammarConfig.nameRegexp)
-    if (!cstNode) return []
-
-    const targetNode = cstNode.astNode
-    if (!targetNode) return []
-
-    const name = this.getNodeName(targetNode)
-    if (!name) return []
+    let cstNode = CstUtils.findDeclarationNodeAtOffset(rootNode, offset, this.grammarConfig.nameRegexp)
+    let targetNode = cstNode?.astNode
+    let name = targetNode ? this.getNodeName(targetNode) : undefined
+    if (!name) {
+      // `$` 不属于 nameRegexp（会被 findDeclarationNodeAtOffset 前移一位而落空）：
+      // 直接用偏移处的叶节点（Dollar），语义名经父节点归一为 APPLY_NAME。
+      const leaf = CstUtils.findLeafNodeAtOffset(rootNode, offset)
+      const leafName = leaf?.astNode ? this.getNodeName(leaf.astNode) : undefined
+      if (leaf && leafName) {
+        cstNode = leaf
+        name = leafName
+      }
+    }
+    if (!cstNode || !name) return []
 
     const allLocations: Array<{ location: Location; isDeclaration: boolean; rangeKey: string }> = []
     const uri = document.uri?.toString()
@@ -131,6 +138,7 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
     if (isRef(innerName)) return innerName.value
     if (innerName.$type === 'StID') return innerName.value.replace(/^"/, '').replace(/"$/, '')
     if (innerName.$type === 'Str') return innerName.value.replace(/^'/, '').replace(/'$/, '')
+    if (innerName.$type === 'Dollar') return APPLY_NAME
     return undefined
   }
 
@@ -140,6 +148,7 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
     const value = nameNode.value
     if (!value) return undefined
     if (isRef(value)) return value.value
+    if (value.$type === 'Dollar') return APPLY_NAME
     if (value.$type === 'StID') return value.value.replace(/^"/, '').replace(/"$/, '')
     if (value.$type === 'Str') return value.value.replace(/^'/, '').replace(/'$/, '')
     return undefined
@@ -162,41 +171,43 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
       if (!semanticNode) return
 
       const leafText = cstNode.text
+      // apply 成员的 surface 写法是 `$`，故叶文本 `$` 与语义名 APPLY_NAME 等价
+      const leafOk = leafText === name || (name === APPLY_NAME && leafText === '$')
 
       // 精确匹配：语义节点类型 + 文本
       let matched = false
       let isDecl = false
 
-      if (isRef(semanticNode) && semanticNode.value === name && leafText === name) {
+      if (isRef(semanticNode) && semanticNode.value === name && leafOk) {
         matched = true
         isDecl = false
-      } else if (isAssignment(semanticNode) && semanticNode.name === name && leafText === name) {
+      } else if (isAssignment(semanticNode) && semanticNode.name === name && leafOk) {
         matched = true
         isDecl = true
-      } else if (isParam(semanticNode) && semanticNode.name === name && leafText === name) {
+      } else if (isParam(semanticNode) && semanticNode.name === name && leafOk) {
         matched = true
         isDecl = true
       } else if (isMethodAll(semanticNode)) {
         const methodName = this.getMethodName(semanticNode)
-        if (methodName === name && leafText === name) {
+        if (methodName === name && leafOk) {
           matched = true
           isDecl = true
         }
       } else if (isMethodBind(semanticNode)) {
         const bindName = this.getBindName(semanticNode)
-        if (bindName === name && leafText === name) {
+        if (bindName === name && leafOk) {
           matched = true
           isDecl = true
         }
       } else if (isMethodBindMutable(semanticNode)) {
         const mutableName = this.getMutableName(semanticNode)
-        if (mutableName === name && leafText === name) {
+        if (mutableName === name && leafOk) {
           matched = true
           isDecl = true
         }
       } else if (isMessage(semanticNode)) {
         const msgName = this.getMethodCallName(semanticNode)
-        if (msgName === name && leafText === name) {
+        if (msgName === name && leafOk) {
           matched = true
           isDecl = false
         }

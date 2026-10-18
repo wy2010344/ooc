@@ -43,14 +43,14 @@ export type OOCEntry =
   | { type: 'bind'; name: string; fn: () => any }
   /** 方法（「=>」/带参）：数据函数 + OOC_METHOD 标记，发消息即调用 */
   | { type: 'call'; name: string; fn: (...args: any[]) => any }
-  /** 转发属性（「<=」）：数据函数 + 标记，发消息转发给委托对象的 apply */
+  /** 转发属性（「<=」）：数据函数 + 标记，发消息转发给委托对象的 $ */
   | { type: 'mutable'; name: string; fn: (...args: any[]) => any }
 // 展开参数辅助：'...expr' 求值为数组则摊平，否则整体作单参（与解释器语义一致）
 export function __spread(value: any): any[] {
   return Array.isArray(value) ? value : [value]
 }
 // 转发属性「<=」的构造器：惰性求值委托对象一次并缓存，之后本 key 上的一切消息
-// 原样转发给委托对象的 apply（消息名不传，只传实参）。
+// 原样转发给委托对象的 $（消息名不传，只传实参）。
 export function __mutable(getDelegate: () => any): any {
   let done = false
   let d: any

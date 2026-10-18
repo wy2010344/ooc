@@ -192,6 +192,20 @@ test('虚拟 runtime 模块：resolveId 归一化、load 返回去掉类型的 J
   }
 })
 
+test('.ooc load：模版字符串经 graft 编译成 [文本/洞].join("")', () => {
+  const tplDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-tpl-'))
+  test.after(() => fs.rmSync(tplDir, { recursive: true, force: true }))
+  const file = path.join(tplDir, 'tpl.ooc')
+  fs.writeFileSync(file, "name = 'world';\n{ msg = 'hi ${name}' }\n")
+  const result: any = load.call(ctx, path.normalize(file))
+  if (!/\]\.join\(''\)/.test(result.code)) {
+    throw new Error(`模版应编译成 join('')，实际:\n${result.code}`)
+  }
+  if (!/"hi "/.test(result.code)) {
+    throw new Error(`模版文本段应保留，实际:\n${result.code}`)
+  }
+})
+
 test('非 .ooc/.runtime id 不打扰：resolveId/load 返回 undefined', () => {
   if (resolveId.call(ctx, './x.ts', appPath) !== undefined) {
     throw new Error('.ts 不应被接管')

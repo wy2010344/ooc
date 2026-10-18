@@ -96,7 +96,7 @@ describe('包感知 FileSystemProvider（重定向 /ooc-pkg → 包根目录）'
   test('包装 provider 转发读取到映射后的真实 URI', async () => {
     // 底层内存 FS 以完整路径为键
     const files = new Map<string, string>([
-      ['/repo/.ooc_modules/base/loop.ooc', 'loop = { apply(fn) => nil }; loop'],
+      ['/repo/.ooc_modules/base/loop.ooc', 'loop = { $(fn) => nil }; loop'],
       ['/proj/math.ooc', 'x = 42; x'],
     ])
     const nameOf = (uri: URI) => decodeURIComponent(uri.path)

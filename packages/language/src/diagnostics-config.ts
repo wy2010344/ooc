@@ -129,7 +129,7 @@ export const DIAGNOSTIC_CODES = {
   extendsValueType: 'extendsValueType',
   invalidCast: 'invalidCast',
   unionUncovered: 'unionUncovered',
-  delegateNoApply: 'delegateNoApply',
+  delegateNotCallable: 'delegateNotCallable',
 } as const
 
 /**
@@ -193,7 +193,7 @@ function extractOocValue(obj: Record<string, unknown>, key: string): unknown {
  * 遍历所有可能的 diagnostic code，通过消息发送获取值。
  *
  * 为什么用对象而不是函数：走真实 OOC 对象语义（成员绑定、鸭子类型、this
- * 指向对象本身），且支持 withDefault 模式——OOC 配置写成 `{ diagnostics = w }`，
+ * 指向对象本身），且支持 merge 模式——OOC 配置写成 `{ diagnostics = w }`，
  * 其中 w = js proxy 对象 (name, ...args => 转发)，兜底 handler 把未配置的
  * 诊断码转发到默认配置对象。
  */
@@ -203,8 +203,8 @@ function extractDiagLevels(
   const result: Record<string, DiagLevel> = {}
 
   // 遍历所有可能的 diagnostic code，通过消息发送获取值
-  // 这样可以触发兜底 Proxy 转发（withDefault 包装的 handler）。
-  // sendMessage 已完成派发（属性 getter 直读、数据函数 apply），raw 就是最终值；
+  // 这样可以触发兜底 Proxy 转发（merge 包装的 handler）。
+  // sendMessage 已完成派发（属性 getter 直读、数据函数 $ 调用），raw 就是最终值；
   // 函数值（lambda 配置）原样透传并被过滤，绝不能再二次调用。
   for (const code of Object.values(DIAGNOSTIC_CODES)) {
     try {

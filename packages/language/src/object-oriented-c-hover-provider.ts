@@ -20,6 +20,7 @@ import {
   isRef,
   isStr,
   isStID,
+  isDollar,
   isParam,
   type LambdaDef,
   type Message,
@@ -28,6 +29,7 @@ import {
   type MethodBindMutable,
   type MethodCallName,
 } from './generated/ast.js'
+import { APPLY_NAME, displayMemberName } from './member-kind.js'
 import { getSharedChecker } from './shared-checker.js'
 import {
   describeType,
@@ -253,7 +255,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
 
     if (isMethodBindMutable(node)) {
       return this.buildHoverContent(
-        `转发属性 ${this.extractName(node.name)}（消息转发给委托对象的 apply）`,
+        `转发属性 ${this.extractName(node.name)}（消息转发给委托对象的 $）`,
         comment,
       )
     }
@@ -286,6 +288,15 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
 
     if (isStID(node)) {
       return this.buildHoverContent(`标识符 ${node.value}`, comment)
+    }
+
+    // `$` 是直接调用（apply 消息）：悬停在 `$` 上按它所在的消息名解析
+    if (isDollar(node)) {
+      const message = node.$container?.$container
+      if (message && isMessage(message)) {
+        return this.handleMessageHover(message, comment)
+      }
+      return this.buildHoverContent('$（直接调用）', comment)
     }
 
     if (isExpression(node) || isPrimary(node)) {
@@ -359,6 +370,8 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
 
   private handleMessageHover(message: Message, comment: string): string {
     const name = this.getMethodCallName(message.name)
+    // apply 成员的 surface 写法是 `$`，悬停展示归一
+    const display = displayMemberName(name)
     const container = message.$container
     let receiverType: TypeInfo | undefined
 
@@ -374,16 +387,16 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
           .join(', ')
         const rest = sig.rest ? `, ...${describeType(sig.rest)}` : ''
         return this.buildHoverContent(
-          `${describeType(receiverType)}.${name}(${params}${rest}) => ${describeType(sig.returns)}`,
+          `${describeType(receiverType)}.${display}(${params}${rest}) => ${describeType(sig.returns)}`,
           comment,
         )
       }
       return this.buildHoverContent(
-        `消息 ${name} 发送给 ${describeType(receiverType)}`,
+        `消息 ${display} 发送给 ${describeType(receiverType)}`,
         comment,
       )
     }
-    return this.buildHoverContent(`消息 ${name}`, comment)
+    return this.buildHoverContent(`消息 ${display}`, comment)
   }
 
   private findMethodSignature(
@@ -408,6 +421,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   private getMethodCallName(name: MethodCallName): string {
     const v = name.value
     if (isRef(v)) return v.value
+    if (isDollar(v)) return APPLY_NAME
     if (isStID(v)) return v.value.slice(1)
     if (v && typeof v === 'object' && 'value' in v) return String(v.value)
     return String(v)
@@ -431,6 +445,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     if (!innerName) return undefined
     if (isRef(innerName)) return innerName.value
     if (isStID(innerName)) return innerName.value.slice(1)
+    if (isDollar(innerName)) return APPLY_NAME
     if (innerName && typeof innerName === 'object' && 'value' in innerName) {
       return String(innerName.value)
     }
@@ -456,15 +471,16 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
       const head = t.name ? `类型 ${t.name}` : '对象'
       const lines = [...t.methods.entries()].flatMap(([n, sigs]) =>
         (sigs as any[]).map((sig: any) => {
+          const memberName = displayMemberName(n)
           const params = (sig.params ?? [])
             .map((p: any) => (p ? describeType(p) : 'any'))
             .join(', ')
           const rest = sig.rest ? `, ...${describeType(sig.rest)}` : ''
           // 零参无泛型成员渲染为属性形态（判别字段），与 d.ts 一致
           if ((sig.params ?? []).length === 0 && !sig.rest && !sig.typeParams) {
-            return `${n}: ${describeType(sig.returns)}`
+            return `${memberName}: ${describeType(sig.returns)}`
           }
-          return `${n}(${params}${rest}) => ${describeType(sig.returns)}`
+          return `${memberName}(${params}${rest}) => ${describeType(sig.returns)}`
         }),
       )
       return lines.length

@@ -3,6 +3,7 @@
 import type { Expression, Message, Primary } from 'object-oriented-c-language'
 import { isTypeRef } from './util.js'
 import { literalOfBindBody, type PrimitiveLiteral } from 'object-oriented-c-language'
+import { APPLY_NAME, getInfixName } from 'object-oriented-c-language'
 
 /** 纯字面量 → TS 代码（绑定数据属性值） */
 function literalCode(lit: PrimitiveLiteral): string {
@@ -22,8 +23,20 @@ function primaryCode(p: Primary): string {
   switch (p.$type) {
     case 'Num':
       return String((p as any).value)
-    case 'Str':
+    case 'Str': {
+      // 含洞的模版字符串 → [文本/洞…].join('')：文本段是已还原转义的字符串字面量，
+      // 洞段是表达式（join 负责字符串化，nil/undefined → 空串）。纯字符串走原样字面量。
+      const parts = ((p as any).parts ?? []) as any[]
+      if (parts.length > 0) {
+        const segs = parts.map((part) =>
+          part.$type === 'TemplateHole'
+            ? `(${expressionCode(part.expression)})`
+            : JSON.stringify(part.value),
+        )
+        return `[${segs.join(', ')}].join('')`
+      }
       return JSON.stringify((p as any).value)
+    }
     case 'Bool':
       return (p as any).value === 'true' ? 'true' : 'false'
     case 'Nil':
@@ -44,6 +57,8 @@ function primaryCode(p: Primary): string {
 function messageName(m: Message): string {
   const v = (m.name as any).value
   if (v?.$type === 'StID') return v.value.slice(1)
+  // `$` 直接调用：归一为 APPLY_NAME
+  if (v?.$type === 'Dollar') return APPLY_NAME
   return v?.value ?? ''
 }
 
@@ -101,8 +116,14 @@ function piplingCode(e: any): string {
       const chainArgs = [left, ...(mc.message.args || []).map((a: any) => argCode(a))]
       return `__send(${primaryCode(mc.primary)}, ${JSON.stringify(messageName(mc.message))}, [${chainArgs.join(', ')}])`
     }
-    case 'MessageInfixRight':
-      return `__send(${left}, ${JSON.stringify(r.infix)}, [${primaryCode(r.value)}])`
+    case 'MessageInfixRight': {
+      // 中缀：`$` 归一为 apply，可带 0~N 个实参（其余中缀恰好 1 个）
+      const args =
+        r.infix === '$'
+          ? (r.args ?? []).map((a: any) => argCode(a))
+          : [primaryCode(r.value)]
+      return `__send(${left}, ${JSON.stringify(getInfixName(r.infix))}, [${args.join(', ')}])`
+    }
     default:
       return left
   }
@@ -216,6 +237,8 @@ function methodName(n: any): string {
   const raw = n?.name
   if (!raw) return ''
   if (raw.$type === 'StID') return raw.value.slice(1)
+  // 定义键写 `$`：归一为 APPLY_NAME（编译产物仍用 apply，与宿主 JS 一致）
+  if (raw.$type === 'Dollar') return APPLY_NAME
   return raw.value ?? ''
 }
 
@@ -281,7 +304,7 @@ function guardChainCode(body: any): string {
   return parts.join(' ')
 }
 
-/** lambda [x => body]：等价 { apply(...) {...} }，编译成真正的 JS 函数（解释器语义：既是值又是函数）。 */
+/** lambda [x => body]：等价 { $ { ... } }，编译成真正的 JS 函数（解释器语义：既是值又是函数）。 */
 function lambdaDefCode(e: any): string {
   if (!e || e.$type !== 'LambdaDef') return expressionCode(e)
   const params = (e.params || []).map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)

@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { FileSystemProvider } from 'langium'
 import {
   createInterpretAction,
-  delegate,
+  merge,
   js,
   sendMessage,
   storage,
@@ -11,7 +11,7 @@ import {
 import { describe, expect, test } from './compat.js'
 
 // 浏览器 demo 的自测案例（packages/example/src/ooc）作为单元测试回归，
-// 宿主桥接用语言包导出的同一份 storage/js/delegate，保证与 main.ts 行为一致。
+// 宿主桥接用语言包导出的同一份 storage/js/merge，保证与 main.ts 行为一致。
 // example 与 base 包源码共同组成可 #import 的模块集合（与浏览器 FS 同构）。
 const fixtures = join(
   import.meta.dirname,
@@ -90,7 +90,7 @@ function runCase(file: string) {
     {
       storage,
       js,
-      delegate,
+      merge,
     },
   )
   return interpreter.interpret(src, join(fixtures, file))

@@ -10,6 +10,7 @@ syntaxes/
 *.tsbuildinfo
 *.vsix
 .agents/
+.sisyphus/
 debug-*.mjs
 test-marker.mjs
 .ooc_modules/

@@ -33,11 +33,14 @@
         "build": "tsc"
     },
     "dependencies": {
+        "@floating-ui/dom": "^1.8.0",
         "mve-core": "*",
         "mve-dom": "*",
+        "mve-helper": "*",
+        "mve-icons": "^6.0.0",
+        "object-oriented-c-language": "0.0.1",
         "wy-dom-helper": "*",
-        "wy-helper": "*",
-        "object-oriented-c-language": "0.0.1"
+        "wy-helper": "*"
     },
     "devDependencies": {
         "shx": "~0.4.0",

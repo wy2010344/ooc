@@ -1,31 +1,31 @@
 // ===== loop：OOC 自实现循环（base 包），无需宿主桥接 =====
-// loop apply：while 循环，lambda 返回真值继续，假值（nil/false/0）停止。
+// loop $：while 循环，lambda 返回真值继续，假值（nil/false/0）停止。
 // loop repeat：次数已知的有限循环，恰好执行 n 次。
-// 实现见 base 包 src/loop.ooc（apply=递归+#guard 短路，repeat='x' repeat n 数据化）。
+// 实现见 base 包 src/loop.ooc（$=递归+#guard 短路，repeat='x' repeat n 数据化）。
 
 loop = #import '@base/loop';
 
-// 基本 apply 循环：计数到 5
+// 基本 $ 循环：计数到 5
 n = storage ref 0;
 step = [n set ((n get) + 1); (n get) < 5];
-loop apply step;
+loop $ step;
 iterationsResult = { iterations = (n get) };
 
-// loop apply 边界：至少执行一次（即使 lambda 立即返回假值）
+// loop $ 边界：至少执行一次（即使 lambda 立即返回假值）
 called = storage ref 0;
-loop apply [called set 1; nil];
+loop $ [called set 1; nil];
 first = (called get);
 
 // 0 也是假值，立即停但已跑一次
 called0 = storage ref 0;
-loop apply [called0 set 1; 0];
+loop $ [called0 set 1; 0];
 zeroStops = (called0 get);
 
 // 递减计数到 0
 count = storage ref 3;
 runs = storage ref 0;
 decStep = [runs set ((runs get) + 1); count set ((count get) - 1); (count get) > 0];
-loop apply decStep;
+loop $ decStep;
 
 // ===== loop repeat：恰好执行 n 次的有限循环 =====
 sum = storage ref 0;
@@ -39,7 +39,7 @@ loop repeat 0 [touched set 1];
 total = storage ref 0;
 i = storage ref 10;
 sumStep = [total set ((total get) + (i get)); i set ((i get) - 1); (i get) > 0];
-loop apply sumStep;
+loop $ sumStep;
 
 {
     loopIterations = (n get),

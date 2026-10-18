@@ -25,17 +25,17 @@ async function makeProject(): Promise<string> {
   // base 包：OOC 语言实现的循环（经 @pkg 引用）
   await fs.writeFile(
     path.join(root, '.ooc_modules', 'base', 'loop.ooc'),
-    `// base 包循环：#guard 分支链（递归 apply + nil 兜底）
+    `// base 包循环：#guard 分支链（递归 $ + nil 兜底）
 loop = {
-    apply(fn) {
-        #guard fn apply;
-        this apply fn
+    $(fn) {
+        #guard fn $;
+        this $ fn
         #else;
         nil
     },
     repeat(n, fn) {
         i = 0;
-        [ i < n; fn apply i; i = i + 1 ];
+        [ i < n; fn $ i; i = i + 1 ];
         nil
     }
 };
@@ -82,7 +82,7 @@ math = #import './math';
 loop = #import '@base/loop';
 host = #import './host.ts';
 n = (host storage) ref 0;
-loop apply [n set ((n get) + 1); (n get) < 5];
+loop $ [n set ((n get) + 1); (n get) < 5];
 {
     sum = (math add 2 3),
     iterations = (n get),

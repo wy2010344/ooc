@@ -3,12 +3,12 @@ import { proxyCatchAll } from './proxy.js'
 import { OocMethodNotFoundError } from './errors.js'
 
 /**
- * 宿主注入的 JS 全局对象（storage/js/delegate），供 OOC 源码直接按名引用。
+ * 宿主注入的 JS 全局对象（storage/js/merge），供 OOC 源码直接按名引用。
  * 浏览器 demo（packages/example/src/main.ts）与语言包单元测试共用这一份，
  * 保证行为一致。
  *
  * 能用 OOC 语言实现的尽量下沉到 packages/base（目前仅 loop），不再桥接。
- * 委托组合（withDefault）需要宿主提供的链式委托原语，故由宿主端 delegate 提供。
+ * 合并/兜底（merge $ overrides defaults）需要宿主提供的链式委托原语，故由宿主端 merge 提供。
  */
 
 /** storage：可变更的引用（cell），OOC 用它与可变状态交互 */
@@ -52,7 +52,7 @@ export const js = {
   },
   // js proxy 对象 handler → 包成兜底 Proxy：对象自身不存在的消息名统一拦截，
   // 转发给 handler(name, ...args)。语言没有 methodNotFound 魔法——要兜底就
-  // 显式传 handler（OOC 侧常写 [name, ...args => ...] 或 { apply(...) }）。
+  // 显式传 handler（OOC 侧常写 [name, ...args => ...] 或 { $ { ... } }）。
   proxy(obj: unknown, handler: unknown) {
     const fn =
       typeof handler === 'function'
@@ -60,7 +60,7 @@ export const js = {
         : (handler as Record<string, unknown> | null | undefined)?.['apply']
     if (typeof fn !== 'function') {
       throw new TypeError(
-        `js proxy 的 handler 需要是 lambda 或带 apply 方法的对象，收到 ${handler}`,
+        `js proxy 的 handler 需要是 lambda 或带 $ 方法的对象，收到 ${handler}`,
       )
     }
     return proxyCatchAll(
@@ -71,15 +71,15 @@ export const js = {
 }
 
 /**
- * delegate：委托组合桥。withDefault(...parts) 把多个对象按优先级组装成
+ * merge：合并/兜底桥。`$` 把多个对象按优先级组装成
  * 「链式委托包装」：包装上未命中的消息按链顺序查找，找到就取用了。
  * 组装期先对已包装的委托（自带 __chain 自有键）展平其链段，再包一层兜底
- * Proxy（见 chainWrap）；原对象（spec/defaults）只读不写，可被多个 withDefault
- * 安全共享，也可把已组合的委托再拼接进新链（二次 withDefault 不丢链）。
+ * Proxy（见 chainWrap）；原对象（overrides/defaults）只读不写，可被多个 merge
+ * 安全共享，也可把已组合的委托再拼接进新链（二次 merge 不丢链）。
  */
-export const delegate = {
-  // delegate withDefault spec defaults … → 链式委托包装对象
-  withDefault(...parts: unknown[]) {
+export const merge = {
+  // merge $ overrides defaults … → 链式委托包装对象
+  apply(...parts: unknown[]) {
     // 组装期展平：参数是已包装委托（自有 __chain 键）时取其链段并查，否则视为叶子
     const entries: unknown[] = []
     for (const p of parts) {
@@ -111,7 +111,7 @@ function chainWrap(entries: unknown[]): unknown {
     for (const o of entries) {
       if (o == null) continue
       // descriptor 优先：属性成员（getter）以包装对象为 receiver 单次读取，
-      // 结果原样返回（可为 lambda，绝不二次 apply）；未命中（undefined）继续向后查找
+      // 结果原样返回（可为 lambda，绝不二次调用）；未命中（undefined）继续向后查找
       const desc =
         typeof o === 'object' || typeof o === 'function'
           ? Object.getOwnPropertyDescriptor(o, name)

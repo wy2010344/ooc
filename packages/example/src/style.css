@@ -1,125 +1,101 @@
+@import 'tailwindcss';
+
+/* 让 Tailwind 扫描 OOC 源码里的工具类（.ooc 是自定义扩展名，显式声明更稳妥）。
+   组件的类名表、variant 逻辑与布局类名全部写在 .ooc（src/ooc/ui/*.ooc），这里补扫描路径。 */
+@source './ooc';
+
+/* 深色变体：跟随 <html class="dark">（本示例默认浅色） */
+@custom-variant dark (&:is(.dark *));
+
+/* ===== shadcn 设计令牌（Tailwind v4，oklch 色值）===== */
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  line-height: 1.6;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
 }
 
-body {
-  margin: 0 auto;
-  max-width: 760px;
-  padding: 2rem 1.5rem;
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
 }
 
-h1 {
-  font-size: 1.5rem;
-  font-weight: bold;
-  margin-bottom: 0.25rem;
+/* 把令牌暴露为 Tailwind 颜色/圆角工具（bg-primary、text-muted-foreground、rounded-lg …） */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-h3 {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #666;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }
 
-p {
-  margin-top: 0;
-}
-
-.card {
-  border-radius: 0.75rem;
-  background: #f5f5f4;
-  padding: 1rem;
-}
-
-.card-value {
-  margin-top: 0.5rem;
-  font-family: monospace;
-  font-size: 1.25rem;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
-.section {
-  border-radius: 0.75rem;
-  padding: 1rem;
-}
-
-.section-blue {
-  background: #eff6ff;
-}
-
-.section-green {
-  background: #ecfdf5;
-}
-
-.section h3 {
-  color: #2563eb;
-}
-
-.section-green h3 {
-  color: #059669;
-}
-
-.counter-value {
-  font-family: monospace;
-  font-size: 1.875rem;
-  color: #1e40af;
-}
-
-.btn {
-  border: none;
-  border-radius: 0.5rem;
-  padding: 0.25rem 0.75rem;
-  font-size: 0.875rem;
-  color: white;
-  background: #2563eb;
-  cursor: pointer;
-}
-
-.btn:hover {
-  background: #1d4ed8;
-}
-
-.input {
-  width: 100%;
-  margin-top: 0.5rem;
-  padding: 0.375rem 0.75rem;
-  border: 1px solid #a7f3d0;
-  border-radius: 0.5rem;
-  font-size: 0.875rem;
-  background: white;
-}
-
-.input:focus {
-  outline: none;
-  border-color: #059669;
-}
-
-.flex {
-  display: flex;
-}
-
-.gap-2 {
-  gap: 0.5rem;
-}
-
-.greeting {
-  font-family: monospace;
-  font-size: 1.25rem;
-  color: #065f46;
-}
-
+/* 加载占位与错误提示 */
 #app:empty::before {
   content: '加载中...';
-  color: #999;
+  color: var(--muted-foreground);
+  display: block;
+  padding: 2rem;
 }
 
 #error {
-  color: #dc2626;
-  margin-top: 1rem;
+  color: var(--destructive);
+  white-space: pre-wrap;
+  padding: 0 1.5rem 1.5rem;
 }

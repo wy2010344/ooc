@@ -92,6 +92,8 @@ const commonMethods: Map<string, MethodSig[]> = new Map([
   ['not', [builtinMethod([], booleanType)]],
   // include：容器成员判定（类/数组/Set/Map 统一），返回布尔
   ['include', [builtinMethod([anyType], booleanType)]],
+  // send：动态派发——`receiver send name ...args`，返回值类型不可静态确定
+  ['send', [builtinMethod([anyType], anyType, anyType)]],
 ])
 
 export function getBuiltinMethods(typeName: string): Map<string, MethodSig[]> {
@@ -226,7 +228,7 @@ export function unionOf(types: TypeInfo[]): TypeInfo {
   return { kind: 'union', types: flat }
 }
 
-/** 交集：成员的公共部分。delegation=true 时为委托交集（withDefault），任一侧定义即可 */
+/** 交集：成员的公共部分。delegation=true 时为委托交集（merge 的产物），任一侧定义即可 */
 export function intersectionOf(types: TypeInfo[], delegation?: boolean): TypeInfo {
   const flat = types.flatMap((t) => (t.kind === 'intersection' ? t.types : [t]))
   if (flat.length === 1) {

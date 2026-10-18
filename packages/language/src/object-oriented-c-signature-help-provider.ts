@@ -10,10 +10,12 @@ import {
   isMessageChain,
   isMessageOrChain,
   isRef,
+  isDollar,
   type Message,
   type MessageChain,
   type MessageOrChain,
 } from './generated/ast.js'
+import { APPLY_NAME, displayMemberName } from './member-kind.js'
 import { getSharedChecker } from './shared-checker.js'
 import { getBuiltinMethods } from './type-system.js'
 
@@ -203,6 +205,10 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
     if (isRef(value)) {
       return value.value
     }
+    if (isDollar(value)) {
+      // `$` 直接调用（apply 消息）
+      return APPLY_NAME
+    }
     if (typeof value === 'object' && 'value' in value) {
       return (value as any).value as string
     }
@@ -298,6 +304,6 @@ export class ObjectOrientedCSignatureHelpProvider extends AbstractSignatureHelpP
     }
 
     const returnStr = sig.returns ? this.formatType(sig.returns) : 'any'
-    return `${name}(${params.join(', ')}) => ${returnStr}`
+    return `${displayMemberName(name)}(${params.join(', ')}) => ${returnStr}`
   }
 }

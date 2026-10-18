@@ -42,7 +42,9 @@ TypeMemberList:
 TypeMember:
     name=MethodDefName 
         ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')?
-        ('(' params+=Param (',' params+=Param)* ')')? 
+        ('(' 
+            ParamAll
+          ')')? 
         (':' typeAnnotation=Type)?
 ;
 
@@ -116,13 +118,13 @@ BindBlock:
     '@{' bindStmts+=Statement (';' bindStmts+=Statement)* ';'? '}'
 ;
 
-//转发属性：本 key 的一切消息原样转发给委托对象的 apply 执行（消息名不传给 apply）
+//转发属性：本 key 的一切消息原样转发给委托对象的 $ 执行（消息名不传给 $）
 MethodBindMutable:
     name=MethodDefName '<=' bindBody=BindBody
 ;
 
 MethodDefName:
-    name=(Ref|Str|StID);
+    name=(Ref|Str|StID|Dollar);
 
 Param:
     name=ID (':' typeAnnotation=Type)?;
@@ -144,8 +146,10 @@ MessageChainExt:
 MessagePipRight:
     '|' value=(NamedExpression | MessageChain);
 
+// 中缀右操作数：其余运算符恰好一个 Primary；`$`（直接调用）右侧接 0~N 个实参
 MessageInfixRight:
-    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'%') value=Primary;
+    infix=('>'|'>='|'<'|'<='|'=='|'!='|'&&'|'||'|'+'|'-'|'*'|'%') value=Primary
+    | infix='$' args+=MessageArg*;
 
 NamedExpression:
     param=ID '->' expression=Expression;
@@ -163,7 +167,13 @@ MessageArg:
     spread?='...'? value=Primary;
 
 MethodCallName:
-    value=(Ref|StID|Str);
+    value=(Ref|StID|Str|Dollar);
+
+// `$`：直接调用——定义键、消息名、中缀运算符三处都用它，
+// 归一为 APPLY_NAME（宿主 JS 侧成员名 apply）。`$` 是独立 token。
+// 与模版洞起始 `${` 共前缀，故 `$` 后紧跟 `{` 需留空格（写 `f $ {…}` 而非 `f${…}`）。
+Dollar:
+    value='$';
 
 //类型表达式：支持联合（|）与交叉（&）
 Type:
@@ -199,8 +209,17 @@ Primary:
 
 Ref:
     value=ID;
+// 字符串字面量：单引号整段作为单个 token 解析；含 ${表达式}（模版）时，由解析后的
+// graft 子解析洞并填充 parts（见 template-graft.ts）——Langium 无 lexer mode，词法层
+// 无法切分「文本 vs 代码」，故整段交给一个 token，洞在 parse 后再解析。
 Str:
-    value=STRING;
+    value=STRING parts+=TemplatePart*;
+TemplatePart:
+    TemplateText | TemplateHole;
+TemplateText:
+    value=TEMPLATE_TEXT;
+TemplateHole:
+    '${' expression=Expression '}';
 StID:
     value=STID;
 Bool:
@@ -215,6 +234,8 @@ terminal CAST: /#as/;
 terminal BOOL: /true|false/;
 //允许了转义
 terminal STRING: /'(\\.|[^'\\])*'/;
+// 仅为生成 TemplateText 的 AST 类型而声明；实际永不匹配（文本段由 graft 生成，源码不含 NUL）。
+terminal TEMPLATE_TEXT: /\u0000/;
 terminal STID: /"[^\s]*/;
 terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;

@@ -41,7 +41,7 @@ npm run preview -w packages/playground
 执行环境里预置以下对象，可直接当消息发：
 
 - `storage`：`ref get 'x'` / `ref set 'x' 值` —— 会话内持久变量。
-- `loop`：`apply 次数 代码` / `repeat 次数 ('消息')` —— 循环执行。
+- `loop`：`$ 次数 代码` / `repeat 次数 ('消息')` —— 循环执行。
 - `js`：`throw 'msg'`、`new 'Date'`、`fn 'fnName' arguments` —— 借用 JS 宿主能力。
 - `db`：`notes` / `read '笔记名'` —— 读写本地笔记本（数据持久）。
 - `ui`：`add '标签' '内容'` —— 往页面追加 HTML 元素。
