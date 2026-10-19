@@ -36,13 +36,17 @@
         "@floating-ui/dom": "^1.8.0",
         "mve-core": "*",
         "mve-dom": "*",
+        "mve-dom-helper": "file:../../../es-pseudo-monorepo/packages/mve/dom-helper",
         "mve-helper": "*",
+        "mve-three": "*",
+        "three": "^0.184.0",
         "mve-icons": "^6.0.0",
         "object-oriented-c-language": "0.0.1",
         "wy-dom-helper": "*",
         "wy-helper": "*"
     },
     "devDependencies": {
+        "@types/three": "^0.184.0",
         "shx": "~0.4.0",
         "typescript": "~6.0.2"
     }

@@ -4,6 +4,20 @@ import { createSignal, memo, addEffect } from 'wy-helper'
 import { merge, js, storage } from 'object-oriented-c-language'
 import { dom, text, html } from './dom.js'
 import { fc, forEach } from './fc.js'
+import {
+  canvas,
+  canvasDraw,
+  align,
+  colorToCSS,
+  flex,
+  grow,
+  ignoreFlex,
+  layoutSize,
+  layoutSizeDirection,
+  rgba,
+} from './canvas.js'
+import { readValue } from './args.js'
+import { three } from './three.js'
 import { multiBind } from './multi-bind.js'
 import { createPop, renderPop } from './pop.js'
 import { floating } from './floating.js'
@@ -37,6 +51,18 @@ export function createBridgeGlobals() {
     renderPop,
     floating,
     hookTrackSignal,
+    canvas,
+    canvasDraw,
+    three,
+    flex,
+    grow,
+    align,
+    ignoreFlex,
+    rgba,
+    colorToCSS,
+    layoutSize,
+    layoutSizeDirection,
+    readValue,
     iconCheck,
     iconChevronDown,
     iconX,

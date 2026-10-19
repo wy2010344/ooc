@@ -8,6 +8,20 @@ export {
   createContext,
   multiBind,
 } from 'ooc-mve-bridge'
+export {
+  canvas,
+  canvasDraw,
+  three,
+  readValue,
+  flex,
+  grow,
+  align,
+  ignoreFlex,
+  rgba,
+  colorToCSS,
+  layoutSize,
+  layoutSizeDirection,
+} from 'ooc-mve-bridge'
 export { storage, js, merge } from 'object-oriented-c-language'
 export {
   renderPop,

@@ -6,6 +6,29 @@ export type { DComponent } from './dom.js'
 export { fc, forEach } from './fc.js'
 export type { ForEachConfig } from './fc.js'
 
+// canvas 组件（mve-dom-helper/canvasRender 薄桥接）+ 布局/颜色工具
+export {
+  canvas,
+  canvasDraw,
+  canvasStage,
+  align,
+  colorToCSS,
+  flex,
+  grow,
+  ignoreFlex,
+  layoutSize,
+  layoutSizeDirection,
+  rgba,
+} from './canvas.js'
+export type { CanvasComponent, CanvasTagFactory } from './canvas.js'
+
+// 桥接共享工具：读值（lambda 展开）
+export { readValue } from './args.js'
+
+// three 组件（mve-three / three.js 薄桥接）
+export { three, threeStage } from './three.js'
+export type { ThreeComponent, ThreeTagFactory } from './three.js'
+
 // 响应式信号 + language 原生原语：OOC 侧直接 import 使用，不需要 globals 注入
 export { createSignal, memo, addEffect } from 'wy-helper'
 export { createContext } from 'mve-core'

@@ -53,6 +53,87 @@ html = {
     $(source): Component => js any
 };
 
+canvas = {
+    stage(props, ...children): Component => js any,
+    node(props, ...children): Component => js any,
+    rect(props, ...children): Component => js any,
+    rich(props, ...children): Component => js any,
+    wrapped(props, ...children): Component => js any,
+    editable(props, ...children): Component => js any,
+    image(props, ...children): Component => js any,
+    scroll(props, ...children): Component => js any
+};
+
+canvasDraw = {
+    fill(node, ctx, color): any => js any,
+    fillInner(node, ctx, color): any => js any,
+    stroke(node, ctx, color, width): any => js any,
+    strokeInner(node, ctx, color, width): any => js any,
+    round(node, ctx, radius, color): any => js any,
+    roundInner(node, ctx, radius, color): any => js any,
+    strokeRound(node, ctx, radius, color, width): any => js any,
+    strokeRoundInner(node, ctx, radius, color, width): any => js any,
+    oval(node, ctx, color): any => js any,
+    strokeOval(node, ctx, color, width): any => js any,
+    ring(node, ctx, gap, radius, color, width): any => js any,
+    fillRound(ctx, x, y, w, h, radius, color): any => js any,
+    text(node, ctx, value, x, y, style): any => js any
+};
+
+// three 组件（mve-three 薄桥接）：stage 是持有 WebGLRenderer 的 div，其余是 3D 节点
+// 变换/材质属性（x/y/z、rotationX/Y/Z、scale、color、roughness…）写 lambda 即响应式
+three = {
+    stage(props, ...children): Component => js any,
+    group(props, ...children): Component => js any,
+    box(props, ...children): Component => js any,
+    sphere(props, ...children): Component => js any,
+    cylinder(props, ...children): Component => js any,
+    torus(props, ...children): Component => js any,
+    plane(props, ...children): Component => js any,
+    ambient(props, ...children): Component => js any,
+    directional(props, ...children): Component => js any,
+    point(props, ...children): Component => js any,
+    grid(props, ...children): Component => js any,
+    axes(props, ...children): Component => js any,
+    label(props, ...children): Component => js any
+};
+
+readValue = {
+    $(value): any => js any
+};
+
+flex = {
+    $(props): any => js any
+};
+
+grow = {
+    $(props): any => js any
+};
+
+align = {
+    $(props): any => js any
+};
+
+ignoreFlex = {
+    $(props): any => js any
+};
+
+rgba = {
+    $(r, g, b, a): any => js any
+};
+
+colorToCSS = {
+    $(color): any => js any
+};
+
+layoutSize = {
+    $(value, fromInside): any => js any
+};
+
+layoutSizeDirection = {
+    $(direction, value, fromInside): any => js any
+};
+
 fc = {
     $(fn): Component => js any
 };
@@ -106,7 +187,19 @@ config = {
         addEffect = addEffect,
         createContext = createContext,
         storage = storage,
-        js = js
+        js = js,
+        canvas = canvas,
+        canvasDraw = canvasDraw,
+        three = three,
+        flex = flex,
+        grow = grow,
+        align = align,
+        ignoreFlex = ignoreFlex,
+        rgba = rgba,
+        colorToCSS = colorToCSS,
+        layoutSize = layoutSize,
+        layoutSizeDirection = layoutSizeDirection,
+        readValue = readValue
     }
 };
 

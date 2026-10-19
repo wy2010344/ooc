@@ -14,6 +14,8 @@ import {
   mergeGlobalsTypes,
 } from 'object-oriented-c-language'
 import type { TypeInfo } from 'object-oriented-c-language'
+import { threeTypesSource } from './types-three.js'
+import { utilsTypesSource } from './types-utils.js'
 
 /** ooc-mve-bridge 的 .ooc 类型源：视图层组件（dom/text/html/fc/forEach）+ 响应式信号 */
 export const bridgeTypesSource = `// ooc-mve-bridge 类型源（视图层组件 + 响应式信号）
@@ -162,93 +164,35 @@ html = {
     $(content): Component
 };
 
-fc = {
-    $(...args): Component
+// canvas 画布组件（mve-dom-helper/canvasRender 薄桥接）
+canvas = {
+    stage(props, ...children): Component,
+    node(props, ...children): Component,
+    rect(props, ...children): Component,
+    rich(props, ...children): Component,
+    wrapped(props, ...children): Component,
+    editable(props, ...children): Component,
+    image(props, ...children): Component,
+    scroll(props, ...children): Component
 };
 
-forEach = {
-    $(config): Component
+// 绘制原语：首参为 canvas 节点（draw 里的 this）
+canvasDraw = {
+    fill(node, ctx, color): any,
+    fillInner(node, ctx, color): any,
+    stroke(node, ctx, color, width): any,
+    strokeInner(node, ctx, color, width): any,
+    round(node, ctx, radius, color): any,
+    roundInner(node, ctx, radius, color): any,
+    strokeRound(node, ctx, radius, color, width): any,
+    strokeRoundInner(node, ctx, radius, color, width): any,
+    oval(node, ctx, color): any,
+    strokeOval(node, ctx, color, width): any,
+    ring(node, ctx, gap, radius, color, width): any,
+    fillRound(ctx, x, y, w, h, radius, color): any,
+    text(node, ctx, value, x, y, style): any
 };
-
-createSignal = {
-    $(initial): Signal
-};
-
-multiBind = {
-    $(holder): Callable
-};
-
-memo = {
-    $(fn): any
-};
-
-addEffect = {
-    $(fn): any
-};
-
-createContext = {
-    $(...args): any
-};
-
-// portal 弹层 + 浮层定位（Dropdown / Select / Dialog / Sheet 用）
-createPop = {
-    $(render): any
-};
-
-renderPop = {
-    $: any
-};
-
-floating = {
-    $(props, ...children): Component
-};
-
-hookTrackSignal = {
-    $(get, set): any
-};
-
-// mve-icons 桥接：图标组件工厂（传入 { className } 返回 Component）
-iconCheck = {
-    $(props): Component
-};
-
-iconChevronDown = {
-    $(props): Component
-};
-
-iconX = {
-    $(props): Component
-};
-
-provideIconContext = {
-    $(holder): any
-};
-
-config = {
-    globals = {
-        dom = dom,
-        text = text,
-        html = html,
-        fc = fc,
-        forEach = forEach,
-        createSignal = createSignal,
-        multiBind = multiBind,
-        memo = memo,
-        addEffect = addEffect,
-        createContext = createContext,
-        createPop = createPop,
-        renderPop = renderPop,
-        floating = floating,
-        hookTrackSignal = hookTrackSignal,
-        iconCheck = iconCheck,
-        iconChevronDown = iconChevronDown,
-        iconX = iconX,
-        provideIconContext = provideIconContext
-    }
-};
-
-config
-`
+` + threeTypesSource + utilsTypesSource
 
 /**
  * 创建完整引擎全局类型（Route A loader，可传给 createObjectOrientedCServices /

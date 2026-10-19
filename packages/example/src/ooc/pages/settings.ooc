@@ -9,6 +9,8 @@
 #import { Showcase } './showcase.ooc';
 #import { VariantDemo } './variant-demo.ooc';
 #import { Kit } './kit.ooc';
+#import { CanvasDemo } './canvas-demo.ooc';
+#import { ThreeDemo } './three-demo.ooc';
 
 SettingsPanel = fc $ [ctx =>
     name = multiBind $ (createSignal $ 'OOC');
@@ -70,6 +72,10 @@ SettingsPanel = fc $ [ctx =>
         (VariantDemo $)
 
         (Kit $)
+
+        (CanvasDemo $)
+
+        (ThreeDemo $)
 
         (dom p { className = 'text-xs text-muted-foreground' } (text $ saved))
     ) $ ctx
