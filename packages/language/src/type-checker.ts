@@ -112,6 +112,7 @@ export type ImportResolver = (
 export function createImportResolver(
   documents: LangiumDocuments,
   extensions: readonly string[],
+  globalsTypes?: Map<string, TypeInfo>,
 ): ImportResolver {
   const visiting = new Set<string>()
   const resolve: ImportResolver = (importPath, fromPath) => {
@@ -129,7 +130,7 @@ export function createImportResolver(
     }
     visiting.add(fileName)
     try {
-      return new ObjectOrientedCTypeChecker(resolve).inferModuleResult(model)
+      return new ObjectOrientedCTypeChecker(resolve, globalsTypes).inferModuleResult(model)
     } finally {
       visiting.delete(fileName)
     }
@@ -173,7 +174,9 @@ export class ObjectOrientedCTypeChecker {
    * 类型环境按顶层语句顺序建立，与检查器一致。Expression 与 Primary 均可。
    */
   inferType(node: AstNode): TypeInfo {
-    const env = new TypeEnv()
+    // 与 checkModel 一致：注入的全局桥接类型（dom/fc…）要进环境，
+    // 否则 hover 里一切全局名与 .ts 宿主导入都退化成 any。
+    const env = new TypeEnv(undefined, this.globalsTypes)
     const model = AstUtils.getContainerOfType(node, isModel)
     const accept: ValidationAcceptor = () => undefined
     this.typedefs.clear()
@@ -203,7 +206,8 @@ export class ObjectOrientedCTypeChecker {
   inferModuleResult(model: Model): ImportedModuleType {
     this.typedefs.clear()
     this.typedefParams.clear()
-    const env = new TypeEnv()
+    // 模块结果里的全局桥接名（fc/dom…）同样要能解析，否则导出类型全成 any
+    const env = new TypeEnv(undefined, this.globalsTypes)
     const accept: ValidationAcceptor = () => undefined
     const namedExports = new Map<string, NamedExport>()
     let last: TypeInfo = nilType

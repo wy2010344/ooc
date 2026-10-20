@@ -4,7 +4,6 @@ import {
   CstNode,
   isCompositeCstNode,
   isLeafCstNode,
-  URI,
 } from 'langium'
 import { DefaultDefinitionProvider } from 'langium/lsp'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
@@ -12,15 +11,18 @@ import {
   isAssignment,
   isImportStatement,
   isMethodAll,
+  isModel,
   isRef,
 } from './generated/ast.js'
 import { LocationLink, Range } from 'vscode-languageserver'
 import {
-  PACKAGE_URI_PREFIX,
-  dirnameOf,
-  joinPath,
-  resolveModuleName,
-} from './module-path.js'
+  findExportedNode,
+  findImportBinding,
+  findModuleResultNode,
+  importDocument,
+  resolveImportUri,
+  type ImportResolution,
+} from './import-binding.js'
 
 /** 目标文件起始位置（跳到文件头即可，不定位到具体符号）。 */
 const FILE_START_RANGE: Range = {
@@ -54,9 +56,15 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
       const varName = sourceNode.value
       const definitionNode = this.findDefinition(sourceNode, varName)
       if (definitionNode) {
-        const link = this.createLocationLink(sourceCstNode, definitionNode)
+        const link = this.createLocationLink(sourceCstNode, definitionNode, varName)
         if (link) {
           links.push(link)
+        }
+      } else {
+        // 本文件没有声明：按 #import 绑定跳到被导入模块里的声明（或本文档的导入项）
+        const importedLink = this.collectImportedBindingLink(sourceCstNode, sourceNode)
+        if (importedLink) {
+          links.push(importedLink)
         }
       }
     }
@@ -72,8 +80,6 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
 
   /**
    * 光标落在 #import 的路径字符串上时，解析出目标文件并返回跳转链接。
-   * 相对路径按导入文件所在目录解析；@pkg 包引用从导入文件所在目录向上找
-   * .ooc_modules/<pkg>（与 CLI ooc install 的落盘位置一致）。
    */
   private collectImportLink(sourceCstNode: any): LocationLink | undefined {
     if (!isLeafCstNode(sourceCstNode)) return undefined
@@ -88,10 +94,7 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
     }
     if (rawText.slice(1, -1) !== statement.path) return undefined
 
-    const doc = AstUtils.getDocument(statement)
-    const extensions = this.services.LanguageMetaData.fileExtensions
-    const resolved = resolveModuleName(statement.path, doc.uri.path, extensions)
-    const targetUri = this.resolveImportUri(resolved, doc.uri.path)
+    const targetUri = resolveImportUri(statement, this.importResolution())
     if (!targetUri) return undefined
 
     return {
@@ -102,26 +105,47 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
     }
   }
 
-  /** 把解析出的模块路径转成真实文件 URI；找不到返回 undefined。 */
-  private resolveImportUri(resolved: string, fromPath: string): URI | undefined {
-    const documents = this.services.shared.workspace.LangiumDocuments
-    const fs = this.services.shared.workspace.FileSystemProvider
-    const known = (uri: URI) => !!documents.getDocument(uri) || fs.existsSync(uri)
+  /**
+   * 引用名走 #import 绑定：优先跳到被导入模块里的那条声明（变量/类型/再导出链），
+   * 目标模块没加载或找不到对应声明时，退回到本文档的导入项（`{ Button }` 里的 Button）。
+   */
+  private collectImportedBindingLink(
+    sourceCstNode: any,
+    refNode: any,
+  ): LocationLink | undefined {
+    const model = AstUtils.getContainerOfType(refNode, isModel)
+    if (!model) return undefined
+    const binding = findImportBinding(model, refNode.value)
+    if (!binding) return undefined
 
-    if (resolved.startsWith(PACKAGE_URI_PREFIX + '/')) {
-      const rest = resolved.slice(PACKAGE_URI_PREFIX.length + 1)
-      let dir = dirnameOf(fromPath)
-      while (dir) {
-        const candidate = URI.file(joinPath(dir, `.ooc_modules/${rest}`))
-        if (known(candidate)) return candidate
-        const parent = dirnameOf(dir)
-        if (parent === dir) break
-        dir = parent
+    const target = importDocument(binding.stmt, this.importResolution())
+    const targetModel = target?.parseResult.value
+    if (targetModel && isModel(targetModel)) {
+      const node =
+        binding.kind === 'default'
+          ? findModuleResultNode(targetModel)
+          : findExportedNode(targetModel, binding.exportName, this.importResolution())
+      if (node) {
+        // 默认导出可能是任意表达式：只在名字确实等于导出名时按名字定位
+        const name = binding.kind === 'default' ? undefined : binding.exportName
+        const link = this.createLocationLink(sourceCstNode, node, name)
+        if (link) return link
       }
-      return undefined
     }
-    const uri = URI.file(resolved)
-    return known(uri) ? uri : undefined
+    // 回退：本文档的导入项就是这个名字的「定义位置」
+    return binding.item
+      ? this.createLocationLink(sourceCstNode, binding.item)
+      : undefined
+  }
+
+  /** DefinitionProvider 侧的 #import 解析上下文 */
+  private importResolution(): ImportResolution {
+    const workspace = this.services.shared.workspace
+    return {
+      getDocument: (uri) => workspace.LangiumDocuments.getDocument(uri),
+      exists: (uri) => workspace.FileSystemProvider.existsSync(uri),
+      extensions: this.services.LanguageMetaData.fileExtensions,
+    }
   }
 
   /**
@@ -163,32 +187,21 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
   }
 
   /**
-   * 创建位置链接
+   * 创建位置链接。给了 name 时把范围收窄到名字那个叶节点（跨文档声明也适用）。
    */
   private createLocationLink(
     sourceCstNode: any,
     targetNode: AstNode,
+    name?: string,
   ): LocationLink | undefined {
-    // 尝试找到变量名本身的 CST 节点
-    const nameCstNode = this.findNameCstNode(targetNode)
-    let targetCstNode = nameCstNode
-    if (!targetCstNode) {
-      // 如果找不到变量名的 CST 节点，则使用目标节点本身
-      targetCstNode = targetNode.$cstNode
-    }
+    const nodeCst = targetNode.$cstNode
+    // 优先按名字定位（Assignment/TypeDef/ImportItem 的 $cstNode 都覆盖整条语句）
+    const nameCstNode = name && nodeCst ? this.findLeafWithText(nodeCst, name) : undefined
+    const targetCstNode = nameCstNode ?? this.findNameCstNode(targetNode) ?? nodeCst
     if (!targetCstNode) return undefined
 
-    let targetRange = targetCstNode.range
+    const targetRange = targetCstNode.range
     if (!targetRange) return undefined
-
-    // 如果目标范围太大（大于变量名本身），尝试缩小范围
-    // 对于 Assignment 节点，只使用变量名的位置
-    if (isAssignment(targetNode) && targetRange.end.character - targetRange.start.character > 1) {
-      const nameCst = this.findNameCstNode(targetNode)
-      if (nameCst?.range) {
-        targetRange = nameCst.range
-      }
-    }
 
     const sourceRange = sourceCstNode.range
 

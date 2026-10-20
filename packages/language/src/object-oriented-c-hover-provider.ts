@@ -1,5 +1,5 @@
 import { Hover, HoverParams } from 'vscode-languageserver'
-import { CstUtils } from 'langium'
+import { AstUtils, CstUtils } from 'langium'
 import { AstNodeHoverProvider } from 'langium/lsp'
 import type { AstNode, CstNode, LangiumDocument } from 'langium'
 import type { LangiumServices } from 'langium/lsp'
@@ -7,6 +7,7 @@ import {
   isAssignment,
   isBool,
   isExpression,
+  isImportItem,
   isImportStatement,
   isLambdaDef,
   isMessage,
@@ -14,6 +15,7 @@ import {
   isMethodAll,
   isMethodBind,
   isMethodBindMutable,
+  isModel,
   isNil,
   isNum,
   isPrimary,
@@ -32,11 +34,26 @@ import {
 import { APPLY_NAME, displayMemberName } from './member-kind.js'
 import { getSharedChecker } from './shared-checker.js'
 import {
+  findExportedNode,
+  findImportBinding,
+  findModuleResultNode,
+  importDocument,
+  type ImportBinding,
+  type ImportResolution,
+} from './import-binding.js'
+import {
   describeType,
   getBuiltinMethods,
   typeToString,
   type TypeInfo,
 } from './type-system.js'
+
+/** #import 绑定形态的中文标签 */
+const IMPORT_KIND_LABEL: Record<ImportBinding['kind'], string> = {
+  named: '命名导入',
+  default: '默认导入',
+  type: '类型导入',
+}
 
 /**
  * OOC Hover 提供者
@@ -45,7 +62,7 @@ import {
 export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   private readonly checker: ReturnType<typeof getSharedChecker>
 
-  constructor(services: LangiumServices) {
+  constructor(private readonly services: LangiumServices) {
     super(services)
     this.checker = getSharedChecker(services)
   }
@@ -76,6 +93,16 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
 
     // 如果是 Ref 节点，自定义解析到声明
     if (isRef(astNode)) {
+      // 导入绑定：合并「类型 + 来源模块 + 本体声明」三块信息
+      if (this.findBindingOf(astNode)) {
+        const imported = this.handleRefHover(
+          astNode,
+          this.commentOfNode(astNode),
+        )
+        if (typeof imported === 'string' && imported.length > 0) {
+          return { contents: { kind: 'markdown', value: imported } }
+        }
+      }
       const resolvedNode = this.resolveDeclaration(astNode)
       const content = await this.getAstNodeHoverContent(resolvedNode ?? astNode)
       if (typeof content === 'string' && content.length > 0) {
@@ -113,7 +140,8 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   }
 
   /**
-   * 解析 Ref 引用到其声明节点
+   * 解析 Ref 引用到其声明节点：先找本文件的作用域声明，
+   * 找不到再走 #import 绑定（跳到被导入模块里的那条声明）。
    */
   private resolveDeclaration(node: AstNode): AstNode | undefined {
     if (!isRef(node)) return undefined
@@ -130,10 +158,39 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
 
     const root = this.getRootNode(node)
     if (root) {
-      return this.findDeclarationInNode(root, name, visited)
+      const found = this.findDeclarationInNode(root, name, visited)
+      if (found) return found
     }
 
-    return undefined
+    return this.resolveImportedDeclaration(node, name)
+  }
+
+  /** 走 #import 绑定解析被导入模块里的声明（模块未加载/名字非顶层声明时返回 undefined） */
+  private resolveImportedDeclaration(
+    node: AstNode,
+    name: string,
+  ): AstNode | undefined {
+    const model = AstUtils.getContainerOfType(node, isModel)
+    if (!model) return undefined
+    const binding = findImportBinding(model, name)
+    if (!binding) return undefined
+    const res = this.importResolution()
+    const target = importDocument(binding.stmt, res)
+    const targetModel = target?.parseResult.value
+    if (!targetModel || !isModel(targetModel)) return undefined
+    return binding.kind === 'default'
+      ? findModuleResultNode(targetModel)
+      : findExportedNode(targetModel, binding.exportName, res)
+  }
+
+  /** HoverProvider 侧的 #import 解析上下文 */
+  private importResolution(): ImportResolution {
+    const workspace = this.services.shared.workspace
+    return {
+      getDocument: (uri) => workspace.LangiumDocuments.getDocument(uri),
+      exists: (uri) => workspace.FileSystemProvider.existsSync(uri),
+      extensions: this.services.LanguageMetaData.fileExtensions,
+    }
   }
 
   /**
@@ -239,6 +296,10 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
       )
     }
 
+    if (isImportItem(node)) {
+      return this.handleImportItemHover(node, comment)
+    }
+
     if (isMethodAll(node)) {
       return this.handleMethodAllHover(node, comment)
     }
@@ -308,9 +369,57 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   }
 
   private handleRefHover(node: any, comment: string): string {
-    const t = this.checker.inferType(node)
+    const binding = this.findBindingOf(node)
+    if (!binding) {
+      const t = this.checker.inferType(node)
+      return this.buildHoverContent(
+        `引用 ${node.value}：${this.describeHoverType(t)}`,
+        comment,
+      )
+    }
+    // 导入绑定：类型 + 来源模块 + 本体声明（本体已含类型时不再重复列一遍）
+    const t =
+      this.checker.inferImportBindings(binding.stmt).get(binding.localName) ??
+      this.checker.inferType(node)
+    const alias =
+      binding.exportName === binding.localName ? '' : `（原名 ${binding.exportName}）`
+    const source = `${IMPORT_KIND_LABEL[binding.kind]}自 '${binding.stmt.path}'${alias}`
+    const target = this.resolveImportedDeclaration(node, node.value)
+    const body = target
+      ? this.getAstNodeHoverContentImpl(target, this.commentOfNode(target))
+      : undefined
+    const head = body
+      ? `导入 ${binding.localName}（${source}）`
+      : `导入 ${binding.localName}（${source}）：${this.describeHoverType(t)}`
     return this.buildHoverContent(
-      `引用 ${node.value}：${this.describeHoverType(t)}`,
+      [head, body].filter(Boolean).join('\n\n'),
+      comment,
+    )
+  }
+
+  /** 该 Ref 是否命中某个 #import 绑定 */
+  private findBindingOf(node: AstNode): ImportBinding | undefined {
+    if (!isRef(node) || !node.value) return undefined
+    const model = AstUtils.getContainerOfType(node, isModel)
+    return model ? findImportBinding(model, node.value) : undefined
+  }
+
+  /** 节点自身的注释（跨文档也适用） */
+  private commentOfNode(node: AstNode): string {
+    const cstNode = (node as any).$cstNode
+    return cstNode ? this.getNodeComment(cstNode) : ''
+  }
+
+  /** 导入项本体（`#import { Button }` 里的 Button）的悬停内容 */
+  private handleImportItemHover(node: any, comment: string): string | undefined {
+    const stmt = node.$container?.$container
+    if (!stmt || !isImportStatement(stmt)) return undefined
+    const isType = !!stmt.types?.items.includes(node)
+    const alias = node.alias ? `（原名 ${node.name}）` : ''
+    const t = this.checker.inferImportBindings(stmt).get(node.alias ?? node.name)
+    const typeText = t ? `：${this.describeHoverType(t)}` : ''
+    return this.buildHoverContent(
+      `${isType ? '类型导入' : '命名导入'} ${node.alias ?? node.name}${alias} ← '${stmt.path}'${typeText}`,
       comment,
     )
   }

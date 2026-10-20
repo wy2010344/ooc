@@ -45,6 +45,7 @@ export function getSharedChecker(services: LangiumServices): ObjectOrientedCType
     createImportResolver(
       services.shared.workspace.LangiumDocuments,
       services.LanguageMetaData.fileExtensions,
+      currentGlobals,
     ),
     currentGlobals,
   )

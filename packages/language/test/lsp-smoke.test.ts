@@ -128,6 +128,50 @@ test('LSP: Hover Ref 引用应有内容', async () => {
   })
 })
 
+test('LSP: Hover 全局桥接对象的成员应可见（推断环境需注入 globals）', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem, undefined, fakeGlobalsTypes)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  // 全局对象 demoDom 的悬停里应列出它的成员 div —— 只有 globals 进了推断环境才可能
+  await expect({
+    text: IDX + 'demoDom;',
+    indexMarker: IDX,
+    index: 0,
+    hover: /div/,
+  })
+})
+
+test('LSP: Hover 导入的命名绑定应显示类型与来源模块', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+  await parse('foo = 42;', { documentUri: URI.file('/proj/hover-lib.ooc').toString() })
+  const expect = expectHover(services.ObjectOrientedC)
+
+  // 悬停在导入名 foo 上：应显示「导入 foo」+ 来源路径
+  await expect({
+    text: `#import { foo } './hover-lib.ooc';\n` + IDX + 'foo;',
+    indexMarker: IDX,
+    index: 0,
+    parseOptions: { documentUri: URI.file('/proj/hover-app.ooc').toString() },
+    hover: /导入 foo[\s\S]*hover-lib\.ooc/,
+  })
+})
+
+test('LSP: Hover 导入项本体（{ foo } 里的 foo）应有内容', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+  await parse('foo = 42;', { documentUri: URI.file('/proj/hover-item-lib.ooc').toString() })
+  const expect = expectHover(services.ObjectOrientedC)
+
+  await expect({
+    text: `#import { ` + IDX + `foo } './hover-item-lib.ooc';\nfoo;`,
+    indexMarker: IDX,
+    index: 0,
+    parseOptions: { documentUri: URI.file('/proj/hover-item-app.ooc').toString() },
+    hover: /命名导入 foo[\s\S]*hover-item-lib\.ooc/,
+  })
+})
+
 test('LSP: Hover 数字字面量应有内容', async () => {
   const services = createObjectOrientedCServices(EmptyFileSystem)
   const expect = expectHover(services.ObjectOrientedC)
@@ -580,6 +624,54 @@ test('LSP: Definition 应能从 #import 路径跳转到目标模块', async () =
   })
   assert.equal(links?.length, 1, '应返回一条跳转链接')
   assert.equal(links![0].targetUri, targetUri.toString())
+})
+
+test('LSP: Definition 应能从导入名跳转到目标模块的声明', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  // 被导入模块：Button = 42（命名导出的顶层声明）
+  const targetUri = URI.file('/proj/def-lib.ooc')
+  await parse('Button = 42;', { documentUri: targetUri.toString() })
+
+  const source = `#import { Button } './def-lib.ooc';\nButton;`
+  const document = await parse(source, {
+    documentUri: URI.file('/proj/def-app.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.lastIndexOf('Button') + 2 // 用法处的 Button
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length, 1, '应返回一条跳转链接')
+  assert.equal(links![0].targetUri, targetUri.toString(), '应跳到被导入模块')
+  assert.equal(links![0].targetRange.start.line, 0, '应定位到目标声明所在行')
+})
+
+test('LSP: Definition 导入名在目标模块无顶层声明时回退到导入项', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  await parse('other = 1;', {
+    documentUri: URI.file('/proj/def-lib2.ooc').toString(),
+  })
+
+  const source = `#import { missing } './def-lib2.ooc';\nmissing;`
+  const appUri = URI.file('/proj/def-app2.ooc')
+  const document = await parse(source, { documentUri: appUri.toString() })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.lastIndexOf('missing') + 2
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length, 1, '应返回一条跳转链接')
+  assert.equal(links![0].targetUri, appUri.toString(), '回退到本文档的导入项')
 })
 
 test('LSP: #import 指向不存在的模块时不跳转', async () => {
