@@ -1,10 +1,9 @@
 /**
  * 外部库模块预加载：
- * 使用 vite 的 import.meta.glob 预加载基础包（base / ooc-mve-bridge）的 .ooc 文件，
- * 供虚拟文件系统使用，让 OOC 代码可以通过 #import '@base/...' 包引用导入它们。
+ * 使用 vite 的 import.meta.glob 预加载共享库（base / ooc-mve-bridge）的 .ooc 文件，
+ * 供虚拟文件系统使用，让 OOC 代码可以 `#import './loop'` 之类相对路径导入它们。
  *
- * 键 = 源码 basename 全名（含 .ooc，小写），与 engine 虚拟 FS 的 basename 查找一致：
- * '@base/loop' → /ooc-pkg/base/loop.ooc → basename 'loop.ooc'，命中即可。
+ * 键 = 源码 basename 全名（含 .ooc，小写），与 engine 虚拟 FS 的 basename 查找一致。
  *
  * 注意：vite 的 import.meta.glob 不支持直接 npm 包路径，
  * 需要使用相对路径定位包内的 .ooc 文件。
@@ -12,7 +11,7 @@
 
 // 预加载 ooc-mve-bridge 包的 .ooc 文件（使用相对路径）
 const oocMveBridgeModules = import.meta.glob(
-  '../../../../ooc-mve-bridge/src/*.ooc',
+  '../../../ooc-mve-bridge/src/*.ooc',
   {
     query: '?raw',
     import: 'default',
@@ -20,9 +19,9 @@ const oocMveBridgeModules = import.meta.glob(
   },
 )
 
-// 预加载 base 包的 .ooc 文件（标准库，使用相对路径）
+// 预加载 base 包的 .ooc 文件（共享循环库，使用相对路径）
 const baseModules = import.meta.glob(
-  '../../../../base/src/*.ooc',
+  '../../../base/src/*.ooc',
   {
     query: '?raw',
     import: 'default',

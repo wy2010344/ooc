@@ -43,14 +43,13 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
   const typeNamesFor = (path: string) =>
     ctx.deps[depIndex.get(path) ?? -1]?.typeNames ?? []
 
-  // 预扫描：顶层赋值（同名多次 → let 重绑）、typedef 名、最后一条表达式（默认导出）
-  const assignCount = new Map<string, number>()
+  // 预扫描：typedef 名、最后一条表达式（默认导出）。
+  // 顶层同名声明是 validator 的 duplicateDeclaration（绑定都是 const），这里不再做重绑/桥接
   const typedefNames = new Set<string>()
   let lastExprIndex = -1
   model.expressions.forEach((st, i) => {
     switch (st.$type) {
       case 'Assignment':
-        assignCount.set(st.name, (assignCount.get(st.name) ?? 0) + 1)
         break
       case 'TypeDef':
         typedefNames.add(st.name)
@@ -61,38 +60,9 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         lastExprIndex = i
     }
   })
-  const rebound = new Set(
-    [...assignCount].filter(([, n]) => n > 1).map(([name]) => name),
-  )
 
-  // 值/类型两个命名空间分别跟踪占用（同名 type 与 value 在 TS 里可并存）。
-  // import 绑定与顶层赋值重名时不能直接 import（会撞声明/赋值），
-  // 改成 import 一个 _oocImp_ 私有名再桥接回原名。
-  const valueTaken = new Set<string>(assignCount.keys())
-  const typeTaken = new Set<string>(typedefNames)
-  const declared = new Set<string>()
-  const bridges: string[] = []
   /** 导入绑定的 OOC 可见名（默认导入名 / 命名导入别名）：本模块的顶层声明，需要再导出 */
   const importBindingNames: string[] = []
-  const reserve = (
-    alias: string,
-    taken: Set<string>,
-    kind: 'value' | 'type',
-  ): string => {
-    if (!taken.has(alias)) {
-      taken.add(alias)
-      return alias
-    }
-    let id = `_oocImp_${alias}`
-    let n = 2
-    while (taken.has(id)) {
-      id = `_oocImp_${alias}${n++}`
-    }
-    taken.add(id)
-    declared.add(alias)
-    bridges.push(kind === 'type' ? `type ${alias} = ${id};` : `let ${alias} = ${id};`)
-    return id
-  }
 
   // 预扫描：命名空间类型 `ns#Name` 的用点（类型位要 `ns$ns.Name`，
   // esm 头部按用点补发 `import * as ns$ns from '<同一模块>'`；值侧仍走默认导入）
@@ -119,7 +89,7 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
       continue
     }
     if (st.name) {
-      defaultImports.push(`import ${reserve(st.name, valueTaken, 'value')} from '${spec}';`)
+      defaultImports.push(`import ${st.name} from '${spec}';`)
       importBindingNames.push(st.name)
     }
     if (st.named) {
@@ -129,8 +99,7 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         const isType = typeNamesFor(st.path).includes(original)
         const target = isType ? typeImports : valueImports
         const clauses = target.get(spec) ?? []
-        const id = reserve(alias, isType ? typeTaken : valueTaken, isType ? 'type' : 'value')
-        clauses.push(id === original ? original : `${original} as ${id}`)
+        clauses.push(alias === original ? original : `${original} as ${alias}`)
         target.set(spec, clauses)
         importBindingNames.push(alias)
       }
@@ -140,8 +109,7 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         const original = item.name
         const alias = item.alias ?? original
         const clauses = typeImports.get(spec) ?? []
-        const id = reserve(alias, typeTaken, 'type')
-        clauses.push(id === original ? original : `${original} as ${id}`)
+        clauses.push(alias === original ? original : `${original} as ${alias}`)
         typeImports.set(spec, clauses)
       }
     }
@@ -178,15 +146,9 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         return // import 已在头部/桥接处处理
       case 'Assignment': {
         const code = expressionCode(st.expression)
-        if (declared.has(st.name)) {
-          bodyLines.push(`${st.name} = ${code};`)
-          return
-        }
-        declared.add(st.name)
         bodyExports.add(st.name)
-        const kw = rebound.has(st.name) ? 'let' : 'const'
         bodyLines.push(
-          `export ${kw} ${st.name}${typeAnnot(st.typeAnnotation)} = ${code};`,
+          `export const ${st.name}${typeAnnot(st.typeAnnotation)} = ${code};`,
         )
         return
       }
@@ -214,7 +176,7 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
     bodyLines.push(`export { ${reExports.join(', ')} };`)
   }
 
-  const body = [...bridges, ...bodyLines].join('\n')
+  const body = bodyLines.join('\n')
   // 只 import 本模块真正用到的 runtime 辅助（不触发 example 的 noUnusedLocals）
   const usedRuntime = ['__send', '__createObject', '__spread', '__mutable']
     .map((name) =>

@@ -3,7 +3,6 @@
 import type { Expression, Message, Primary } from 'object-oriented-c-language'
 import { isTypeRef } from './util.js'
 import { literalOfBindBody, type PrimitiveLiteral } from 'object-oriented-c-language'
-import { APPLY_NAME, getInfixName } from 'object-oriented-c-language'
 
 /** 纯字面量 → TS 代码（绑定数据属性值） */
 function literalCode(lit: PrimitiveLiteral): string {
@@ -57,8 +56,8 @@ function primaryCode(p: Primary): string {
 function messageName(m: Message): string {
   const v = (m.name as any).value
   if (v?.$type === 'StID') return v.value.slice(1)
-  // `$` 直接调用：归一为 APPLY_NAME
-  if (v?.$type === 'Dollar') return APPLY_NAME
+  // `$` 直接调用：成员名就是 `$`
+  if (v?.$type === 'Dollar') return '$'
   return v?.value ?? ''
 }
 
@@ -117,12 +116,12 @@ function piplingCode(e: any): string {
       return `__send(${primaryCode(mc.primary)}, ${JSON.stringify(messageName(mc.message))}, [${chainArgs.join(', ')}])`
     }
     case 'MessageInfixRight': {
-      // 中缀：`$` 归一为 apply，可带 0~N 个实参（其余中缀恰好 1 个）
+      // 中缀：中缀符本身就是成员名（`$` 可带 0~N 个实参，其余恰好 1 个）
       const args =
         r.infix === '$'
           ? (r.args ?? []).map((a: any) => argCode(a))
           : [primaryCode(r.value)]
-      return `__send(${left}, ${JSON.stringify(getInfixName(r.infix))}, [${args.join(', ')}])`
+      return `__send(${left}, ${JSON.stringify(r.infix)}, [${args.join(', ')}])`
     }
     default:
       return left
@@ -197,24 +196,24 @@ function methodCode(m: any): string | null {
     case 'MethodBind': {
       const lit = literalOfBindBody(m.bindBody)
       if (lit) {
-        return `{ type: 'value', name: ${JSON.stringify(name)}, value: ${literalCode(lit)} }`
+        return `{ name: ${JSON.stringify(name)}, value: ${literalCode(lit)} }`
       }
       const body = m.bindBody
       const fn =
         body && body.$type === 'BindBlock'
           ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
           : `function(){ return ${expressionCode(body.expression)} }`
-      return `{ type: 'bind', name: ${JSON.stringify(name)}, fn: ${fn} }`
+      return `{ name: ${JSON.stringify(name)}, get: ${fn} }`
     }
     // 转发属性 <=：__mutable(getDelegate) 惰性求值委托对象一次并缓存，之后本 key
-    // 上的一切消息原样转发给委托对象的 apply（消息名不传，只传实参）。
+    // 上的一切消息原样转发给委托对象的 $（消息名不传，只传实参）。
     case 'MethodBindMutable': {
       const body = m.bindBody
       const delegate =
         body && body.$type === 'BindBlock'
           ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
           : `function(){ return ${expressionCode(body.expression)} }`
-      return `{ type: 'mutable', name: ${JSON.stringify(name)}, fn: __mutable(${delegate}) }`
+      return `{ name: ${JSON.stringify(name)}, fn: __mutable(${delegate}) }`
     }
     default: {
       const body = m.body
@@ -227,8 +226,8 @@ function methodCode(m: any): string | null {
         guards.length > 0
           ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
           : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
-      // 零参/带参统一为方法函数（数据函数 + 运行时打 OOC_METHOD 标记）
-      return `{ type: 'call', name: ${JSON.stringify(name)}, fn: ${fn} }`
+      // 零参/带参统一为只读数据函数（方法）；形态由 descriptor 承载，不打标记
+      return `{ name: ${JSON.stringify(name)}, fn: ${fn} }`
     }
   }
 }
@@ -237,8 +236,8 @@ function methodName(n: any): string {
   const raw = n?.name
   if (!raw) return ''
   if (raw.$type === 'StID') return raw.value.slice(1)
-  // 定义键写 `$`：归一为 APPLY_NAME（编译产物仍用 apply，与宿主 JS 一致）
-  if (raw.$type === 'Dollar') return APPLY_NAME
+  // 定义键写 `$`：成员名就是 `$`（编译产物同字面）
+  if (raw.$type === 'Dollar') return '$'
   return raw.value ?? ''
 }
 
@@ -312,7 +311,7 @@ function lambdaDefCode(e: any): string {
   const bodyLines: string[] = ['let __last = null;']
   for (const st of e.expressions || []) {
     if (st.$type === 'Assignment') {
-      bodyLines.push(`let ${st.name} = ${expressionCode(st.expression)};`)
+      bodyLines.push(`const ${st.name} = ${expressionCode(st.expression)};`)
     } else {
       bodyLines.push(`__last = ${expressionCode(st)};`)
     }

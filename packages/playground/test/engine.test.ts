@@ -6,18 +6,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { OOC_METHOD, sendMessage } from 'object-oriented-c-language'
+import { sendMessage } from 'object-oriented-c-language'
 import { createRoot } from 'mve-dom'
 import type { StateHolderWithNode } from 'mve-core'
 import { createEngine, formatValue } from '../src/lib/engine.js'
 
-/** 是否为带 OOC_METHOD 标记的方法函数（替代已移除的 ObjectValue 反射） */
-function isMethod(v: unknown): boolean {
-  return (
-    typeof v === 'function' &&
-    Boolean((v as unknown as Record<symbol, unknown>)[OOC_METHOD])
-  )
-}
 import type { LibModules } from '../src/lib/lib-modules.js'
 import { PREVIEW_DEMO, TODO_DEMO } from '../src/demos/index.js'
 import { DEMO_NOTES } from '../src/demos/index.js'
@@ -69,7 +62,7 @@ const baseLib = (): LibModules => {
     join(import.meta.dirname, '..', '..', '..', 'base', 'src'),
     join(import.meta.dirname, '..', '..', '..', 'ooc-mve-bridge', 'src'),
   ]) {
-    for (const file of ['loop.ooc', 'index.ooc', 'config.ooc']) {
+    for (const file of ['loop.ooc', 'config.ooc']) {
       try {
         modules[file] = readFileSync(join(dir, file), 'utf-8')
       } catch {
@@ -207,8 +200,9 @@ test('preview 导出可识别，holder addNode/addDestroy 生效', async () => {
       '};\nobj\n',
   )
   assert.equal(r.error, null, r.error ?? '')
-  assert.ok(
-    isMethod((r.value as Record<string, unknown>).preview),
+  assert.equal(
+    typeof (r.value as Record<string, unknown>).preview,
+    'function',
     '导出对象应带 preview 方法',
   )
 
@@ -234,7 +228,7 @@ test('fc $ 生成惰性组件，挂载期执行组件体', async () => {
     'Comp = fc $ [ctx, a, b => ctx addDestroy [a + b]];\nComp\n',
   )
   assert.equal(r.error, null, r.error ?? '')
-  const comp = sendMessage(r.value, 'apply', ['x', 1]) as (
+  const comp = sendMessage(r.value, '$', ['x', 1]) as (
     holder: unknown,
   ) => unknown
   assert.equal(typeof comp, 'function', '惰性 FC（渲染时才执行组件体）')
@@ -283,8 +277,9 @@ test('预览.ooc 演示：点「添加一项/删第一项」驱动信号并响�
     const engine = createEngine(notes)
     const r = await runNote(engine, '预览.ooc', PREVIEW_DEMO)
     assert.equal(r.error, null, r.error ?? '')
-    assert.ok(
-      isMethod((r.value as Record<string, unknown>).preview),
+    assert.equal(
+      typeof (r.value as Record<string, unknown>).preview,
+      'function',
       '演示导出应带 preview',
     )
 
@@ -350,8 +345,9 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表�
     const engine = createEngine(notes)
     const r = await runNote(engine, '待办清单.ooc', TODO_DEMO)
     assert.equal(r.error, null, r.error ?? '')
-    assert.ok(
-      isMethod((r.value as Record<string, unknown>).preview),
+    assert.equal(
+      typeof (r.value as Record<string, unknown>).preview,
+      'function',
       '演示导出应带 preview',
     )
 
@@ -434,26 +430,24 @@ test('待办清单.ooc 演示：添加/切换完成/删除，信号驱动列表�
   }
 })
 
-test('对象成员运行时形态：字面量数据属性 + 标记方法', async () => {
+test('对象成员运行时形态：字面量数据属性 + 方法数据函数', async () => {
   const engine = createEngine(notes)
   const r = await runNote(engine, '形态', 'k = 1; p = {a => k, b = 2};\np\n')
   assert.equal(r.error, null, r.error ?? '')
   const obj = r.value as Record<string, unknown>
-  // a 是零参方法 → 带 OOC_METHOD 标记的数据函数
-  assert.ok(isMethod(obj.a), 'a 应是带标记的方法函数')
+  // a 是零参方法 → 只读数据函数（无 getter、writable=false）
+  const desc = Object.getOwnPropertyDescriptor(obj, 'a')!
+  assert.equal(typeof desc.value, 'function')
+  assert.equal(desc.get, undefined)
+  assert.equal(desc.writable, false)
   // b 是纯字面量绑定 → 数据属性（非函数）
   assert.equal(obj.b, 2)
   assert.equal(sendMessage(r.value, 'a', []), 1, 'a 发消息调用返回 k')
   assert.equal(sendMessage(r.value, 'b', []), 2, 'b 返回数据属性值')
-  // 宿主值无标记
-  assert.equal(
-    (42 as unknown as Record<symbol, unknown>)[OOC_METHOD],
-    undefined,
-  )
 })
 
-test('宿主.ooc demo：storage ref + loop repeat 可跑（loop 从 base 包 #import）', async () => {
-  // 宿主 demo 现在 #import '@base/loop'，引擎虚拟 FS 用 libModules 提供 base 标准库源码
+test('宿主.ooc demo：storage ref + loop repeat 可跑（loop 从共享库 #import）', async () => {
+  // 宿主 demo 现在 #import './loop'，引擎虚拟 FS 用 libModules 提供 loop 源码
   const engine = createEngine(notes, baseLib())
   const r = await runNote(engine, '宿主.ooc', DEMO_NOTES.find((d) => d.name === '宿主.ooc')!.source)
   assert.equal(r.error, null, r.error ?? '')

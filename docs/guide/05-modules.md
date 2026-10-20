@@ -20,22 +20,20 @@ math = #import 'math.ooc';
 math run 2 3    // 5
 ```
 
-`#import` 使用相对路径。运行含模块的文件请用 `interpretPath` 配合 `NodeFileSystem`。
+`#import` 只认相对路径（`#import './loop'`、`#import '../lib/loop'`、`#import 'loop'`）。运行含模块的文件请用 `interpretPath` 配合 `NodeFileSystem`。
 
-## 包引用（`@name`）
+## 跨目录复用源码
 
-已安装的包通过 `.ooc_modules/<name>/` 目录解析（CLI `ooc install <目录|git-url>` 安装到该项目 `.ooc_modules/`）。引用时用 `@包名` 前缀：
+没有包安装或包前缀机制：共享源码就是普通文件，按相对路径引用即可。
 
 ```ooc
-// base 是内置标准库包：'@base' → index.ooc 聚合导出；'@base/loop' → 子模块
-loop = #import '@base/loop';
-strings = #import '@base';
+// example 里的示例库位于 packages/base/src/loop.ooc
+loop = #import '../../../base/src/loop';
 ```
 
-- `'@base'` 解析到包的入口（`ooc.json` 的 `entry` 字段，默认 `index.ooc`）
-- `'@base/loop'` 解析到包的子模块 `loop.ooc`
-- 包引用解析为虚拟路径 `/ooc-pkg/<name>/<file>`，由包感知的 FileSystemProvider 重定向到真实 `.ooc_modules` 目录
-- 相对路径（`#import './loop'`、`#import 'loop'`）仍是默认风格，优先级低于 `/ooc-pkg` 包路径
+- 路径相对**当前文件所在目录**解析，`..` 可跨包目录
+- 省略扩展名时按 `.ooc`、`.ts` 顺序探测（OOC 也能直接 `#import './bridge.ts'`）
+- 编译（`ooc build`）要求所有 `.ooc` 源码位于 `rootDir` 内
 
 ## 类型的导入与导出
 

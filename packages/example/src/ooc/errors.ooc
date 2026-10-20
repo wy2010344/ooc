@@ -51,16 +51,10 @@
 
 // === 重复定义类 ===
 
-// 12. duplicateType：重复的 typedef
-// Point #type { x: number };
-// Point #type { y: number };
+// 12. duplicateDeclaration：同层作用域重复声明（顶层 / 方法内 / 绑定块 / lambda 各是一层作用域，全部按 const 处理）
+// x = 1;
+// x = 2;
 
-// 13. duplicateMethod / duplicateParam：重复定义
+// 13. duplicateMethod / duplicateParam：对象成员 / 参数重复定义
 // obj = { fun = 1, fun = 2 };
 // bad = [a, a => a];
-
-// === 变量与赋值类 ===
-
-// 14. reassignmentMismatch：重新赋值类型不匹配
-// x: number = 42;
-// x = 'string';

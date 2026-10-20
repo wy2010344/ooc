@@ -1,31 +1,8 @@
 // 对象成员分类的共享判定：解释器（interpreter/runtime.ts）、编译器（cli tsgen/expr.ts）、
 // 校验器（member-lint.ts）必须口径一致，故集中在这里。
+// 成员形态完全由 JS descriptor 承载：getter＝绑定值（读一次），只读数据函数＝方法，
+// 只读数据值＝字面量常量——不再往函数上挂标记符号。
 import type { Expression } from './generated/ast.js'
-
-/**
- * 「方法函数」标记键。`=>` 方法编译成的 JS 函数附带这个符号属性，运行时（__send /
- * 宿主桥接）据此区分「OOC 方法（应发送消息调用）」与「lambda 值（原样返回）」。
- * 用 Symbol.for 全局注册表：编译产物（_ooc_runtime.ts）与宿主桥接（如 dom.ts）
- * 读到的必须是同一个符号。
- */
-export const OOC_METHOD: unique symbol = Symbol.for('ooc:method')
-
-/**
- * 「直接调用」成员的归一名字。OOC surface 里这个成员一律写成 `$`：定义键、消息名、
- * 中缀运算符三处都用 `$`。运行时/codegen/类型检查/LSP 一律经这里归一
- * （宿主 JS 侧成员名仍是 'apply'）。
- */
-export const APPLY_NAME = 'apply'
-
-/** 归一「中缀运算符名」：`$` 是直接调用运算符（`a $ b` ≡ 调用 a 的 APPLY_NAME），其余原样。 */
-export function getInfixName(infix: string): string {
-  return infix === '$' ? APPLY_NAME : infix
-}
-
-/** 成员名的 OOC surface 展示名：APPLY_NAME 展示为 `$`，其余原样（hover/补全/签名提示用）。 */
-export function displayMemberName(name: string): string {
-  return name === APPLY_NAME ? '$' : name
-}
 
 /** 纯原始字面量的结构化表示（str/num/bool/nil 四种） */
 export type PrimitiveLiteral = {

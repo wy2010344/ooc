@@ -1,7 +1,6 @@
 export * from './object-oriented-c-module.js'
 export * from './object-oriented-c-validator.js'
 export * from './module-path.js'
-export * from './package-fs.js'
 export * from './interpreter/index.js'
 export * from './type-system.js'
 export * from './type-checker.js'

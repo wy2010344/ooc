@@ -1,5 +1,5 @@
 // loop.ooc —— 循环工具（OOC 语言实现，无需宿主桥接）
-// 使用：#import '@base/loop' 后 `loop $ fn` / `loop repeat n fn`（base 是内置标准库包）。
+// 使用：按相对路径 #import 本文件后 `loop $ fn` / `loop repeat n fn`。
 // OOC 无控制流关键字：$ 靠方法递归 + #guard 分支（guard 是真值继续递归，
 // 假/NIL/0 时 guard 不通过，落到 #else 的 nil 终止）。
 // repeat 次数已知，用 JS 生态数据化（n 长度字符串 split 成数组逐索引调用 fn）。

@@ -1,4 +1,4 @@
-import { OOC_METHOD, APPLY_NAME, literalOfBindBody, literalToValue } from '../member-kind.js'
+import { literalOfBindBody, literalToValue } from '../member-kind.js'
 import {
   Expression,
   Method,
@@ -37,7 +37,7 @@ type LazyBind = {
 }
 
 // 定义值类型
-export type Value = number | string | boolean | null | OocObject
+export type Value = number | string | boolean | null | object
 
 export function getObjDefineName(n: MethodDefName) {
   const v = n.name
@@ -49,11 +49,10 @@ export function getObjDefineName(n: MethodDefName) {
     case 'Str':
       return getStrValue(v)
     case 'Dollar':
-      // 定义键用 `$`：归一为 APPLY_NAME（同一成员）
-      return APPLY_NAME
+      // 定义键、消息名、中缀运算符三处都写 `$`：成员名就是 `$`
+      return '$'
   }
 }
-export type OocObject = object
 
 /** 执行一个方法体：把参数（含 rest）绑进作用域后逐条求值表达式，返回最后一条的值。
  *  OOC 对象方法与原生 JS 函数型 lambda（见 evaluate.ts createLambdaValue）共用，
@@ -129,9 +128,9 @@ export function objectValue(methods: Method[], scope: Scope) {
       value,
     })
   }
-  // 方法属性 + OOC_METHOD 标记（宿主据此区分「方法」与「lambda 值」）
+  // 方法属性：只读数据函数（每次发消息调用）。成员形态只看 descriptor——
+  // getter＝绑定值原样返回，数据函数＝方法调用。
   const writeMethod = (name: string, fn: (...args: unknown[]) => unknown) => {
-    Object.defineProperty(fn, OOC_METHOD, { value: true })
     Object.defineProperty(obj, name, { enumerable: true, value: fn })
   }
   for (const method of methods) {
@@ -160,11 +159,11 @@ export function objectValue(methods: Method[], scope: Scope) {
         break
       }
       case 'MethodBindMutable': {
-        // 转发属性：本 key 上的一切消息原样转发给委托对象的 $（APPLY_NAME）
+        // 转发属性：本 key 上的一切消息原样转发给委托对象的 `$`
         //（消息名不传给 $，只传实参），委托对象惰性求值一次缓存。
         const bind: LazyBind = { method, scope, done: false, value: undefined }
         writeMethod(name, function (this: unknown) {
-          return sendMessage(lazyValue(bind), 'apply', Array.from(arguments))
+          return sendMessage(lazyValue(bind), '$', Array.from(arguments))
         })
         break
       }
@@ -228,8 +227,8 @@ export function getMethodCallName({ value }: MethodCallName) {
     case 'Str':
       return getStrValue(value)
     case 'Dollar':
-      // `$` 直接调用：归一为 APPLY_NAME
-      return APPLY_NAME
+      // `$` 直接调用：消息名就是 `$`
+      return '$'
     default:
       return value.value
   }
@@ -264,7 +263,7 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
 }
 
 export function sendMessage(o: any, value: string, args: any[]): any {
-  if (typeof o == 'function' && value == 'apply') {
+  if (typeof o == 'function' && value == '$') {
     // 函数接收者：lambda 直接当函数调用
     return o.apply(o, args)
   }
@@ -285,7 +284,7 @@ export function sendMessage(o: any, value: string, args: any[]): any {
       return desc.get ? desc.get.call(o) : undefined
     }
     if (typeof desc.value === 'function') {
-      // 数据函数＝OOC 方法（带 OOC_METHOD 标记）或宿主方法 → 调用。lambda 值不会
+      // 数据函数＝方法（OOC 方法或宿主方法）→ 调用。lambda 值不会以数据属性出现
       // 以数据属性出现（绑定里的 lambda 走 getter），故这里调用对两者都安全。
       return desc.value.apply(o, args)
     }

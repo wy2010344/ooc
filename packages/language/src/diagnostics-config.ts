@@ -106,8 +106,7 @@ function hashStr(s: string): string {
 
 /** 类型检查的规则 code（与 type-checker.ts 中 accept 的 data.code 对应） */
 export const DIAGNOSTIC_CODES = {
-  duplicateType: 'duplicateType',
-  reassignmentMismatch: 'reassignmentMismatch',
+  duplicateDeclaration: 'duplicateDeclaration',
   typeMismatch: 'typeMismatch',
   overloadReturnMismatch: 'overloadReturnMismatch',
   guardNotBoolean: 'guardNotBoolean',

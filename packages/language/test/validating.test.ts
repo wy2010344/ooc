@@ -165,7 +165,114 @@ describe('Validating', () => {
         document?.diagnostics?.map(diagnosticToString)?.join('\n'),
     ).toHaveLength(0)
   })
+
+  test('顶层重复声明报错', async () => {
+    document = await parse(`
+            x = 1;
+            x = 2
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('顶层 #type 与赋值同名报错', async () => {
+    document = await parse(`
+            Point #type { x: number };
+            Point = 1
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('方法体内重复声明报错', async () => {
+    document = await parse(`
+            obj = {
+                fun {
+                    x = 1;
+                    x = 2;
+                    x
+                }
+            };
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('#guard 分支不另开作用域：跨分支同名报错', async () => {
+    document = await parse(`
+            obj = {
+                fun(a) {
+                    #guard a;
+                    x = 1;
+                    x
+                    #else;
+                    x = 2;
+                    x
+                }
+            };
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('参数与方法体内声明同名报错', async () => {
+    document = await parse(`
+            obj = {
+                fun(a) {
+                    a = 1;
+                    a
+                }
+            };
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('不同作用域可以同名', async () => {
+    document = await parse(`
+            x = 1;
+            obj = {
+                get { x },
+                fun(x) { x }
+            };
+            obj get;
+            obj fun 2
+        `)
+    expect(outputOf(document)).not.toContain('同层作用域不允许重复声明')
+  })
+
+  test('绑定块内重复声明报错', async () => {
+    document = await parse(`
+            obj = {
+                get = @{
+                    x = 1;
+                    x = 2;
+                    x
+                }
+            };
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('lambda 参数与体内声明同名报错', async () => {
+    document = await parse(`
+            f = [x => x = 1]
+        `)
+    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+  })
+
+  test('不同 lambda 之间同名不报错', async () => {
+    document = await parse(`
+            f = [x => y = x; y];
+            g = [x => y = x + 1; y]
+        `)
+    expect(outputOf(document)).not.toContain('同层作用域不允许重复声明')
+  })
 })
+
+/** 诊断文本：解析器错误优先，其次逐条诊断（无诊断时为空串） */
+function outputOf(document: LangiumDocument | undefined): string {
+  return (
+    checkDocumentValid(document as LangiumDocument) ||
+    document?.diagnostics?.map(diagnosticToString)?.join('\n') ||
+    ''
+  )
+}
 
 function checkDocumentValid(document: LangiumDocument): string | undefined {
   return (

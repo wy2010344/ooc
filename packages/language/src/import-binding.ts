@@ -17,12 +17,7 @@ import {
   type ImportStatement,
   type Model,
 } from './generated/ast.js'
-import {
-  PACKAGE_URI_PREFIX,
-  dirnameOf,
-  joinPath,
-  resolveModuleName,
-} from './module-path.js'
+import { resolveModuleName } from './module-path.js'
 
 /** #import 的绑定形态 */
 export interface ImportBinding {
@@ -80,9 +75,7 @@ export interface ImportResolution {
 }
 
 /**
- * 把 #import 路径解析成目标文件 URI。
- * 相对路径按导入文件所在目录解析；@pkg 包引用从导入文件所在目录向上找
- * .ooc_modules/<pkg>（与 CLI `ooc install` 的落盘位置一致）。
+ * 把 #import 路径解析成目标文件 URI（相对导入文件所在目录）。
  */
 export function resolveImportUri(
   stmt: ImportStatement,
@@ -91,19 +84,6 @@ export function resolveImportUri(
   const doc = AstUtils.getDocument(stmt)
   const resolved = resolveModuleName(stmt.path, doc.uri.path, res.extensions)
   const known = (uri: URI) => !!res.getDocument(uri) || res.exists(uri)
-
-  if (resolved.startsWith(PACKAGE_URI_PREFIX + '/')) {
-    const rest = resolved.slice(PACKAGE_URI_PREFIX.length + 1)
-    let dir = dirnameOf(doc.uri.path)
-    while (dir) {
-      const candidate = URI.file(joinPath(dir, `.ooc_modules/${rest}`))
-      if (known(candidate)) return candidate
-      const parent = dirnameOf(dir)
-      if (parent === dir) break
-      dir = parent
-    }
-    return undefined
-  }
   const uri = URI.file(resolved)
   return known(uri) ? uri : undefined
 }

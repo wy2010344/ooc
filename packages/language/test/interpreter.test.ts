@@ -10,12 +10,9 @@ import * as nodeFs from 'node:fs/promises'
 import * as nodeOs from 'node:os'
 import * as nodePath from 'node:path'
 import {
-  createDirPackageResolver,
   createInterpretAction,
-  createPackageAwareFileSystem,
   createTypeCheckAction,
   merge,
-  OOC_METHOD,
   OocCircularImportError,
   OocMethodNotFoundError,
   sendMessage,
@@ -41,23 +38,6 @@ async function diagnostics(input: string): Promise<Diagnostic[]> {
 function messages(diags: Diagnostic[]): string[] {
   return diags.map((d) => d.message)
 }
-
-// base 包 loop.ooc 的等价源码（包引用测试用，与 packages/base/src/loop.ooc 同语义）
-const baseLoopSource = `
-loop = {
-    $(fn) {
-        #guard fn $;
-        this $ fn
-        #else;
-        nil
-    },
-    repeat(n, fn) {
-        (('x' repeat n) split '') forEach [v, i => fn $ i];
-        nil
-    }
-};
-loop
-`
 
 describe('OOC Interpreter', () => {
   test('变量与算术', async () => {
@@ -456,7 +436,7 @@ describe('OOC Interpreter', () => {
     // 零参成员是方法：发消息执行方法体，返回 lambda 本体（不是 lambda 执行结果）
     const lambda = sendMessage(result, 'handler', [])
     expect(typeof lambda).toBe('function')
-    expect(sendMessage(lambda, 'apply', [41])).toBe(42)
+    expect(sendMessage(lambda, '$', [41])).toBe(42)
   })
 
   test('方法体内 this 引用自身字段', async () => {
@@ -984,145 +964,6 @@ describe('OOC #import 模块', () => {
       '不允许循环模块导入',
     )
   })
-
-  test('包引用 @pkg/sub 经包感知 FS 解析执行', async () => {
-    // 底层内存 FS 以完整路径为键，模拟 Node .ooc_modules 布局
-    const files = new Map<string, string>([
-      ['/repo/.ooc_modules/base/loop.ooc', baseLoopSource],
-    ])
-    const nameOf = (uri: import('langium').URI) =>
-      decodeURIComponent(uri.path)
-    const underlying: FileSystemProvider = {
-      stat(uri) {
-        if (files.has(nameOf(uri))) {
-          return Promise.resolve({ isFile: true, isDirectory: false, uri })
-        }
-        return Promise.reject(new Error(`文件不存在: ${uri.path}`))
-      },
-      statSync(uri) {
-        if (files.has(nameOf(uri))) {
-          return { isFile: true, isDirectory: false, uri }
-        }
-        throw new Error(`文件不存在: ${uri.path}`)
-      },
-      exists(uri) {
-        return Promise.resolve(files.has(nameOf(uri)))
-      },
-      existsSync(uri) {
-        return files.has(nameOf(uri))
-      },
-      readBinary() {
-        return Promise.resolve(new Uint8Array())
-      },
-      readBinarySync() {
-        return new Uint8Array()
-      },
-      readFile(uri) {
-        const c = files.get(nameOf(uri))
-        if (c == null) {
-          return Promise.reject(new Error(`文件不存在: ${uri.path}`))
-        }
-        return Promise.resolve(c)
-      },
-      readFileSync(uri) {
-        const c = files.get(nameOf(uri))
-        if (c == null) {
-          throw new Error(`文件不存在: ${uri.path}`)
-        }
-        return c
-      },
-      readDirectory() {
-        return Promise.resolve([])
-      },
-      readDirectorySync() {
-        return []
-      },
-    }
-    const fs = createPackageAwareFileSystem(
-      underlying,
-      createDirPackageResolver('/repo/.ooc_modules'),
-    )
-    const { interpret } = createInterpretAction({
-      fileSystemProvider: () => fs,
-    })
-    const result = await interpret(
-      `loop = #import '@base/loop';
-       loop repeat 3 [i => i + 1];
-       loop`,
-      '/proj/demo.ooc',
-    )
-    // base/loop 模块导出对象带 repeat 方法（带 OOC_METHOD 标记的数据函数）
-    expect(
-      (result as Record<string, unknown>).repeat instanceof Function,
-    ).toBe(true)
-  })
-
-  test('包入口 @pkg 默认解析 index.ooc', async () => {
-    const files = new Map<string, string>([
-      ['/repo/.ooc_modules/base/index.ooc', 'base = { hello => 42 }; base'],
-    ])
-    const nameOf = (uri: import('langium').URI) =>
-      decodeURIComponent(uri.path)
-    const underlying: FileSystemProvider = {
-      stat(uri) {
-        if (files.has(nameOf(uri))) {
-          return Promise.resolve({ isFile: true, isDirectory: false, uri })
-        }
-        return Promise.reject(new Error(`文件不存在: ${uri.path}`))
-      },
-      statSync(uri) {
-        if (files.has(nameOf(uri))) {
-          return { isFile: true, isDirectory: false, uri }
-        }
-        throw new Error(`文件不存在: ${uri.path}`)
-      },
-      exists(uri) {
-        return Promise.resolve(files.has(nameOf(uri)))
-      },
-      existsSync(uri) {
-        return files.has(nameOf(uri))
-      },
-      readBinary() {
-        return Promise.resolve(new Uint8Array())
-      },
-      readBinarySync() {
-        return new Uint8Array()
-      },
-      readFile(uri) {
-        const c = files.get(nameOf(uri))
-        if (c == null) {
-          return Promise.reject(new Error(`文件不存在: ${uri.path}`))
-        }
-        return Promise.resolve(c)
-      },
-      readFileSync(uri) {
-        const c = files.get(nameOf(uri))
-        if (c == null) {
-          throw new Error(`文件不存在: ${uri.path}`)
-        }
-        return c
-      },
-      readDirectory() {
-        return Promise.resolve([])
-      },
-      readDirectorySync() {
-        return []
-      },
-    }
-    const fs = createPackageAwareFileSystem(
-      underlying,
-      createDirPackageResolver('/repo/.ooc_modules'),
-    )
-    const { interpret } = createInterpretAction({
-      fileSystemProvider: () => fs,
-    })
-    const result = await interpret(
-      `base = #import '@base';
-       base hello`,
-      '/proj/demo.ooc',
-    )
-    expect(result).toBe(42)
-  })
 })
 
 describe('除法运算', () => {
@@ -1181,14 +1022,17 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
     expect(result.v).toBe(3)
   })
 
-  test('方法（零参/带参）是带 OOC_METHOD 标记的数据函数，发消息即调用', async () => {
+  test('方法（零参/带参）是只读数据函数，发消息即调用', async () => {
     const result = (await interpreter.interpret(`
         p = { a => 1, b(x) => x };
         p
     `)) as Record<string, unknown>
-    expect(typeof result.a).toBe('function')
-    expect((result.a as Record<symbol, unknown>)[OOC_METHOD]).toBe(true)
-    expect((result.b as Record<symbol, unknown>)[OOC_METHOD]).toBe(true)
+    const a = Object.getOwnPropertyDescriptor(result, 'a')!
+    const b = Object.getOwnPropertyDescriptor(result, 'b')!
+    expect(typeof a.value).toBe('function')
+    expect(a.get).toBeUndefined()
+    expect(a.writable).toBe(false)
+    expect(typeof b.value).toBe('function')
     expect(sendMessage(result, 'a', [])).toBe(1)
     expect(sendMessage(result, 'b', [7])).toBe(7)
   })
@@ -1250,17 +1094,9 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
     expect(Object.keys(result as object)).toEqual([])
   })
 
-  test('lambda 是 JS 函数，但不带 OOC_METHOD 标记', async () => {
-    const result = await interpreter.interpret(`[x => x]`)
-    expect(typeof result).toBe('function')
-    expect((result as Record<symbol, unknown>)[OOC_METHOD]).toBeUndefined()
-  })
-
   test('宿主 JS 值（数组/字符串/数字）不是语言定义对象', async () => {
-    const arr = (await interpreter.interpret(
-      `(Array of)`,
-    )) as Record<symbol, unknown>
-    expect(arr[OOC_METHOD]).toBeUndefined()
+    const arr = await interpreter.interpret(`(Array of)`)
+    expect(Array.isArray(arr)).toBe(true)
     expect(await interpreter.interpret(`'x'`)).toBe('x')
     expect(await interpreter.interpret(`3`)).toBe(3)
   })

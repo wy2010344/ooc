@@ -5,7 +5,7 @@
  * OocMethodNotFoundError。要拦截未知消息就显式包兜底 Proxy：get trap 拦下
  * target 不存在的消息名，统一交给 handler(name, ...args)。
  *
- * - 已存在的属性与 symbol 键（如方法标记 OOC_METHOD）直通，不参与转发；
+ * - 已存在的属性与 symbol 键直通，不参与转发；
  * - handler 传入的实参是 (消息名, ...调用参数)；
  * - 未声明 methodNotFound 这个名字约定，handler 由宿主/调用方显式给出。
  */

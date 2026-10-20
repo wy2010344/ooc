@@ -40,13 +40,8 @@ const RUNTIME_JS = ts
   })
   .outputText
 
-export type OocPluginOptions = {
-  /** 包安装目录（默认 <vite root>/.ooc_modules） */
-  modulesDir?: string
-}
-
 /** 创建 OOC 一等模块 vite 插件。 */
-export function oocPlugin(options: OocPluginOptions = {}): Plugin {
+export function oocPlugin(): Plugin {
   // 共享 langium 服务（只用于 parse 单个 .ooc，不做 linking/validation）
   const services = createObjectOrientedCServices(NodeFileSystem)
   // 模版字符串：fromString 不经 DocumentBuilder，需在此手动 graft 洞内表达式。
@@ -54,7 +49,6 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
     services.ObjectOrientedC.parser.LangiumParser.parse(source),
   )
   let root = process.cwd()
-  let modulesDir: string | undefined
 
   /** 把磁盘读到的当前源码 parse 成 Model（同步、不走文档缓存，天然响应热更新）。 */
   function parseModel(code: string, id: string): Model {
@@ -72,7 +66,7 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
 
   /** #import 原值 → 相对当前 .ooc 模块的 ES import 说明符（带扩展名，vite 可直接解析）。 */
   function specifierFor(id: string, raw: string): string {
-    const target = resolveImportSource(raw, id, modulesDir ?? path.join(root, '.ooc_modules'))
+    const target = resolveImportSource(raw, id)
     let rel = path.relative(path.dirname(id), target).replace(/\\/g, '/')
     if (!rel.startsWith('.')) rel = './' + rel
     return rel
@@ -82,7 +76,7 @@ export function oocPlugin(options: OocPluginOptions = {}): Plugin {
   const depModelCache = new Map<string, Model>()
   const depTypeNameCache = new Map<string, string[]>()
   function depTypeNames(fromId: string, raw: string): string[] {
-    const target = resolveImportSource(raw, fromId, modulesDir ?? path.join(root, '.ooc_modules'))
+    const target = resolveImportSource(raw, fromId)
     if (target.endsWith('.ts') || target.endsWith('.js') || target.endsWith('.mjs')) {
       // .ts/.js 依赖：粗略扫 export type/interface 名当类型导出（命名值导出走真 ESM named import）
       const names: string[] = []

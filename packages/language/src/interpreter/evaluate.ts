@@ -19,7 +19,6 @@ import {
   bindMethod,
   runBody,
 } from './runtime.js'
-import { getInfixName } from '../member-kind.js'
 import { addScope, getScope, type Scope } from './scope.js'
 import { templateStringify } from '../template.js'
 
@@ -165,12 +164,12 @@ export function interpretExpression(e: Expression, scope: Scope): any {
               return interpretExpression(rv.expression, scope)
           }
         default: {
-          // 中缀：`$` 归一为 apply 消息，可带 0~N 个实参（其余中缀恰好 1 个）
+          // 中缀：中缀符本身就是成员名（`$` 可带 0~N 个实参，其余恰好 1 个）
           const args =
             r.infix === '$'
               ? interpretMessageArgs(r.args ?? [], scope)
               : [interpretPrimary(r.value!, scope)]
-          return sendMessage(obj, getInfixName(r.infix), args)
+          return sendMessage(obj, r.infix, args)
         }
       }
   }

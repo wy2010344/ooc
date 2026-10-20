@@ -1,8 +1,6 @@
 import {
   createInterpretAction,
   createTypeCheckAction,
-  createPackageAwareFileSystem,
-  createDirPackageResolver,
   merge,
   js,
   storage,
@@ -12,7 +10,6 @@ import chalk from 'chalk'
 import { Command } from 'commander'
 import { createBridgeGlobalsTypes } from 'ooc-mve-bridge/types'
 import { buildProject, RUNTIME_FILE } from './build.js'
-import { installPackage, MODULES_DIR_NAME } from './install.js'
 import { NodeFileSystem } from 'langium/node'
 import * as url from 'node:url'
 import * as fs from 'node:fs/promises'
@@ -23,19 +20,9 @@ const __dirname = url.fileURLToPath(new URL('.', import.meta.url))
 const packagePath = path.resolve(__dirname, '..', 'package.json')
 const packageContent = await fs.readFile(packagePath, 'utf-8')
 
-/**
- * 包感知的 Langium 上下文：把 /ooc-pkg/<name>/<file> 重定向到 <cwd>/.ooc_modules/<name>/<file>，
- * 让 interpret / type-check 能解析 @name 包引用，其余文件仍走 NodeFileSystem。
- */
-function pkgContext() {
-  const modulesDir = path.resolve(process.cwd(), MODULES_DIR_NAME)
-  return {
-    fileSystemProvider: () =>
-      createPackageAwareFileSystem(
-        NodeFileSystem.fileSystemProvider(),
-        createDirPackageResolver(modulesDir),
-      ),
-  }
+/** interpret / type-check 共用 Node 文件系统上下文。 */
+const nodeContext = {
+  fileSystemProvider: () => NodeFileSystem.fileSystemProvider(),
 }
 
 const DEFAULT_CONFIG = `// config.ooc — OOC 项目配置文件
@@ -96,7 +83,7 @@ export const buildAction = async (
 export const interpretAction = (fileName: string) => {
   // 注入语言包自带宿主桥接（storage/js/merge），与浏览器 demo 一致，
   // 让同一份 OOC 项目源码在 Node（CLI）与浏览器（vite）端行为相同。
-  return createInterpretAction(pkgContext(), { storage, js, merge }).interpretPath(
+  return createInterpretAction(nodeContext, { storage, js, merge }).interpretPath(
     fileName,
   )
 }
@@ -105,7 +92,7 @@ export const typeCheckAction = async (fileName: string): Promise<void> => {
   // 注册表（Route A）：宿主包类型源先行注入，config.ooc 的 globals 成员
   // 只列名即可解析出真实类型（storage/js/dom/createSignal/console 等）。
   const diagnostics = await createTypeCheckAction(
-    pkgContext(),
+    nodeContext,
     createBridgeGlobalsTypes(),
   ).checkPath(fileName)
   if (diagnostics.length === 0) {
@@ -143,20 +130,9 @@ export async function initAction(): Promise<void> {
   console.log('Edit it to configure diagnostic levels for your project.')
 }
 
-export async function installAction(source: string): Promise<void> {
-  const modulesRoot = path.resolve(process.cwd(), MODULES_DIR_NAME)
-  const result = await installPackage(source, modulesRoot)
-  console.log(
-    chalk.green(
-      `Installed package '${result.name}' (${result.fileCount} files) → ${path.relative(process.cwd(), result.destDir)}`,
-    ),
-  )
-}
-
 export { modelToTs } from './tsgen/model.js'
 export { OOC_RUNTIME_MODULE } from './tsgen/runtime-template.js'
 export { buildProject, resolveImportSource, collectImports, typeExportNames } from './build.js'
-export { installPackage, readPackageManifest } from './install.js'
 
 export default function (): void {
   const program = new Command()
@@ -211,14 +187,6 @@ export default function (): void {
     .command('init')
     .description('create a config.ooc file in the current directory')
     .action(initAction)
-
-  program
-    .command('install')
-    .argument('<source>', 'local package root directory or git repository URL')
-    .description(
-      `install an OOC package into ${MODULES_DIR_NAME}/<name>/ (resolvable via #import '@name')`,
-    )
-    .action(installAction)
 
   program.parse(process.argv)
 }

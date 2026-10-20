@@ -1,6 +1,6 @@
-// ooc build 端到端测试：多文件项目（相对 import + @pkg 包引用）→ 编译 .ts 树 +
+// ooc build 端到端测试：多文件项目（相对 import）→ 编译 .ts 树 +
 // 共享 _ooc_runtime.ts，Node 原生类型剥离（≥23.6）直接加载产物验证运行语义。
-// 覆盖：依赖图遍历、包路径映射、ES import 说明符相对正确、模块间 run(globals) 组合。
+// 覆盖：依赖图遍历、ES import 说明符相对正确、模块间组合。
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -8,11 +8,10 @@ import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { buildProject } from 'object-oriented-c-cli'
 
-/** 组装一个临时 OOC 项目：src/ 源码 + .ooc_modules/base/ 包，返回根目录。 */
+/** 组装一个临时 OOC 项目：src/ 源码（含相对导入的循环库），返回根目录。 */
 async function makeProject(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-build-'))
   await fs.mkdir(path.join(root, 'src'), { recursive: true })
-  await fs.mkdir(path.join(root, '.ooc_modules', 'base'), { recursive: true })
 
   await fs.writeFile(
     path.join(root, 'src', 'math.ooc'),
@@ -22,10 +21,9 @@ async function makeProject(): Promise<string> {
     'utf-8',
   )
 
-  // base 包：OOC 语言实现的循环（经 @pkg 引用）
   await fs.writeFile(
-    path.join(root, '.ooc_modules', 'base', 'loop.ooc'),
-    `// base 包循环：#guard 分支链（递归 $ + nil 兜底）
+    path.join(root, 'src', 'loop.ooc'),
+    `// 循环库：#guard 分支链（递归 $ + nil 兜底）
 loop = {
     $(fn) {
         #guard fn $;
@@ -43,25 +41,7 @@ loop
 `,
     'utf-8',
   )
-  await fs.writeFile(
-    path.join(root, '.ooc_modules', 'base', 'ooc.json'),
-    '{ "name": "base" }',
-    'utf-8',
-  )
 
-  await fs.writeFile(
-    path.join(root, 'src', 'host.ts'),
-    `export default {
-  storage: {
-    ref(v: number) {
-      let _v = v
-      return { get: () => _v, set: (x: number) => { _v = x } }
-    },
-  },
-}
-`,
-    'utf-8',
-  )
   await fs.writeFile(
     path.join(root, 'src', 'host.ts'),
     `export default {
@@ -77,9 +57,9 @@ loop
   )
   await fs.writeFile(
     path.join(root, 'src', 'main.ooc'),
-    `// 入口：相对 import math + 包 import @base/loop，组合宿主 storage
+    `// 入口：相对 import math / loop，组合宿主 storage
 math = #import './math';
-loop = #import '@base/loop';
+loop = #import './loop';
 host = #import './host.ts';
 n = (host storage) ref 0;
 loop $ [n set ((n get) + 1); (n get) < 5];
@@ -94,7 +74,7 @@ loop $ [n set ((n get) + 1); (n get) < 5];
   return root
 }
 
-test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语义与解释器一致', async () => {
+test('ooc build：依赖图编译成 ES 模块树，运行语义与解释器一致', async () => {
   const root = await makeProject()
   const gen = path.join(root, 'generated')
   const result = await buildProject({
@@ -103,9 +83,9 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
     outDir: gen,
   })
 
-  // 产物：入口 + math + 包 loop + 共享 runtime
+  // 产物：入口 + math + loop + 共享 runtime
   const outs = result.files.map((f) => path.relative(gen, f.out).replace(/\\/g, '/'))
-  for (const expected of ['src/main.ts', 'src/math.ts', 'ooc-pkg/base/loop.ts']) {
+  for (const expected of ['src/main.ts', 'src/math.ts', 'src/loop.ts']) {
     if (!outs.includes(expected)) {
       throw new Error(`产物缺失 ${expected}，实际 ${outs.join(', ')}`)
     }
@@ -115,11 +95,6 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
   }
   if (path.relative(gen, result.entryOut).replace(/\\/g, '/') !== 'src/main.ts') {
     throw new Error(`入口产物应为 src/main.ts，实际 ${result.entryOut}`)
-  }
-  // 产物目录里不应再有 _ooc_globals.ts（宿主依赖改走普通 import）
-  const dirEntries = await fs.readdir(gen)
-  if (dirEntries.includes('_ooc_globals.ts')) {
-    throw new Error(`不应再生成 _ooc_globals.ts，实际产物 ${dirEntries.join(', ')}`)
   }
 
   // Node ≥23.6 原生类型剥离：直接 import 生成的 .ts 树（纯 ES，import 即执行）
@@ -137,10 +112,11 @@ test('ooc build：依赖图（相对+@pkg）编译成 ES 模块树，运行语�
   const double = rt.__send(value, 'double', [])
   if (double !== 8) throw new Error(`math double 4 应为 8，实际 ${double}`)
 })
-test('ooc build��#import �ⲿ .ts ���������������룬ֱ�� ES import Դ�ļ�', async () => {
+
+test('ooc build：#import 外部 .ts 依赖不参与编译，直接 ES import 源文件', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-build-ts-'))
   await fs.mkdir(path.join(root, 'src'), { recursive: true })
-  // ���� TS ģ�飺���� + ֵ����
+  // 宿主 TS 模块：类型 + 值导出
   await fs.writeFile(
     path.join(root, 'src', 'helper.ts'),
     `export type Foo = { hi(): string }
@@ -149,7 +125,7 @@ export default { tag }
 `,
     'utf-8',
   )
-  // ��ڣ����͵��루path ֮�����������루path ֮ǰ��������һ�� .ts ����
+  // 入口：类型导入（path 之前）/ 命名导入（path 之后），共用同一个 .ts 依赖
   await fs.writeFile(
     path.join(root, 'src', 'main.ooc'),
     `#import './helper.ts' { Foo };
@@ -165,16 +141,16 @@ export default { tag }
     outDir: gen,
   })
 
-  // .ts �������������б���ֻ������ڣ�
+  // .ts 依赖不进入产物列表（只有入口）
   const outs = result.files.map((f) => path.relative(gen, f.out).replace(/\\/g, '/'))
   if (outs.length !== 1 || outs[0] !== 'src/main.ts') {
-    throw new Error(`.ts ������Ӧ�����룬ʵ�ʲ��� ${outs.join(', ')}`)
+    throw new Error(`.ts 依赖不应参与编译，实际产物 ${outs.join(', ')}`)
   }
   const code = await fs.readFile(result.entryOut, 'utf8')
   if (!/import type \{ Foo \} from '\.\.\/\.\.\/src\/helper\.ts'/.test(code)) {
-    throw new Error(`���͵���Ӧ����� import type ָ�� .ts Դ�ļ���ʵ��:\n${code}`)
+    throw new Error(`类型导入应生成 import type 指向 .ts 源文件，实际:\n${code}`)
   }
   if (!/import \{ tag \} from '\.\.\/\.\.\/src\/helper\.ts'/.test(code)) {
-    throw new Error(`��������ֵӦ����� ES named import ָ�� .ts Դ�ļ���ʵ��:\n${code}`)
+    throw new Error(`命名导入值应生成 ES named import 指向 .ts 源文件，实际:\n${code}`)
   }
 })

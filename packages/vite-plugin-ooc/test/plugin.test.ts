@@ -215,7 +215,7 @@ test('非 .ooc/.runtime id 不打扰：resolveId/load 返回 undefined', () => {
   }
 })
 
-test('方法标记契约：__createObject 的 call 成员带 OOC_METHOD 标记，value 成员为数据属性', async () => {
+test('成员形态契约：__createObject 的方法成员是只读数据函数，字面量成员是数据属性', async () => {
   // 把共享 runtime 模板转成 JS（同 vite-plugin 的做法），run 一次 __createObject
   const js = ts
     .transpileModule(OOC_RUNTIME_MODULE, {
@@ -226,15 +226,15 @@ test('方法标记契约：__createObject 的 call 成员带 OOC_METHOD 标记�
     'data:text/javascript;base64,' + Buffer.from(js).toString('base64')
   )
   const obj = mod.__createObject([
-    { type: 'call', name: 'onClick', fn: (e: any) => e + 1 },
-    { type: 'value', name: 'className', value: 'btn' },
+    { name: 'onClick', fn: (e: any) => e + 1 },
+    { name: 'className', value: 'btn' },
   ])
-  // call → 带 OOC_METHOD 标记的数据函数（方法/事件，宿主据此区分方法与 lambda 值）
-  if (typeof obj.onClick !== 'function') throw new Error('onClick 应是函数')
-  if (!obj.onClick[mod.OOC_METHOD]) {
-    throw new Error('onClick 应带 OOC_METHOD 标记')
-  }
-  // value → 纯数据属性
+  // 方法 → 只读数据函数（成员形态由 descriptor 决定，宿主据此区分方法与 lambda 值）
+  const desc = Object.getOwnPropertyDescriptor(obj, 'onClick')!
+  if (typeof desc.value !== 'function') throw new Error('onClick 应是函数')
+  if (desc.get || desc.writable) throw new Error('onClick 应是只读数据函数')
+  if (obj.onClick(1) !== 2) throw new Error('onClick 调用应返回 e + 1')
+  // 字面量 → 纯数据属性
   if (obj.className !== 'btn') throw new Error('className 应是数据属性值 btn')
   // 空对象 {} 构造成功，无自有成员
   if (Object.keys(mod.__createObject([])).length !== 0) {

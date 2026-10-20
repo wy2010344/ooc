@@ -1,13 +1,10 @@
 {
     "name": "object-oriented-c-example",
-    "description": "OOC 项目示例：源码 src/ooc/ + 顶层 config.ooc，依赖经 ooc install 装进 .ooc_modules/",
+    "description": "OOC 项目示例：源码 src/ooc/ + 顶层 config.ooc，纯相对路径复用 packages/base 源码",
     "private": true,
     "version": "0.0.1",
     "type": "module",
     "scripts": {
-        "ooc:install": "node ../cli/bin/cli.js install ../base/src",
-        "predev": "npm run ooc:install",
-        "prebuild": "npm run ooc:install",
         "dev": "vite",
         "build": "tsc && vite build",
         "preview": "vite preview"

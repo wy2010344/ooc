@@ -31,7 +31,6 @@ import {
   type MethodBindMutable,
   type MethodCallName,
 } from './generated/ast.js'
-import { APPLY_NAME, displayMemberName } from './member-kind.js'
 import { getSharedChecker } from './shared-checker.js'
 import {
   findExportedNode,
@@ -474,7 +473,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   private handleLambdaHover(node: LambdaDef, comment: string): string {
     const t = this.checker.inferType(node)
     if (t.kind === 'object' && t.methods) {
-      const sig = t.methods.get('apply')?.[0]
+      const sig = t.methods.get('$')?.[0]
       if (sig) {
         const params = (sig.params ?? [])
           .map((p: any) => (p ? describeType(p) : 'any'))
@@ -490,8 +489,8 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
 
   private handleMessageHover(message: Message, comment: string): string {
     const name = this.getMethodCallName(message.name)
-    // apply 成员的 surface 写法是 `$`，悬停展示归一
-    const display = displayMemberName(name)
+    // `$` 成员的 surface 写法与语义名一致，直接展示
+    const display = name
     const container = message.$container
     let receiverType: TypeInfo | undefined
 
@@ -541,7 +540,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
   private getMethodCallName(name: MethodCallName): string {
     const v = name.value
     if (isRef(v)) return v.value
-    if (isDollar(v)) return APPLY_NAME
+    if (isDollar(v)) return '$'
     if (isStID(v)) return v.value.slice(1)
     if (v && typeof v === 'object' && 'value' in v) return String(v.value)
     return String(v)
@@ -565,7 +564,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     if (!innerName) return undefined
     if (isRef(innerName)) return innerName.value
     if (isStID(innerName)) return innerName.value.slice(1)
-    if (isDollar(innerName)) return APPLY_NAME
+    if (isDollar(innerName)) return '$'
     if (innerName && typeof innerName === 'object' && 'value' in innerName) {
       return String(innerName.value)
     }
@@ -591,7 +590,7 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
       const head = t.name ? `类型 ${t.name}` : '对象'
       const lines = [...t.methods.entries()].flatMap(([n, sigs]) =>
         (sigs as any[]).map((sig: any) => {
-          const memberName = displayMemberName(n)
+          const memberName = n
           const params = (sig.params ?? [])
             .map((p: any) => (p ? describeType(p) : 'any'))
             .join(', ')

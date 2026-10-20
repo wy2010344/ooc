@@ -1,9 +1,9 @@
-// ===== loop：OOC 自实现循环（base 包），无需宿主桥接 =====
+// ===== loop：OOC 自实现循环（packages/base 共享库），无需宿主桥接 =====
 // loop $：while 循环，lambda 返回真值继续，假值（nil/false/0）停止。
 // loop repeat：次数已知的有限循环，恰好执行 n 次。
-// 实现见 base 包 src/loop.ooc（$=递归+#guard 短路，repeat='x' repeat n 数据化）。
+// 实现见 packages/base/src/loop.ooc（$=递归+#guard 短路，repeat='x' repeat n 数据化）。
 
-loop = #import '@base/loop';
+loop = #import '../../../base/src/loop';
 
 // 基本 $ 循环：计数到 5
 n = storage ref 0;

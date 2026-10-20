@@ -57,7 +57,7 @@ export const js = {
     const fn =
       typeof handler === 'function'
         ? (handler as (...a: unknown[]) => unknown)
-        : (handler as Record<string, unknown> | null | undefined)?.['apply']
+        : (handler as Record<string, unknown> | null | undefined)?.['$']
     if (typeof fn !== 'function') {
       throw new TypeError(
         `js proxy 的 handler 需要是 lambda 或带 $ 方法的对象，收到 ${handler}`,
@@ -79,7 +79,7 @@ export const js = {
  */
 export const merge = {
   // merge $ overrides defaults … → 链式委托包装对象
-  apply(...parts: unknown[]) {
+  $(...parts: unknown[]) {
     // 组装期展平：参数是已包装委托（自有 __chain 键）时取其链段并查，否则视为叶子
     const entries: unknown[] = []
     for (const p of parts) {

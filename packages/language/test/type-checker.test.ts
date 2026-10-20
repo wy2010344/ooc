@@ -396,17 +396,20 @@ describe('真实示例无类型告警', () => {
   test('lambda 与 $ 对象双向兼容（同像）', async () => {
     const diags = await diagnostics(`
         f = [x => x + 1];
-        f = { $(x) { x + 1 } };
-        f $ 1
+        g = { $(x) { x + 1 } };
+        f $ 1;
+        g $ 1
     `)
     expect(messages(diags)).toEqual([])
   })
 
-  test('可调用对象重新赋值为 lambda 无警告（同像）', async () => {
+  test('lambda 与 $ 对象在实参位置双向兼容（同像）', async () => {
     const diags = await diagnostics(`
-        f = { $(x) { x + 1 } };
-        f = [x => x + 1];
-        f $ 1
+        Callback #type { $(x: number): number };
+        Runner #type { run(cb: Callback) };
+        p: Runner = { run(cb) { cb $ 1 } };
+        p run { $(x) { x + 1 } };
+        p run [x => x + 1]
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -683,14 +686,14 @@ describe('上下文类型回填', () => {
   test('回填后参数按声明类型检查', async () => {
     const diags = await diagnostics(`
         Box #type<T> { get: T, set(x: T) };
-        b: Box<number> = { get = 42, set(x) { x = 'str' } }
+        b: Box<string> = { get = 'a', set(x) { y: number = x } }
     `)
-    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
   test('无注解对象不回填：参数保持 any', async () => {
     const diags = await diagnostics(`
-        b = { set(x) { x = 'str' } }
+        b = { set(x) { x + 'str' } }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -698,9 +701,9 @@ describe('上下文类型回填', () => {
   test('非泛型注解也回填参数', async () => {
     const diags = await diagnostics(`
         Mapper #type { map(x: number): string };
-        m: Mapper = { map(x) { x = 'str' } }
+        m: Mapper = { map(x) { y: string = x } }
     `)
-    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
   test('显式参数注解优先于回填', async () => {
@@ -728,9 +731,9 @@ describe('回调实参回填', () => {
         Callback #type { $(x: number) };
         Processor #type { run(cb: Callback) };
         p: Processor = { run(cb) { cb $ 1 } };
-        p run { $(x) { x = 'str' } }
+        p run { $(x) { y: string = x } }
     `)
-    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
   test('lambda 回调参数回填', async () => {
@@ -748,9 +751,9 @@ describe('回调实参回填', () => {
         Callback #type { $(x: number) };
         Processor #type { run(cb: Callback) };
         p: Processor = { run(cb) { cb $ 1 } };
-        p run [x => x = 'str']
+        p run [x => y: string = x]
     `)
-    expect(messages(diags).join('\n')).toContain('重新赋值类型不匹配')
+    expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
   test('$ 定义键 / 消息 / 中缀都归一为同一成员', async () => {
@@ -783,10 +786,10 @@ describe('回调实参回填', () => {
     expect(messages(diags)).toEqual([])
   })
 
-  test('无回调上下文时不回填', async () => {
+  test('无回调上下文时不回填：参数保持 any 不误报', async () => {
     const diags = await diagnostics(`
         n = { run(cb) { 1 } };
-        n run { $(x) { x = 'str' } }
+        n run { $(x) { x + 'str' } }
     `)
     expect(messages(diags)).toEqual([])
   })
@@ -1745,11 +1748,6 @@ describe('#import 模块存在性检查', () => {
 
   test('.ts 宿主依赖不报（存在性交给打包器）', async () => {
     const diags = await diagnostics(`d = #import './helper.ts';\nd`)
-    expect(messages(diags).join('\n')).not.toContain('找不到模块')
-  })
-
-  test('@pkg 包引用不报（IDE 无包感知 FS，交给 CLI/运行时）', async () => {
-    const diags = await diagnostics(`b = #import '@base/loop';\nb`)
     expect(messages(diags).join('\n')).not.toContain('找不到模块')
   })
 })

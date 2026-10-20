@@ -58,7 +58,6 @@ describe('loadGlobalsTypesFromSource', () => {
     expect(storage.methods.get('ref')?.[0].returns?.name).toBe('Ref')
     expect(globals!.has('js')).toBe(true)
     expect(globals!.has('merge')).toBe(true)
-    expect(globals!.has('ObjectValue')).toBe(false)
     expect(globals!.has('console')).toBe(true)
   })
 

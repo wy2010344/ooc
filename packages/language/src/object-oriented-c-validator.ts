@@ -21,8 +21,9 @@ import {
   mergeGlobalsTypes,
   type OocConfig,
 } from './diagnostics-config.js'
-import { extnameOf, isPackageRef, resolveModuleName } from './module-path.js'
+import { extnameOf, resolveModuleName } from './module-path.js'
 import { checkConstMethodBodies } from './member-lint.js'
+import { checkScopeDuplicates } from './scope-duplicates.js'
 
 /**
  * Register custom validation checks.
@@ -107,6 +108,8 @@ export class ObjectOrientedCValidator {
   ): void {
     this.checkCircularImports(model, accept)
     this.checkImportExists(model, accept)
+    // 同层作用域不允许同名重新声明（顶层 / 方法 / 绑定块 / lambda 各一层）
+    checkScopeDuplicates(model, this.wrap(accept))
     // 每次新建，避免不同文档之间的类型定义互相污染。
     // 有 services 时注入 #import 解析器：跨模块 typedef/模块结果类型可见（需要完整工作区）。
     const importResolver = this.services
@@ -184,8 +187,7 @@ export class ObjectOrientedCValidator {
 
   /**
    * #import 目标存在性检查：只查 OOC 模块（无扩展名或 .ooc）。
-   * 跳过：@pkg 包引用（IDE 无包感知 FS，存在性交给 CLI/运行时）、
-   * .ts/.js 等宿主依赖（不解析不产码，存在性交给打包器）。
+   * 跳过 .ts/.js 等宿主依赖（不解析不产码，存在性交给打包器）。
    * 工作区已加载文档或磁盘上存在文件均视为存在。
    */
   private checkImportExists(
@@ -199,7 +201,6 @@ export class ObjectOrientedCValidator {
     const fromPath = model.$document.uri.path
     for (const statement of model.expressions) {
       if (statement.$type !== 'ImportStatement') continue
-      if (isPackageRef(statement.path)) continue
       const resolved = resolveModuleName(statement.path, fromPath, extensions)
       const ext = extnameOf(resolved)
       if (ext && !extensions.includes(ext)) continue

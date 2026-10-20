@@ -16,7 +16,6 @@ import {
   type MethodBindMutable,
   type Message,
 } from './generated/ast.js'
-import { APPLY_NAME } from './member-kind.js'
 
 /**
  * OOC 查找引用提供者
@@ -49,7 +48,7 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
     let name = targetNode ? this.getNodeName(targetNode) : undefined
     if (!name) {
       // `$` 不属于 nameRegexp（会被 findDeclarationNodeAtOffset 前移一位而落空）：
-      // 直接用偏移处的叶节点（Dollar），语义名经父节点归一为 APPLY_NAME。
+      // 直接用偏移处的叶节点（Dollar），语义名就是 `$`
       const leaf = CstUtils.findLeafNodeAtOffset(rootNode, offset)
       const leafName = leaf?.astNode ? this.getNodeName(leaf.astNode) : undefined
       if (leaf && leafName) {
@@ -138,7 +137,7 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
     if (isRef(innerName)) return innerName.value
     if (innerName.$type === 'StID') return innerName.value.replace(/^"/, '').replace(/"$/, '')
     if (innerName.$type === 'Str') return innerName.value.replace(/^'/, '').replace(/'$/, '')
-    if (innerName.$type === 'Dollar') return APPLY_NAME
+    if (innerName.$type === 'Dollar') return '$'
     return undefined
   }
 
@@ -148,7 +147,7 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
     const value = nameNode.value
     if (!value) return undefined
     if (isRef(value)) return value.value
-    if (value.$type === 'Dollar') return APPLY_NAME
+    if (value.$type === 'Dollar') return '$'
     if (value.$type === 'StID') return value.value.replace(/^"/, '').replace(/"$/, '')
     if (value.$type === 'Str') return value.value.replace(/^'/, '').replace(/'$/, '')
     return undefined
@@ -171,8 +170,8 @@ export class ObjectOrientedCReferencesProvider extends DefaultReferencesProvider
       if (!semanticNode) return
 
       const leafText = cstNode.text
-      // apply 成员的 surface 写法是 `$`，故叶文本 `$` 与语义名 APPLY_NAME 等价
-      const leafOk = leafText === name || (name === APPLY_NAME && leafText === '$')
+      // `$` 成员的 surface 写法与语义名一致
+      const leafOk = leafText === name
 
       // 精确匹配：语义节点类型 + 文本
       let matched = false

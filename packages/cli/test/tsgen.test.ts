@@ -1,6 +1,6 @@
 // tsgen 端到端测试：.ooc → 编译成纯 ES .ts 产物（Node ≥23.6 原生类型剥离直接 import）→
 // 运行断言（语义与解释器一致）。覆盖：guard 分支循环、宿主依赖按 import 导入、跨模块 import、
-// 顶层重复绑定、命名导入。（类型形态与命名空间类型见 tsgen-types.test.ts）
+// 命名导入。（类型形态与命名空间类型见 tsgen-types.test.ts；同层重复声明由 language 校验拦截）
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -50,7 +50,7 @@ test('guard 分支循环：$ 至少一次并按真值递归，repeat 恰好 n �
   const rt = await loadRuntime(dir)
 
   let count = 0
-  rt.__send(loop, 'apply', [() => ++count < 3])
+  rt.__send(loop, '$', [() => ++count < 3])
   if (count !== 3) throw new Error(`$ 循环应跑 3 次，实际 ${count}`)
 
   let sum = 0
@@ -58,28 +58,28 @@ test('guard 分支循环：$ 至少一次并按真值递归，repeat 恰好 n �
   if (sum !== 6) throw new Error(`repeat 4 次应累加 0..3=6，实际 ${sum}`)
 })
 
-test('$ 直接调用编译为统一消息（宿主成员名 apply）', async (t) => {
+test('$ 直接调用编译为统一的 `$` 消息', async (t) => {
   const { ts: tsPath } = await compileSource('dollar', `
 inc = [x => x + 1];
 obj = { $(x) => x * 3 };
 inc $ (obj $ 4)
 `)
   const code = await fs.readFile(tsPath, 'utf-8')
-  if (!/__send\(inc, "apply"/.test(code)) throw new Error('$ 应编译成统一 apply 消息')
+  if (!/__send\(inc, "\$"/.test(code)) throw new Error('$ 应编译成 `$` 消息')
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
   const mod = await import(pathToFileURL(tsPath).href)
   if (mod.default !== 13) throw new Error(`$ 求值应为 13，实际 ${mod.default}`)
 })
 
-test('$ 中缀带多实参编译为统一 apply 消息', async (t) => {
+test('$ 中缀带多实参编译为同一条 `$` 消息', async (t) => {
   const { ts: tsPath } = await compileSource('dollarargs', `
 add = { $(a, b) => a + b };
 obj = { get { add } };
 obj get $ 20 22
 `)
   const code = await fs.readFile(tsPath, 'utf-8')
-  if (!/"apply",\s*\[20, 22\]/.test(code)) {
-    throw new Error(`$ 中缀应编译成带 [20, 22] 的 apply 消息，实际:\n${code}`)
+  if (!/"\$",\s*\[20, 22\]/.test(code)) {
+    throw new Error(`$ 中缀应编译成带 [20, 22] 的 \`$\` 消息，实际:\n${code}`)
   }
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
   const mod = await import(pathToFileURL(tsPath).href)
@@ -178,18 +178,6 @@ n = storage ref 0;
   }
 })
 
-test('顶层重复绑定编译为重赋，不产生重复 let', async () => {
-  const { dir } = await compileSource('rebind', `
-calc = 1;
-calc = 2;
-{ done = calc }
-`)
-  const code = await fs.readFile(path.join(dir, 'rebind.ts'), 'utf8')
-  const lets = code.match(/let calc = /g) ?? []
-  if (lets.length !== 1) throw new Error(`let calc 应只声明 1 次，实际 ${lets.length}`)
-  if (!/[^=]calc = 2;/.test(code)) throw new Error('第二次绑定应生成重赋 calc = 2')
-})
-
 test('bind 惰性 + 多语句块：编译成 thunk，运行时只算一次', async (t) => {
   const { dir } = await compileSource('bindblock', `
 tally = 5;
@@ -203,8 +191,8 @@ obj = { v = @{ n = tally + 1; n }, w = @{ m = tally; m * 2 } };
   // v 惰性只算一次（tally+1=6），w 用外层 tally *2=10；合计 6 + 6 + 10
   if (value !== 22) throw new Error(`bind 惰性块应为 22，实际 ${value}`)
   const code = await fs.readFile(path.join(dir, 'bindblock.ts'), 'utf8')
-  if (!/type: 'bind'/.test(code) || !/fn: function/.test(code)) {
-    throw new Error(`bind 应编译成 fn thunk，实际:\n${code}`)
+  if (!/get: function/.test(code) || /type: '/.test(code)) {
+    throw new Error(`bind 应编译成 getter thunk（无 type 判别字段），实际:\n${code}`)
   }
 })
 
@@ -297,7 +285,7 @@ obj
   // bind 形同理
   const inc = rt.__send(mod.default, 'inc', [])
   if (typeof inc !== 'function') throw new Error('inc 应为 lambda 函数本体')
-  if (rt.__send(inc, 'apply', [41]) !== 43) throw new Error('$ 显式调用应得 43')
+  if (rt.__send(inc, '$', [41]) !== 43) throw new Error('$ 显式调用应得 43')
   // JS 直读：bind 成员（getter）是 lambda 本体；零参 call 成员是方法本体（调用才执行）
   if (typeof mod.default.inc !== 'function') throw new Error('JS 直读 inc 应为 lambda 本体')
   if (mod.default.inc(41) !== 43) throw new Error('JS 直调 inc lambda 应得 43')

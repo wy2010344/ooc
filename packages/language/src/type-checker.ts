@@ -1,7 +1,6 @@
 import type { AstNode, LangiumDocuments, ValidationAcceptor } from 'langium'
 import { AstUtils, URI } from 'langium'
 import { diagnosticData } from './diagnostics-config.js'
-import { APPLY_NAME } from './member-kind.js'
 import {
   isAssignment,
   isBindBlock,
@@ -583,13 +582,6 @@ export class ObjectOrientedCTypeChecker {
     env: TypeEnv,
     accept: ValidationAcceptor,
   ): void {
-    if (this.typedefs.has(stmt.name)) {
-      accept('warning', `类型 '${stmt.name}' 已经定义过了`, {
-        node: stmt,
-        property: 'name',
-        data: diagnosticData('duplicateType'),
-      })
-    }
     // 泛型类型参数名：body 里出现的这些名字是占位，实例化时替换
     const typeParams = stmt.typeParams.map((p) => p.name)
     // 先注册占位，支持自引用
@@ -665,16 +657,6 @@ export class ObjectOrientedCTypeChecker {
       undefined,
       env,
     )
-    const prev = env.lookup(stmt.name)
-    if (prev && prev.kind !== 'any' && declared.kind !== 'any') {
-      if (!isSubtype(declared, prev)) {
-        accept(
-          'warning',
-          `重新赋值类型不匹配：'${stmt.name}' 期望 ${describeType(prev)}，却得到了 ${describeType(declared)}`,
-          { node: stmt, property: 'name', data: diagnosticData('reassignmentMismatch') },
-        )
-      }
-    }
     env.define(stmt.name, declared)
   }
 
@@ -752,7 +734,7 @@ export class ObjectOrientedCTypeChecker {
       // 转发属性：本 key 的一切消息原样转发给委托对象的 $ 执行，
       // 因此静态签名 = 委托对象 $ 方法的签名。
       const delegateType = this.inferBindBody(method.bindBody, env, accept)
-      const applySigs = this.resolveSigs(delegateType, APPLY_NAME) ?? []
+      const applySigs = this.resolveSigs(delegateType, '$') ?? []
       if (applySigs.length > 0) {
         for (const s of applySigs) {
           sigs.push({ params: s.params, rest: s.rest, returns: s.returns })
@@ -1513,11 +1495,11 @@ export class ObjectOrientedCTypeChecker {
     }
     // 中缀
     if (right.infix === '$') {
-      // `left $ a b …`：等价于向 left 发送 APPLY_NAME 消息（0~N 个实参）
+      // `left $ a b …`：等价于向 left 发送 `$` 消息（0~N 个实参）
       const argTypes = (right.args ?? []).map((arg) =>
         arg.spread ? anyType : this.inferPrimary(arg.value, env, accept),
       )
-      return this.dispatch(left, APPLY_NAME, argTypes, accept, right)
+      return this.dispatch(left, '$', argTypes, accept, right)
     }
     const rightType = this.inferPrimary(right.value!, env, accept)
     return this.inferInfix(left, right.infix, rightType)
@@ -1770,8 +1752,8 @@ export class ObjectOrientedCTypeChecker {
         if (!sigs) {
           return anyType
         }
-        // merge 库签名（宿主端 merge.apply）：返回委托交集（任一侧定义即可）
-        if (name === 'apply' && receiver.name === 'merge' && args.length >= 2) {
+        // merge 库签名（宿主端 merge 的 `$`）：返回委托交集（任一侧定义即可）
+        if (name === '$' && receiver.name === 'merge' && args.length >= 2) {
           return intersectionOf(args, true)
         }
         return this.checkArgs(
@@ -1966,12 +1948,12 @@ export class ObjectOrientedCTypeChecker {
       return t
     }
     if (isLambdaDef(e)) {
-      // 同像性：lambda 就是 { $ { ... } }，类型即只有一个 apply 方法的对象。
+      // 同像性：lambda 就是 { $ { ... } }，类型即只有一个 `$` 方法的对象。
       // 参数注解收集为 MethodSig，函数体最后一条表达式推断为返回类型。
-      // context 为调用处回调签名时，无注解参数按 apply 签名回填。
+      // context 为调用处回调签名时，无注解参数按 `$` 签名回填。
       const applySig =
         context && context.kind === 'object'
-          ? context.methods.get('apply')?.slice(-1)[0]
+          ? context.methods.get('$')?.slice(-1)[0]
           : undefined
       const bodyEnv = env.child()
       const params: (TypeInfo | undefined)[] = []
@@ -1991,7 +1973,7 @@ export class ObjectOrientedCTypeChecker {
       const t: ObjectTypeInfo = {
         kind: 'object',
         methods: new Map([
-          ['apply', [{ params, rest: undefined, returns }]],
+          ['$', [{ params, rest: undefined, returns }]],
         ]),
       }
       return t
@@ -2069,8 +2051,8 @@ export class ObjectOrientedCTypeChecker {
       return v.value.slice(1)
     }
     if (isDollar(v)) {
-      // 定义键写 `$`：与 APPLY_NAME 同一个成员
-      return APPLY_NAME
+      // 定义键、消息名都是 `$`：成员名就是 `$`
+      return '$'
     }
     return v.value
   }
@@ -2081,8 +2063,8 @@ export class ObjectOrientedCTypeChecker {
       return v.value
     }
     if (isDollar(v)) {
-      // `$` 直接调用：归一为 APPLY_NAME
-      return APPLY_NAME
+      // `$` 直接调用：消息名就是 `$`
+      return '$'
     }
     if (isStID(v)) {
       return v.value.slice(1)
