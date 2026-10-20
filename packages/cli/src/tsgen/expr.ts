@@ -241,50 +241,44 @@ function methodName(n: any): string {
   return raw.value ?? ''
 }
 
+/** RHS 里是否引用了 name（含嵌套 lambda/对象体；跳过 Langium 的 $ 内部字段避免环）。 */
+function referencesName(node: unknown, name: string): boolean {
+  if (Array.isArray(node)) return node.some((n) => referencesName(n, name))
+  if (!node || typeof node !== 'object') return false
+  const rec = node as Record<string, unknown>
+  if (rec.$type === 'Ref' && rec.value === name) return true
+  return Object.keys(rec).some((k) => !k.startsWith('$') && referencesName(rec[k], name))
+}
+
 /**
- * 块 → JS：复刻解释器 runBody 的 addScope 语义——「先用外层作用域求值 RHS，再遮蔽绑定」。
- * JS 的 let/var 提升是词法的，`let x = <引用 x 的 RHS>` 必 TDZ，所以逐层套块：
- *   { const __v1 = <RHS1>; { const x = __v1; ... } }
- * RHS 在 x 尚未声明的块里求值，自然引用外层同名值。
+ * 块 → JS 语句序列。块内绑定一律 const（同层已禁止重复声明），平铺输出即可；
+ * 仅当 RHS 引用了同名外层绑定（`x = x + 1` 遮蔽场景）时，才另起块先求值再声明，
+ * 复刻解释器「用外层作用域求值 RHS，再遮蔽绑定」的语义（避免 TDZ 与错误闭包捕获）。
  */
-function bodyCode(stmts: any[]): string {
-  if (stmts.length === 0) {
-    return 'let __last = null; return __last;'
+function bodyCode(stmts: any[], offset = 0, returnLast = true): string {
+  if (stmts.length === 0) return returnLast ? 'return null' : ''
+  const [st, ...rest] = stmts
+  const restCode = bodyCode(rest, offset + 1, returnLast)
+  if (st.$type === 'Assignment') {
+    const rhs = expressionCode(st.expression)
+    const tail = rest.length > 0 ? restCode : returnLast ? `return ${st.name}` : ''
+    const decl = `const ${st.name} = ${rhs};`
+    if (!referencesName(st.expression, st.name)) return `${decl} ${tail}`.trim()
+    return `{ const __v${offset} = ${rhs}; { const ${st.name} = __v${offset}; ${tail} } }`
   }
-  // 自内向外逐层包裹：最内层是最后一条语句（块的值）
-  let inner = `__last = ${expressionCode(stmts[stmts.length - 1] as any)}; return __last;`
-  for (let i = stmts.length - 2; i >= 0; i--) {
-    const st = stmts[i]
-    if (st.$type === 'Assignment') {
-      inner = `{ const __v${i} = ${expressionCode(st.expression)}; { const ${st.name} = __v${i}; ${inner} } }`
-    } else {
-      inner = `{ __last = ${expressionCode(st as any)}; ${inner} }`
-    }
-  }
-  return `let __last = null; ${inner}`
+  const code = expressionCode(st)
+  if (rest.length > 0) return `${code}; ${restCode}`
+  return returnLast ? `return ${code}` : `${code};`
 }
 
 /**
  * #guard 分支链 → 前置语句先执行（与解释器 runGuardedBody 一致：
  * 赋值进作用域，表达式求值），再 if / else if / else：命中即 return 该分支语句段的值。
- * 复刻 bodyCode 的逐层嵌套遮蔽语义，但不 return，执行完进入 guard 链。
  */
 function guardedBodyCode(body: any): string {
   const chain = guardChainCode(body)
-  const pre = body.stmts ?? []
-  if (pre.length === 0) {
-    return chain
-  }
-  let inner = chain
-  for (let i = pre.length - 1; i >= 0; i--) {
-    const st = pre[i]
-    if (st.$type === 'Assignment') {
-      inner = `{ const __v${i} = ${expressionCode(st.expression)}; { const ${st.name} = __v${i}; ${inner} } }`
-    } else {
-      inner = `{ __last = ${expressionCode(st)}; ${inner} }`
-    }
-  }
-  return `let __last = null; ${inner}`
+  const pre = bodyCode(body.stmts ?? [], 0, false)
+  return pre ? `${pre} ${chain}` : chain
 }
 
 /** if / else if / else 链本体：命中即 return，无 else 时返回 nil。 */
@@ -298,7 +292,7 @@ function guardChainCode(body: any): string {
   })
   const elseBlock = body.elseBranch
     ? bodyCode(body.elseBranch.stmts ?? [])
-    : 'let __last = null; return __last;'
+    : 'return null'
   parts.push(`else { ${elseBlock} }`)
   return parts.join(' ')
 }
@@ -308,14 +302,5 @@ function lambdaDefCode(e: any): string {
   if (!e || e.$type !== 'LambdaDef') return expressionCode(e)
   const params = (e.params || []).map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
   if (e.restParam) params.push(`...${e.restParam.name}`)
-  const bodyLines: string[] = ['let __last = null;']
-  for (const st of e.expressions || []) {
-    if (st.$type === 'Assignment') {
-      bodyLines.push(`const ${st.name} = ${expressionCode(st.expression)};`)
-    } else {
-      bodyLines.push(`__last = ${expressionCode(st)};`)
-    }
-  }
-  bodyLines.push('return __last;')
-  return `(function(${params.join(', ')}){ ${bodyLines.join(' ')} })`
+  return `(function(${params.join(', ')}){ ${bodyCode(e.expressions ?? [])} })`
 }
