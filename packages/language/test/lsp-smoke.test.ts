@@ -1,6 +1,6 @@
 import { test } from './compat.js'
 import assert from 'node:assert/strict'
-import { EmptyFileSystem, URI } from 'langium'
+import { EmptyFileSystem, EmptyFileSystemProvider, URI } from 'langium'
 import {
   expectHover,
   expectCompletion,
@@ -195,6 +195,32 @@ test('LSP: Hover 字符串字面量应有内容', async () => {
     indexMarker: IDX,
     index: 0,
     hover: /字符串|string/,
+  })
+})
+
+test('LSP: Hover 模版洞 ${} 内的引用应显示类型', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  // 光标在洞内 x 上（STRING 是单个叶节点，需切进洞内子解析表达式）
+  await expect({
+    text: "x = 42;\ny = 'a ${" + IDX + "x} b';",
+    indexMarker: IDX,
+    index: 0,
+    hover: /变量 x/,
+  })
+})
+
+test('LSP: Hover 导入项本体解析不到宿主 .ts 模块时退回全局类型', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem, undefined, fakeGlobalsTypes)
+  const expect = expectHover(services.ObjectOrientedC)
+
+  // demoDom 只存在于注入的全局桥接类型里；./host.ts 不是 Langium 文档
+  await expect({
+    text: `#import { ` + IDX + `demoDom } './host.ts';\ndemoDom;`,
+    indexMarker: IDX,
+    index: 0,
+    hover: /命名导入 demoDom[\s\S]*类型 demoDom/,
   })
 })
 
@@ -691,6 +717,123 @@ test('LSP: #import 指向不存在的模块时不跳转', async () => {
     position: document.textDocument.positionAt(offset),
   })
   assert.equal(links?.length ?? 0, 0, '目标不存在时不应返回跳转链接')
+})
+
+test('LSP: Definition 模版洞 ${} 内的引用应跳到声明', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  const source = "x = 42;\ny = 'a ${x} b';"
+  const document = await parse(source, {
+    documentUri: URI.file('/proj/tpl-def.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.indexOf('${x}') + 2 // 落在洞内 x 上（${ 占2字符）
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length, 1, '应返回一条跳转链接')
+  assert.equal(links![0].targetUri, document.uri.toString())
+  assert.equal(links![0].targetRange.start.line, 0, '应定位到 x = 42 所在行')
+})
+
+test('LSP: Definition 跨文件再导出（宿主链中断）应跳到中间模块的导入项', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  // 中间模块只从宿主 .ts 再导出 host（目标不是 Langium 文档，链在中间模块中断）
+  const libUri = URI.file('/proj/reexp-lib.ooc')
+  await parse(`#import { host } './host.ts';`, { documentUri: libUri.toString() })
+
+  const source = `#import { host } './reexp-lib.ooc';\nhost;`
+  const document = await parse(source, {
+    documentUri: URI.file('/proj/reexp-app.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.lastIndexOf('host') + 1
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length, 1, '应返回一条跳转链接')
+  assert.equal(links![0].targetUri, libUri.toString(), '应跳到中间模块')
+  // 定位到 #import { host } 里的 host（'#import { ' = 10 字符）
+  assert.equal(links![0].targetSelectionRange.start.character, 10, '应定位到导入项 host')
+})
+
+test('LSP: Definition 宿主 .ts 导入应跳到目标文件', async () => {
+  // 磁盘上存在 .ts 宿主文件、但不是 Langium 文档 → 跳文件头
+  class HostExistFs extends EmptyFileSystemProvider {
+    override existsSync(uri?: URI): boolean {
+      return !!uri && uri.path.endsWith('.ts')
+    }
+  }
+  const services = createObjectOrientedCServices({
+    fileSystemProvider: () => new HostExistFs(),
+  })
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  const source = `#import { dom } './bridge.ts';\ndom;`
+  const document = await parse(source, {
+    documentUri: URI.file('/proj/host-app.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.DefinitionProvider
+  assert.ok(provider, 'DefinitionProvider 应存在')
+
+  const offset = source.lastIndexOf('dom') + 1
+  const links = await provider.getDefinition(document, {
+    textDocument: { uri: document.uri.toString() },
+    position: document.textDocument.positionAt(offset),
+  })
+  assert.equal(links?.length, 1, '应返回一条跳转链接')
+  assert.ok(links![0].targetUri.endsWith('/proj/bridge.ts'), '应跳到宿主文件')
+  assert.equal(links![0].targetRange.start.line, 0, '宿主文件定位到文件头')
+})
+
+// ========== Semantic Token 测试 ==========
+
+test('LSP: 语义 token 模版洞 ${} 内的引用应落在文档正确位置', async () => {
+  const services = createObjectOrientedCServices(EmptyFileSystem)
+  const parse = parseHelper<Model>(services.ObjectOrientedC)
+
+  const source = "x = 42;\ny = 'a ${x} b';"
+  const document = await parse(source, {
+    documentUri: URI.file('/proj/tpl-tok.ooc').toString(),
+  })
+  const provider = services.ObjectOrientedC.lsp.SemanticTokenProvider
+  assert.ok(provider, 'SemanticTokenProvider 应存在')
+  const tokens = await provider.semanticHighlight(document, {
+    textDocument: { uri: document.uri.toString() },
+  })
+
+  // LSP delta 解码（同行 deltaStart 相对上一 token 起点）
+  const srcLines = source.split('\n')
+  const hits: { line: number; char: number }[] = []
+  let line = 0
+  let prevChar = 0
+  const data = tokens?.data ?? []
+  for (let i = 0; i < data.length; i += 5) {
+    const deltaLine = data[i]!
+    line += deltaLine
+    const char = deltaLine === 0 && i > 0 ? prevChar + data[i + 1]! : data[i + 1]!
+    prevChar = char
+    const len = data[i + 2]!
+    const text = srcLines[line]?.slice(char, char + len)
+    if (text === 'x') hits.push({ line, char })
+  }
+
+  // 洞内 x 应落在第 2 行、`${` 之后（历史 bug：子解析偏移当文档坐标、错位到行首）
+  const expectedLine = 1
+  const expectedChar = srcLines[1]!.indexOf('${x}') + 2
+  assert.ok(
+    hits.some((h) => h.line === expectedLine && h.char === expectedChar),
+    `洞内 x 的 token 应在 ${expectedLine}:${expectedChar}，实际 ${JSON.stringify(hits)}`,
+  )
 })
 
 // ========== SignatureHelp Provider 测试 ==========

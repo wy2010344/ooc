@@ -12,6 +12,7 @@ import type {
   TemplateText,
 } from './generated/ast.js'
 import { splitTemplate, type TemplateSegment } from './template.js'
+import { templateHoleSpans } from './template-offsets.js'
 
 /** 子解析器：把洞源码解析成表达式（解析失败/非表达式返回 undefined）。 */
 export type HoleParser = (source: string) => Expression | undefined
@@ -60,7 +61,10 @@ function graftOne(str: Str, parseHole: HoleParser): void {
     const expr = parseHole(seg.source)
     if (expr) {
       hasHole = true
-      parts.push(makeHole(expr, str, parts.length))
+      const hole = makeHole(expr, str, parts.length)
+      // 登记洞在 body 里的起点/长度，供 LSP 把文档偏移换算进洞、洞内 range 换算回文档
+      templateHoleSpans.set(hole, { start: seg.start, length: seg.source.length })
+      parts.push(hole)
       graftTemplates(expr, parseHole) // 洞内字符串仍可能是模版
     } else {
       parts.push(makeText('', str, parts.length))

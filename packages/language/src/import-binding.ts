@@ -131,6 +131,8 @@ export function findExportedNode(
 ): AstNode | undefined {
   if (seen.has(model)) return undefined
   seen.add(model)
+  // 上游链断掉时（宿主 .ts 不是 Langium 文档 / 目标未加载）的兜底落点
+  let fallback: ImportItem | undefined
   for (const stmt of model.expressions) {
     if ((isAssignment(stmt) || isTypeDef(stmt)) && stmt.name === exportName) {
       return stmt
@@ -144,8 +146,10 @@ export function findExportedNode(
       const found = findExportedNode(upstreamModel, item.name, res, seen)
       if (found) return found
     }
+    // 上游不可用：本模块的导入项就是这个名字的再导出落点（先记下，继续扫其余语句）
+    fallback ??= item
   }
-  return undefined
+  return fallback
 }
 
 /** 模块的默认导出 = 最后一条语句（语句顺序即求值顺序，最后一条是模块结果） */

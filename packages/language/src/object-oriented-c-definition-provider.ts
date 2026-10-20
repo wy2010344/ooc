@@ -2,9 +2,11 @@ import {
   AstNode,
   AstUtils,
   CstNode,
+  CstUtils,
   isCompositeCstNode,
   isLeafCstNode,
 } from 'langium'
+import type { LangiumDocument } from 'langium'
 import { DefaultDefinitionProvider } from 'langium/lsp'
 import { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import {
@@ -13,8 +15,13 @@ import {
   isMethodAll,
   isModel,
   isRef,
+  isStr,
 } from './generated/ast.js'
-import { LocationLink, Range } from 'vscode-languageserver'
+import {
+  DefinitionParams,
+  LocationLink,
+  Range,
+} from 'vscode-languageserver'
 import {
   findExportedNode,
   findImportBinding,
@@ -23,6 +30,7 @@ import {
   resolveImportUri,
   type ImportResolution,
 } from './import-binding.js'
+import { leafAtTemplateHole } from './template-offsets.js'
 
 /** 目标文件起始位置（跳到文件头即可，不定位到具体符号）。 */
 const FILE_START_RANGE: Range = {
@@ -38,6 +46,28 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
 
   constructor(private readonly services: ObjectOrientedCServices) {
     super(services)
+  }
+
+  /**
+   * 光标落在模版洞 ${…} 内时，先切到洞内子解析出的表达式叶节点，再走常规解析。
+   * 整段字符串是单个 STRING 叶节点，基类按文档偏移只会命中它，洞内引用无法跳转。
+   */
+  override async getDefinition(
+    document: LangiumDocument,
+    params: DefinitionParams,
+  ): Promise<LocationLink[] | undefined> {
+    const cstRoot = document.parseResult?.value?.$cstNode
+    if (cstRoot) {
+      const offset = document.textDocument.offsetAt(params.position)
+      const leaf = CstUtils.findLeafNodeAtOffset(cstRoot, offset)
+      if (leaf && isStr(leaf.astNode)) {
+        const grafted = leafAtTemplateHole(leaf.astNode, offset)
+        if (grafted) {
+          return this.collectLocationLinks(grafted, params)
+        }
+      }
+    }
+    return super.getDefinition(document, params)
   }
 
   /**
@@ -118,18 +148,30 @@ export class ObjectOrientedCDefinitionProvider extends DefaultDefinitionProvider
     const binding = findImportBinding(model, refNode.value)
     if (!binding) return undefined
 
-    const target = importDocument(binding.stmt, this.importResolution())
+    const res = this.importResolution()
+    const target = importDocument(binding.stmt, res)
     const targetModel = target?.parseResult.value
     if (targetModel && isModel(targetModel)) {
       const node =
         binding.kind === 'default'
           ? findModuleResultNode(targetModel)
-          : findExportedNode(targetModel, binding.exportName, this.importResolution())
+          : findExportedNode(targetModel, binding.exportName, res)
       if (node) {
         // 默认导出可能是任意表达式：只在名字确实等于导出名时按名字定位
         const name = binding.kind === 'default' ? undefined : binding.exportName
         const link = this.createLocationLink(sourceCstNode, node, name)
         if (link) return link
+      }
+    } else {
+      // 目标不是/未加载为 Langium 文档（宿主 .ts 等）：文件在就跳文件头
+      const uri = resolveImportUri(binding.stmt, res)
+      if (uri) {
+        return {
+          originSelectionRange: sourceCstNode.range,
+          targetUri: uri.toString(),
+          targetRange: FILE_START_RANGE,
+          targetSelectionRange: FILE_START_RANGE,
+        }
       }
     }
     // 回退：本文档的导入项就是这个名字的「定义位置」

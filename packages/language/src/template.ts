@@ -5,7 +5,8 @@
 /** 模版片段：文本段（已还原转义）或洞（源码，待子解析）。 */
 export type TemplateSegment =
   | { kind: 'text'; text: string }
-  | { kind: 'hole'; source: string }
+  // start：洞源码在 body（去引号）里的起点；供 graft 登记，LSP 换算文档坐标
+  | { kind: 'hole'; source: string; start: number }
 
 /** 转义字符还原，复刻 Langium ValueConverter.convertEscapeCharacter。 */
 function unescapeChar(char: string): string {
@@ -90,7 +91,7 @@ export function splitTemplate(raw: string): TemplateSegment[] {
     if (c === '$' && body[i + 1] === '{') {
       flush()
       const end = findHoleEnd(body, i + 2)
-      out.push({ kind: 'hole', source: body.slice(i + 2, end) })
+      out.push({ kind: 'hole', source: body.slice(i + 2, end), start: i + 2 })
       i = end + 1
       continue
     }

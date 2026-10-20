@@ -41,6 +41,7 @@ import {
   type ImportBinding,
   type ImportResolution,
 } from './import-binding.js'
+import { leafAtTemplateHole } from './template-offsets.js'
 import {
   describeType,
   getBuiltinMethods,
@@ -88,7 +89,13 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     }
     if (!cstNode) return undefined
 
-    const astNode = cstNode.astNode
+    // 光标落在模版洞 ${…} 内：整段字符串是单个 STRING 叶节点，需切到洞内子解析出的表达式
+    const grafted = isStr(cstNode.astNode)
+      ? leafAtTemplateHole(cstNode.astNode, offset)
+      : undefined
+    const targetCstNode = grafted ?? cstNode
+
+    const astNode = targetCstNode.astNode
     if (!astNode) return undefined
 
     // 如果是 Ref 节点，自定义解析到声明
@@ -416,10 +423,14 @@ export class ObjectOrientedCHoverProvider extends AstNodeHoverProvider {
     if (!stmt || !isImportStatement(stmt)) return undefined
     const isType = !!stmt.types?.items.includes(node)
     const alias = node.alias ? `（原名 ${node.name}）` : ''
-    const t = this.checker.inferImportBindings(stmt).get(node.alias ?? node.name)
+    const local = node.alias ?? node.name
+    // 宿主 .ts 导入（bridge.ts 等）模块不可见 → 类型退回注入的全局桥接类型
+    const t =
+      this.checker.inferImportBindings(stmt).get(local) ??
+      this.checker.globals?.get(local)
     const typeText = t ? `：${this.describeHoverType(t)}` : ''
     return this.buildHoverContent(
-      `${isType ? '类型导入' : '命名导入'} ${node.alias ?? node.name}${alias} ← '${stmt.path}'${typeText}`,
+      `${isType ? '类型导入' : '命名导入'} ${local}${alias} ← '${stmt.path}'${typeText}`,
       comment,
     )
   }
