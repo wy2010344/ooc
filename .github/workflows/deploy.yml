@@ -34,12 +34,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          # 与根 package.json 的 volta.node 保持一致（langium 在 24.22 下校验会失败）
+          node-version: 24.15.0
           cache: npm
 
-      # 本地通过 workspace 复用的兄弟仓库，CI 需要放到相同相对路径。
+      # 本地通过 workspace 复用的兄弟仓库在 CI 不存在，按相同目录结构还原。
+      # es-pseudo-monorepo 只是骨架，mve / wy-helper 是独立公开仓库。
       - name: Clone sibling workspace
-        run: git clone --depth 1 https://github.com/wy2010344/es-pseudo-monorepo.git ../es-pseudo-monorepo
+        run: |
+          git clone --depth 1 https://github.com/wy2010344/es-pseudo-monorepo.git ../es-pseudo-monorepo
+          git clone --depth 1 https://github.com/wy2010344/mve.git ../es-pseudo-monorepo/packages/mve
+          git clone --depth 1 https://github.com/wy2010344/wy-helper.git ../es-pseudo-monorepo/packages/wy-helper
 
       - uses: pnpm/action-setup@v4
         with:
