@@ -3,7 +3,7 @@ import { hookCurrentStateHolder } from 'mve-core'
 import { createPop as createPopImpl, renderPop } from 'mve-helper'
 
 import type { DComponent } from './dom.js'
-import { SetValue } from 'wy-helper'
+import type { SetValue } from 'wy-helper'
 
 /**
  * Portal / 弹层：内容渲染到 `renderPop()` 维护的弹层列表里（main.ts 在根渲染流程中调用
@@ -24,7 +24,7 @@ export function createPop<T>(
     close: SetValue<T>,
   ) => DComponent,
 ) {
-  return createPopImpl<T>((close) => {
+  return createPopImpl<T>((close: SetValue<T>) => {
     const holder = hookCurrentStateHolder(
       true,
     ) as unknown as StateHolderWithNode<Node, readonly Node[]>
