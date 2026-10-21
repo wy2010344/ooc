@@ -50,12 +50,12 @@ export const compileAction = async (
   fileName: string,
   opts: { destination?: string | undefined },
 ): Promise<void> => {
-  const srcDir = path.dirname(path.resolve(fileName))
-  const outDir = opts.destination ?? path.join(srcDir, 'generated')
-  // 与 build 同一套纯 ES 产物：入口 + 依赖图 + 共享 runtime，平铺进 destination
+  // 默认输出到 cwd/generated，不再污染源码目录；跨目录依赖的 rootDir 由 buildProject
+  // 取依赖图公共祖先自动计算。
+  const outDir = opts.destination ?? path.resolve(process.cwd(), 'generated')
+  // 与 build 同一套纯 ES 产物：入口 + 依赖图 + 共享 runtime，按相对路径写进 destination
   const result = await buildProject({
     entry: path.resolve(fileName),
-    rootDir: srcDir,
     outDir,
   })
   console.log(
@@ -132,7 +132,7 @@ export async function initAction(): Promise<void> {
 
 export { modelToTs } from './tsgen/model.js'
 export { OOC_RUNTIME_MODULE } from './tsgen/runtime-template.js'
-export { buildProject, resolveImportSource, collectImports, typeExportNames } from './build.js'
+export { buildProject, resolveImportSource, collectImports, typeExportNames, tsTypeExportNames } from './build.js'
 
 export default function (): void {
   const program = new Command()

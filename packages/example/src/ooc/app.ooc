@@ -11,6 +11,8 @@ math = #import 'math';
 Circle #type { kind: 'circle', radius: number };
 Square #type { kind: 'square', side: number };
 
+#import {x  as m} './types.ooc';
+
 area = {
     calc(s: Circle | Square) {
         #guard (s kind) == 'circle';

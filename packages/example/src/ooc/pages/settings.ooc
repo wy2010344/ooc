@@ -1,6 +1,6 @@
 // settings.ooc —— 账户设置页：受控输入 + 计数器 + 保存/重置，组合各 demo 区块。
-// 信号用 multiBind 包成 lambda：`x $` 读、`x $ v` 写（见 ooc-mve-bridge）。
-#import { dom, text, fc, multiBind, createSignal, storage } '../bridge.ts';
+// 信号用 bindSignal、storage ref 用 bindRef 包成 lambda：`x $` 读、`x $ v` 写。
+#import { dom, text, fc, bindSignal, bindRef } '../bridge.ts';
 #import { Button } '../ui/button.ooc';
 #import { Badge } '../ui/badge.ooc';
 #import { Input } '../ui/input.ooc';
@@ -13,11 +13,11 @@
 #import { ThreeDemo } './three-demo.ooc';
 
 SettingsPanel = fc $ [ctx =>
-    name = multiBind $ (createSignal $ 'OOC');
-    count = multiBind $ (createSignal $ 0);
-    saved = multiBind $ (createSignal $ '');
-    // storage ref 是普通可变 cell（非响应式）：multiBind 同样适用，读值在保存时快照。
-    saves = multiBind $ (storage ref 0);
+    name = bindSignal $ 'OOC';
+    count = bindSignal $ 0;
+    saved = bindSignal $ '';
+    // storage ref 是普通可变 cell（非响应式）：bindRef 包成同样的读写 lambda。
+    saves = bindRef $ 0;
 
     (dom div { className = 'mx-auto max-w-2xl space-y-6 p-6' }
         (dom header { className = 'space-y-1' }

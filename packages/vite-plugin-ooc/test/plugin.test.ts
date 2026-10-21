@@ -6,11 +6,10 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { oocPlugin, OOC_RUNTIME_VIRTUAL_ID } from 'vite-plugin-ooc'
-import { modelToTs, OOC_RUNTIME_MODULE } from 'object-oriented-c-cli'
+import { modelToTs } from 'object-oriented-c-cli'
 import { createObjectOrientedCServices } from 'object-oriented-c-language'
 import { URI } from 'langium'
 import { NodeFileSystem } from 'langium/node'
-import * as ts from 'typescript'
 
 const plugin = oocPlugin()
 const RESOLVED_RUNTIME = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
@@ -48,6 +47,13 @@ helper = #import './helper.ts';
 )
 fs.writeFileSync(mathPath, `{ double(x) { x * 2 } }`)
 fs.writeFileSync(helperPath, `export default 10`)
+const shapePath = path.join(dir, 'ooc', 'shape.ooc')
+fs.writeFileSync(
+  shapePath,
+  `obj = { onClick(e) => e, className = 'btn', lazy = @{ 'x' } };
+obj
+`,
+)
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }))
 
 test('.ooc resolveId：相对引用归一化为真实绝对路径 id，dev/build 共用同一路径', () => {
@@ -215,29 +221,32 @@ test('非 .ooc/.runtime id 不打扰：resolveId/load 返回 undefined', () => {
   }
 })
 
-test('成员形态契约：__createObject 的方法成员是只读数据函数，字面量成员是数据属性', async () => {
-  // 把共享 runtime 模板转成 JS（同 vite-plugin 的做法），run 一次 __createObject
-  const js = ts
-    .transpileModule(OOC_RUNTIME_MODULE, {
-      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-    })
-    .outputText
+test('成员形态契约：字面量/方法/惰性 getter 直接生成冻结对象，无 __createObject', async () => {
+  const result: any = load.call(ctx, path.normalize(shapePath))
+  const code = result.code as string
+  if (/__createObject/.test(code)) {
+    throw new Error(`对象构造不应再依赖 __createObject，实际:\n${code}`)
+  }
+  if (!/get "lazy"\(\)/.test(code)) {
+    throw new Error(`计算绑定应生成对象字面量 getter，实际:\n${code}`)
+  }
   const mod: any = await import(
-    'data:text/javascript;base64,' + Buffer.from(js).toString('base64')
+    'data:text/javascript;base64,' + Buffer.from(code).toString('base64')
   )
-  const obj = mod.__createObject([
-    { name: 'onClick', fn: (e: any) => e + 1 },
-    { name: 'className', value: 'btn' },
-  ])
+  const obj = mod.default
   // 方法 → 只读数据函数（成员形态由 descriptor 决定，宿主据此区分方法与 lambda 值）
   const desc = Object.getOwnPropertyDescriptor(obj, 'onClick')!
   if (typeof desc.value !== 'function') throw new Error('onClick 应是函数')
   if (desc.get || desc.writable) throw new Error('onClick 应是只读数据函数')
-  if (obj.onClick(1) !== 2) throw new Error('onClick 调用应返回 e + 1')
-  // 字面量 → 纯数据属性
+  if (obj.onClick(1) !== 1) throw new Error('onClick 调用应返回 e')
+  // 字面量 → 只读数据属性
   if (obj.className !== 'btn') throw new Error('className 应是数据属性值 btn')
-  // 空对象 {} 构造成功，无自有成员
-  if (Object.keys(mod.__createObject([])).length !== 0) {
-    throw new Error('空对象 {} 不应有自有成员')
+  if (Object.getOwnPropertyDescriptor(obj, 'className')?.writable !== false) {
+    throw new Error('className 应是只读数据属性')
+  }
+  // 计算绑定 → getter，读取得到求值结果
+  if (obj.lazy !== 'x') throw new Error("lazy getter 应返回 'x'")
+  if (Object.getOwnPropertyDescriptor(obj, 'lazy')?.get == null) {
+    throw new Error('lazy 应是 getter')
   }
 })

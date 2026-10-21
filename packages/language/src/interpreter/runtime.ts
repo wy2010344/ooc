@@ -321,7 +321,7 @@ export function sendMessage(o: any, value: string, args: any[]): any {
   }
   const obj = objectDefine[value as '||']
   if (obj) {
-    return obj(o, args[0])
+    return obj(o, ...args)
   }
   // 没有兜底：需要拦截未知消息的对象已用 `js proxy` 显式包成 JS Proxy
   // （get trap 动态转发），到这里就是真的没有接收方了，直接抛结构化错误。

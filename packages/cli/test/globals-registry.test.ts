@@ -25,6 +25,8 @@ const ALL_NAMES = [
   // ooc-mve-bridge 响应式
   'createSignal',
   'multiBind',
+  'bindSignal',
+  'bindRef',
   'memo',
   'addEffect',
   'createContext',

@@ -1,11 +1,21 @@
-// AST → TS 片段生成的共享 helper：类型注解、TypeDef 声明、宿主 globals 引用收集。
+// AST → TS 片段生成的共享 helper：类型注解与 TypeDef 声明。
 // 单文件 compile（model.ts）与 ES 模块产物（esm.ts）共用。
-import type { Model } from 'object-oriented-c-language'
-import { expressionCode, typeCode } from './expr.js'
+import { expressionCode, restTypeAnnot, typeAnnot } from './expr.js'
 
-export function typeAnnot(t?: unknown): string {
-  if (!t || !(t as any)?.$type) return ''
-  return `: ${typeCode(t)}`
+export { expressionCode, typeAnnot }
+
+/** 定义键 → 文本：StID 带前导 `"`，Str 已去引号，Dollar 是 `$`。 */
+function memberName(n: any): string {
+  const raw = n?.name
+  if (!raw) return ''
+  if (raw.$type === 'StID') return raw.value.slice(1)
+  if (raw.$type === 'Dollar') return '$'
+  return raw.value ?? ''
+}
+
+/** 非标识符键要加引号，否则 `foo-bar: number` 不是合法 TS。 */
+function tsKey(name: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name)
 }
 
 /** TypeDef → TS type（形态声明，运行时无副作用）。 */
@@ -14,15 +24,22 @@ export function typeDefCode(td: any): string {
   const params = (td.typeParams || []).map((p: any) => p.name).join(', ')
   const members = (td.body?.members || [])
     .map((m: any) => {
-      const mname = m.name?.name?.value ?? ''
+      const mname = tsKey(memberName(m.name))
       const typeArgs = (m.typeParams || []).map((p: any) => p.name).join(', ')
-      const mparams = (m.params || [])
-        .map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation)}`)
+      const params = [...(m.params || [])]
+      // rest 在 AST 里是独立字段，不补进来会把它当普通属性丢掉
+      if (m.restParam) params.push(m.restParam)
+      const mparams = params
+        .map((p: any) =>
+          p === m.restParam
+            ? `...${p.name}${restTypeAnnot(p.typeAnnotation)}`
+            : `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`,
+        )
         .join(', ')
       const ret = typeAnnot(m.typeAnnotation)
-      // 零参无泛型成员渲染为属性形态（kind: 'circle'）：TS 可区分联合判别/收窄生效；
+      // 零参无泛型无 rest 成员渲染为属性形态（kind: 'circle'）：TS 可区分联合判别/收窄生效；
       // 泛型零参保持方法形态（TS 属性不能泛型）
-      const isProp = (m.params || []).length === 0 && !typeArgs
+      const isProp = (m.params || []).length === 0 && !m.restParam && !typeArgs
       return isProp
         ? `  ${mname}${ret || ': any'}`
         : `  ${mname}${typeArgs ? `<${typeArgs}>` : ''}(${mparams})${ret || ': any'}`
@@ -30,63 +47,3 @@ export function typeDefCode(td: any): string {
     .join(';\n')
   return `export type ${name}${params ? `<${params}>` : ''} = {\n${members}\n};`
 }
-
-/** 语言内建 globalThis 名字：编译产物直接引用，不注入 globals */
-const BUILTIN_GLOBALS = new Set([
-  'Array', 'Object', 'JSON', 'Math', 'console', 'Promise', 'Number', 'String', 'Boolean',
-])
-
-/** 遍历 AST 收集所有 Ref 标识符（顶层、对象构造表达式与方法体），返回待注入的宿主 globals 名。 */
-export function collectHostRefs(model: Model, topBound: Set<string>): string[] {
-  const refs = new Set<string>()
-  const bounds = new Set<string>(topBound)
-  // 先扫全树收集绑定名（参数、lambda 参数、嵌套赋值、简单属性读取等），再收集 Ref
-  const walkRefs = (node: any, out: Set<string>): void => {
-    if (!node || typeof node !== 'object') return
-    if (node.$type === 'Ref') {
-      if (typeof node.value === 'string') out.add(node.value)
-      return
-    }
-    if (node.$type === 'MethodCallName' || node.$type === 'MethodDefName') {
-      return // 消息名/方法名不是变量引用
-    }
-    if (typeof node.$type === 'string') {
-      for (const key of Object.keys(node)) {
-        if (key.startsWith('$')) continue // 跳过 Langium 元字段，防环
-        const v = (node as any)[key]
-        if (Array.isArray(v)) for (const item of v) walkRefs(item, out)
-        else if (v && typeof v === 'object') walkRefs(v, out)
-      }
-    }
-  }
-  const collectBindings = (node: any): void => {
-    if (!node || typeof node !== 'object') return
-    if (node.$type === 'Param') {
-      if (node.name) bounds.add(node.name)
-    } else if (node.$type === 'Assignment') {
-      if (node.name) bounds.add(node.name)
-    }
-    // 方法名不绑进变量作用域（OOC 需 this.xxx 取成员），不加入 bounds
-    if (typeof node.$type === 'string') {
-      for (const key of Object.keys(node)) {
-        if (key.startsWith('$')) continue // 跳过 $type/$container 等 Langium 元字段，防环
-        const v = (node as any)[key]
-        if (Array.isArray(v)) for (const item of v) collectBindings(item)
-        else if (v && typeof v === 'object') collectBindings(v)
-      }
-    }
-  }
-  for (const st of model.expressions) {
-    collectBindings(st)
-    walkRefs(st, refs)
-  }
-  refs.delete('this')
-  return Array.from(refs).filter(
-    (name) =>
-      !bounds.has(name) &&
-      !BUILTIN_GLOBALS.has(name) &&
-      !['globalThis', 'undefined', 'NaN', 'Infinity'].includes(name),
-  )
-}
-
-export { expressionCode }

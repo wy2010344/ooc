@@ -1,12 +1,12 @@
-// variant-demo.ooc —— 动态切换：multiBind 信号作 lambda（无参读、单参写）。
+// variant-demo.ooc —— 动态切换：bindSignal 信号作 lambda（无参读、单参写）。
 // props 用 `=>` 方法读信号（每次读重算），Button 的 className 随之更新。
-#import { dom, text, fc, multiBind, createSignal } '../bridge.ts';
+#import { dom, text, fc, bindSignal } '../bridge.ts';
 #import { Button } '../ui/button.ooc';
 #import { Card, CardHeader, CardTitle, CardDescription, CardContent } '../ui/card.ooc';
 
 VariantDemo = fc $ [ctx =>
-    variant = multiBind $ (createSignal $ 'default');
-    size = multiBind $ (createSignal $ 'default');
+    variant = bindSignal $ 'default';
+    size = bindSignal $ 'default';
 
     (Card $ {}
         (CardHeader $ {}

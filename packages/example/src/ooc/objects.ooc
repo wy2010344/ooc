@@ -3,11 +3,18 @@ calc = {
     add(a, b) => a + b,
     sub(a, b) { a - b },
     cached = 1 + 2,
-    inc(n) { this cached + n }
+    inc(n) { this cached + n },
+    // 签名方法：无函数体的声明只写返回类型，是纯类型层承诺（检查器用）
+    // 运行时分发交给有实现的同名方法，签名与实现写在同一个对象里即可
+    area(radius: number): number,
+    area(radius: string): string,
+    area(r) { r }
 };
 calc add 3 4;
 calc cached;
 calc inc 3;
+calc area 3;
+calc area 'x';
 
 // 守卫分支链：命中的分支语句段执行完即返回，全不命中走 #else
 size = {
@@ -27,15 +34,6 @@ dog = { speak = 'voice', bark = 'wang' };
 dog speak;
 dog bark;
 
-// 签名方法：无函数体的声明只写返回类型，是纯类型层承诺（检查器用）
-// 运行时分发交给有实现的同名方法
-calc = {
-    area(radius: number): number,
-    area(radius: string): string,
-    area(r) { r }
-};
-calc area 3;
-calc area 'x';
 
 // 可调用对象：$ 直接调用，和其它方法一起挂着
 math = { $(x) => x * 3, square(x) => x * x };

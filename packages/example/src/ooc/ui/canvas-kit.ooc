@@ -2,7 +2,7 @@
 // 与 DOM 组件同构：fc + props(merge 默认值) + 剩余参数 children；
 // 差异只在绘制：draw 里用 canvasDraw 操作 this（当前节点），坐标是节点本地坐标。
 // 颜色是 canvasRender 的 ColorInt（rgba 打包整数），与 Tailwind 令牌同色系。
-#import { fc, canvas, canvasDraw, flex, grow, rgba, readValue, merge, multiBind, createSignal } '../bridge.ts';
+#import { fc, canvas, canvasDraw, flex, grow, rgba, readValue, merge, bindSignal } '../bridge.ts';
 #import { when } './utils.ooc';
 
 // 颜色令牌（zinc 系，对应 shadcn 亮色主题）
@@ -47,7 +47,7 @@ canvasStatDefaults = {
 
 CanvasStat = fc $ [ctx, props =>
     p = merge $ props canvasStatDefaults;
-    pressed = multiBind $ (createSignal $ false);
+    pressed = bindSignal $ false;
     (canvas rect (merge $ p {
         height = 116,
         padding = 16,
@@ -82,7 +82,7 @@ canvasButtonDefaults = { label = '', width = 120, height = 40, onClick(e){ nil }
 
 CanvasButton = fc $ [ctx, props =>
     p = merge $ props canvasButtonDefaults;
-    pressed = multiBind $ (createSignal $ false);
+    pressed = bindSignal $ false;
     (canvas rect (merge $ p {
         width = (p width),
         height = (p height),

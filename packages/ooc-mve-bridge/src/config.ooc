@@ -9,20 +9,32 @@ Component #type {
     on(event): Component
 };
 
-Signal #type {
-    get: any,
-    set(value): any,
+Signal #type<T> {
+    get: T,
+    set(value: T): any,
     update(fn): any
 };
 
-Ref #type {
-    get: any,
-    set(value): any,
+Ref #type<T> {
+    get: T,
+    set(value: T): any,
     update(fn): any
 };
 
 Callable #type {
     $(...args): any
+};
+
+// 读/写持有者：createSignal / storage ref 都满足
+Holder #type<T> {
+    get: T,
+    set(value: T): any
+};
+
+// 绑定函数：无参读、单参写
+Bound #type<T> {
+    $: T,
+    $(value: T): T
 };
 
 dom = {
@@ -143,15 +155,23 @@ forEach = {
 };
 
 createSignal = {
-    $(initial): Signal => js any
+    $<T>(initial: T): Signal<T> => js any
 };
 
 multiBind = {
-    $(holder): Callable => js any
+    $<T>(holder: Holder<T>): Bound<T> => js any
+};
+
+bindSignal = {
+    $<T>(initial: T): Bound<T> => js any
+};
+
+bindRef = {
+    $<T>(initial: T): Bound<T> => js any
 };
 
 memo = {
-    $(fn): Signal => js any
+    $(fn): Signal<any> => js any
 };
 
 addEffect = {
@@ -163,7 +183,7 @@ createContext = {
 };
 
 storage = {
-    ref(initial): Ref => js any
+    ref<T>(initial: T): Ref<T> => js any
 };
 
 js = {
@@ -183,6 +203,8 @@ config = {
         forEach = forEach,
         createSignal = createSignal,
         multiBind = multiBind,
+        bindSignal = bindSignal,
+        bindRef = bindRef,
         memo = memo,
         addEffect = addEffect,
         createContext = createContext,

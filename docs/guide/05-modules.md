@@ -129,7 +129,7 @@ geom = #import './lib';
 // lib.ts（生成）
 export type Point = { x(): number }
 export const scale = 2
-export const factory = __createObject([...])
+export const factory = Object.freeze({ ... }) as any
 export default factory
 ```
 
@@ -138,10 +138,10 @@ export default factory
 import geom from './lib.ts'                       // 默认导入
 import { scale, factory } from './lib.ts'          // 命名导入（值）
 // 类型导入会合并成 import type { ... }
-export default __createObject([...])               // 最后一条表达式
+export default Object.freeze({ ... }) as any          // 最后一条表达式
 ```
 
-- 产物另有共享 `_ooc_runtime.ts`（`__send` / `__createObject`），各模块按需相对 import
+- 产物另有共享 `_ooc_runtime.ts`（`__send` / `__spread` / `__mutable`），各模块按需相对 import
 - **宿主依赖就是普通 ES import**：globals 注入已整体移除（`_ooc_globals.ts`/`--globals` 已删），
   视图组件 / 响应式信号 / storage 等一律 `#import` 进来，产物里是普通 ES import；
   浏览器全局（`window`/`document`/`console`）本来就是自由标识符

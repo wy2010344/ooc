@@ -1,6 +1,6 @@
 // 项目级编译器：ooc build <entry> —— 遍历依赖图把整棵 .ooc 模块树编译成 .ts。
-// 产物形态：共享 _ooc_runtime.ts + 每个模块的 run(globals)；模块间 #import 编译为 ES import
-// （被依赖模块默认导出 run），模块图交付 vite/tsc 处理——不再需要浏览器解释器/虚拟文件系统/loader。
+// 产物形态：共享 _ooc_runtime.ts + 每个模块一个纯 ES 模块（顶层声明 export、最后一条表达式默认导出）；
+// 模块间 #import 编译为 ES import，模块图交给 vite/tsc 处理——不再需要浏览器解释器/虚拟文件系统/loader。
 import type { Model } from 'object-oriented-c-language'
 import { createObjectOrientedCServices } from 'object-oriented-c-language'
 import type { LangiumCoreServices } from 'langium'
@@ -66,6 +66,22 @@ function importSpecifier(srcOut: string, dstOut: string): string {
   return rel.startsWith('.') ? rel : `./${rel}`
 }
 
+/** 多文件共同的祖先目录：让 src/ 与 ../shared/ 这类跨目录依赖都能落在 outDir 内。 */
+function commonAncestor(files: string[]): string {
+  if (files.length === 0) return process.cwd()
+  let root = path.dirname(files[0]!)
+  const inside = (dir: string, file: string): boolean => {
+    const rel = path.relative(dir, file)
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+  }
+  while (!files.every((file) => inside(root, file))) {
+    const parent = path.dirname(root)
+    if (parent === root) break
+    root = parent
+  }
+  return root
+}
+
 /** 收集模型里的 #import 原值（ImportStatement 的两种形态：默认导入与命名导入）。 */
 export function collectImports(model: Model): string[] {
   const out: string[] = []
@@ -95,13 +111,41 @@ export function typeExportNames(model?: Model): string[] {
   return out
 }
 
+/** `.ts` 依赖里真正导出的类型名：没有 AST 时用轻量扫描区分 type-only 导入。 */
+export function tsTypeExportNames(source: string): string[] {
+  const names = new Set<string>()
+  const exportName = (part: string): string => {
+    const text = part.trim().replace(/^type\s+/, '')
+    const alias = text.match(/\bas\s+([A-Za-z_$][\w$]*)$/)
+    return alias ? alias[1]! : text
+  }
+  const add = (raw: string): void => {
+    const name = exportName(raw)
+    if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name)
+  }
+  for (const m of source.matchAll(
+    /export\s+(?:declare\s+)?(?:type|interface)\s+([A-Za-z_$][\w$]*)/g,
+  )) {
+    add(m[1]!)
+  }
+  for (const m of source.matchAll(/export\s+type\s*\{([^}]*)\}/g)) {
+    for (const part of m[1]!.split(',')) add(part)
+  }
+  for (const m of source.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const part of m[1]!.split(',')) {
+      if (/^\s*type\s+/.test(part)) add(part)
+    }
+  }
+  return [...names]
+}
+
 /**
  * 编译项目：从 entry 出发 BFS 解析依赖图，每个模块产出一个 .ts，并写出共享 `_ooc_runtime.ts`。
  * 典型脚本：`ooc build src/main.ooc -o <outDir>`。
  */
 export async function buildProject(options: BuildOptions): Promise<BuildResult> {
-  const rootDir = options.rootDir ?? process.cwd()
-  const outDir = options.outDir ?? path.resolve(rootDir, 'generated')
+  const baseDir = path.resolve(options.rootDir ?? process.cwd())
+  const entryAbs = path.resolve(baseDir, options.entry)
 
   const services: LangiumCoreServices =
     createObjectOrientedCServices(NodeFileSystem).ObjectOrientedC
@@ -110,7 +154,7 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
   // 非 .ooc 依赖（如 #import './helper.ts'）是外部 ES 模块：不解析、不产码，
   // 生成侧直接用 ES import 引用它们（vite 插件同样处理）。
   const models = new Map<string, Model>()
-  const queue: string[] = [path.resolve(rootDir, options.entry)]
+  const queue: string[] = [entryAbs]
   while (queue.length > 0) {
     const source = queue.shift()!
     if (models.has(source)) continue
@@ -121,6 +165,27 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
       if (models.has(dep) || path.extname(dep) !== '.ooc') continue
       queue.push(dep)
     }
+  }
+
+  // 未显式给 rootDir 时取依赖图所有源文件的最小共同祖先，
+  // 这样 `#import '../shared/lib'` 不会因为 entry 目录太窄而抛「源码必须位于 ... 内」。
+  const rootDir = options.rootDir ? path.resolve(options.rootDir) : commonAncestor([...models.keys()])
+  const outDir = options.outDir ?? path.resolve(rootDir, 'generated')
+
+  // 依赖类型名缓存：.ooc 看 AST，.ts 用轻量扫描
+  const typeNamesCache = new Map<string, string[]>()
+  const typeNamesFor = (depSource: string): string[] => {
+    const cached = typeNamesCache.get(depSource)
+    if (cached) return cached
+    const ext = path.extname(depSource)
+    let names: string[] = []
+    if (ext === '.ooc') {
+      names = typeExportNames(models.get(depSource))
+    } else if (ext === '.ts' || ext === '.mts' || ext === '.cts' || ext === '.tsx') {
+      names = tsTypeExportNames(fs.readFileSync(depSource, 'utf8'))
+    }
+    typeNamesCache.set(depSource, names)
+    return names
   }
 
   // 生成产物：共享运行时 + 各模块 .ts（宿主依赖就是普通 ES import，没有 globals 注入）
@@ -142,7 +207,7 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
       return {
         path: raw,
         specifier: importSpecifier(out, depTarget),
-        typeNames: typeExportNames(models.get(depSource)),
+        typeNames: typeNamesFor(depSource),
       }
     })
     const runtimeImport = importSpecifier(out, runtimeOut)
@@ -157,7 +222,7 @@ export async function buildProject(options: BuildOptions): Promise<BuildResult> 
 
   return {
     files,
-    entryOut: outPathFor(path.resolve(rootDir, options.entry), rootDir, outDir),
+    entryOut: outPathFor(entryAbs, rootDir, outDir),
     runtimeOut,
   }
 }

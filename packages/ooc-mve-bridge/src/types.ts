@@ -25,14 +25,14 @@ Component #type {
     on(event): Component
 };
 
-Signal #type {
-    get: any,
-    set(value): any,
+Signal #type<T> {
+    get: T,
+    set(value: T): any,
     update(fn): any
 };
 
-// multiBind 的返回值：无参读、单参写的 lambda（一切消息转发给 $ 调用）。
-// 带 $ 签名，故可作 「x <= multiBind(...)」 的转发委托。
+// 旧式宽泛调用签名：仅保留给无法标注具体 $ 形状的桥接类型。
+// bindSignal / multiBind / bindRef 已改用 Bound<T>，读写都有类型。
 Callable #type {
     $(...args): any
 };

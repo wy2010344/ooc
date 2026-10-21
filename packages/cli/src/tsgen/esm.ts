@@ -9,7 +9,7 @@
 // 模块在 ES 导入时按其依赖顺序自动执行（解释器也是先执行全部 #import 再跑模块体）。
 // 宿主依赖（视图/信号/存储等）没有特殊待遇：和其它 TS 模块一样 `#import` 进来，
 // 产物里就是普通 import；浏览器全局（document/window/console）本来就是自由标识符。
-// 重复的底层辅助（__send/__createObject）从共享 runtime 外部导入。
+// 重复的底层辅助（__send/__mutable）从共享 runtime 外部导入。
 import type { Model } from 'object-oriented-c-language'
 import { AstUtils } from 'langium'
 import { expressionCode, typeAnnot, typeDefCode } from './helpers.js'
@@ -63,6 +63,8 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
 
   /** 导入绑定的 OOC 可见名（默认导入名 / 命名导入别名）：本模块的顶层声明，需要再导出 */
   const importBindingNames: string[] = []
+  /** 其中只作为类型导入的绑定：再导出必须用 `export type`（verbatimModuleSyntax） */
+  const typeBindingNames = new Set<string>()
 
   // 预扫描：命名空间类型 `ns#Name` 的用点（类型位要 `ns$ns.Name`，
   // esm 头部按用点补发 `import * as ns$ns from '<同一模块>'`；值侧仍走默认导入）
@@ -102,6 +104,7 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         clauses.push(alias === original ? original : `${original} as ${alias}`)
         target.set(spec, clauses)
         importBindingNames.push(alias)
+        if (isType) typeBindingNames.add(alias)
       }
     }
     if (st.types) {
@@ -111,6 +114,8 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
         const clauses = typeImports.get(spec) ?? []
         clauses.push(alias === original ? original : `${original} as ${alias}`)
         typeImports.set(spec, clauses)
+        importBindingNames.push(alias)
+        typeBindingNames.add(alias)
       }
     }
   }
@@ -168,17 +173,23 @@ export function emitEsmModule(model: Model, ctx: EsmContext): string {
     bodyLines.push('export default null;')
   }
 
-  // 导入绑定也是本模块顶层声明：与赋值/typedef 不重名的一并再导出（去重）
-  const reExports = [...new Set(importBindingNames)].filter(
+  // 导入绑定也是本模块顶层声明：与赋值/typedef 不重名的一并再导出（去重）。
+  // 类型绑定必须走 `export type`，否则 verbatimModuleSyntax 报 TS1205。
+  const freeBindings = [...new Set(importBindingNames)].filter(
     (name) => !bodyExports.has(name) && !typedefNames.has(name),
   )
-  if (reExports.length > 0) {
-    bodyLines.push(`export { ${reExports.join(', ')} };`)
+  const typeReExports = freeBindings.filter((name) => typeBindingNames.has(name))
+  const valueReExports = freeBindings.filter((name) => !typeBindingNames.has(name))
+  if (valueReExports.length > 0) {
+    bodyLines.push(`export { ${valueReExports.join(', ')} };`)
+  }
+  if (typeReExports.length > 0) {
+    bodyLines.push(`export type { ${typeReExports.join(', ')} };`)
   }
 
   const body = bodyLines.join('\n')
   // 只 import 本模块真正用到的 runtime 辅助（不触发 example 的 noUnusedLocals）
-  const usedRuntime = ['__send', '__createObject', '__spread', '__mutable']
+  const usedRuntime = ['__send', '__spread', '__mutable']
     .map((name) =>
       new RegExp(`\\b${name}\\(`).test(bodyLines.join('\n')) ? name : null,
     )

@@ -78,6 +78,75 @@ describe('loadGlobalsTypesFromSource', () => {
   })
 })
 
+describe('bindSignal / bindRef 泛型类型源', () => {
+  const BINDING_SOURCE = `
+Signal #type<T> { get: T, set(value: T): any };
+Holder #type<T> { get: T, set(value: T): any };
+Bound #type<T> { $: T, $(value: T): T };
+createSignal = { $<T>(initial: T): Signal<T> };
+multiBind = { $<T>(holder: Holder<T>): Bound<T> };
+bindSignal = { $<T>(initial: T): Bound<T> };
+bindRef = { $<T>(initial: T): Bound<T> };
+config = {
+    globals = {
+        createSignal = createSignal,
+        multiBind = multiBind,
+        bindSignal = bindSignal,
+        bindRef = bindRef
+    }
+};
+config
+`
+
+  async function diagnosticsFor(source: string): Promise<string[]> {
+    const registry = loadGlobalsTypesFromSource(BINDING_SOURCE)!
+    const services = createObjectOrientedCServices(
+      EmptyFileSystem,
+      undefined,
+      registry,
+    ).ObjectOrientedC
+    const parse = parseHelper<Model>(services)
+    const doc = await parse(source, {
+      documentUri: URI.file('/proj/bind.ooc').toString(),
+      validation: true,
+    })
+    return (doc.diagnostics ?? []).map((d) => d.message)
+  }
+
+  test('bindSignal 由初值推断 T：读/写均保留具体类型', async () => {
+    const messages = await diagnosticsFor(`
+count = bindSignal $ 0;
+n: number = count $;
+count $ 2;
+n
+`)
+    expect(messages).toEqual([])
+  })
+
+  test('bindSignal 写入错误类型与多余实参都报错', async () => {
+    const messages = await diagnosticsFor(`
+count = bindSignal $ 0;
+s: string = count $;
+count $ 'x';
+count $ 1 2;
+s
+`)
+    const joined = messages.join('\n')
+    expect(joined).toContain('类型不匹配')
+    expect(joined).toContain('调用参数不匹配')
+  })
+
+  test('bindRef 同样由初值推断 T', async () => {
+    const messages = await diagnosticsFor(`
+n = bindRef $ 0;
+n $ 1;
+bad: string = n $;
+n
+`)
+    expect(messages.join('\n')).toContain('类型不匹配')
+  })
+})
+
 describe('config.ooc 名字清单解析（Route A）', () => {
   const NAME_LIST = 'config = { globals = { dom = dom } };\nconfig'
 

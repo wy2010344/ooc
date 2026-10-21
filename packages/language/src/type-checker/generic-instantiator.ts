@@ -2,6 +2,7 @@ import {
   anyType,
   intersectionOf,
   isSubtype,
+  literalBaseName,
   unionOf,
   type MethodSig,
   type TypeInfo,
@@ -112,10 +113,13 @@ export function inferTypeParams(
   switch (pattern.kind) {
     case 'name':
       if (typeParams.includes(pattern.name)) {
+        // 与 TS 一致：未加约束的泛型参数从字面量实参推断时拓宽到基础类型，
+        // 否则 bindSignal $ 0 会把 T 锁成 0，后续写入 2 会误报类型不匹配。
+        const widened = widenLiteral(actual)
         const prev = mapping.get(pattern.name)
         mapping.set(
           pattern.name,
-          prev ? unionOf([prev, actual]) : actual,
+          prev ? unionOf([prev, widened]) : widened,
         )
       }
       return
@@ -169,6 +173,14 @@ export function inferTypeParams(
     default:
       return
   }
+}
+
+/** 字面量类型拓宽为基础类型；非字面量原样返回。 */
+function widenLiteral(t: TypeInfo): TypeInfo {
+  if (t.kind !== 'literal') {
+    return t
+  }
+  return { kind: 'name', name: literalBaseName(t.value) }
 }
 
 export function argsCompatible(sig: MethodSig, args: TypeInfo[]): boolean {

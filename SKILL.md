@@ -12,9 +12,13 @@ OOC 是一门极简的消息传递语言：没有函数调用，只有「给对�
 | 目录 | 说明 |
 | --- | --- |
 | `packages/language` | 核心：Langium 语法、静态类型检查器、解释器、LSP 服务 |
-| `packages/cli` | CLI：`interpret`（解释执行）与 `generate`（JS 生成，未实现） |
+| `packages/cli` | CLI：`compile`（.ooc → .ts）、`build`（整棵模块树）、`interpret`（解释执行）、`type-check`、`init` |
+| `packages/vite-plugin-ooc` | Vite 插件：直接 import `.ooc` 模块 |
 | `packages/extension` | VS Code 插件（LSP + hover + 语义高亮） |
 | `packages/example` | 浏览器 demo（vite 打包，不在 Termux 兼容范围） |
+| `packages/playground` | 浏览器 playground（预载 base 库） |
+| `packages/ooc-mve-bridge` | MVE/宿主桥接（dom、信号等宿主依赖） |
+| `packages/base` | 共享 OOC 源码库（无 package.json，按相对路径复用） |
 | `docs/` | Rspress 文档站 |
 
 ## 构建与测试
@@ -56,8 +60,8 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
   - **对象无继承**（已移除原型链，`{ ... }` 只烧录自己的成员）。复用走 `merge`（宿主端 merge 全局：把 parts 展平成链、包兜底 Proxy，前面对象的方法优先，未知消息按链转发到 defaults）。**没有 methodNotFound 魔法**：语言不认这个名字；要拦截未知消息就显式包兜底 Proxy——OOC 侧 `js proxy 对象 (name, ...args => 转发)`，宿主侧 `proxyCatchAll(target, handler)`，get trap 把未命中的消息交给 `handler(name, ...args)`（this 绑定原对象）；没包的对象发未知消息直接抛 `OocMethodNotFoundError`。currentScope 伪对象同样由 Proxy 实现。
   - **签名方法（无 body）**：`area(radius: number): number;` 这种**没有函数体**的方法是纯类型契约——运行时不烧录（签名只作类型层契约），调用落在实现方法（有 body 的那个）上；签名必须声明返回类型；签名之间返回类型不同不告警（TS 式豁免）。改全局 AST 遍历时，方法体字段在 `MethodAll.body`（MethodBody 上），不是 `method.expressions`。
   - 方法体内 `this` 就是**接收消息的对象**（receiver）；`#guard` 是方法体内的分支链（if/else-if/else），与方法派发无关——同层不存在同名重载，一个名字只对应一个成员。
-  - 消息派发顺序（`sendMessage`/`__send`）：**own descriptor 优先**——访问器（getter/setter）单次读取、结果原样返回（函数值也不二次调用，lambda 保留语义）；数据函数按方法调用；数据属性带参写/无参读 → 无 own descriptor 再走回退链：原型链方法/`o?.[value]` 函数调用 → `value in o` 读写 → `numDef` → `objectDefine` → 抛「没有定义该方法」。兜底转发不在派发链里——在包了兜底 Proxy 的对象上，未知消息由 get trap 在派发前截走。
-  - **类型注解纯装饰**：`type-checker.ts`（~1400 行）实现联合类型、字面量、可区分联合 guard 收窄、泛型实例化、上下文类型回填。**方法体内 `#guard` 分支链按同一参数判别时做覆盖枚举**（缺联合成员报 `unionUncovered`：无 `#else` 兜底是 error、有则 warning；判别分支之间返回类型豁免一致性；分支按 else-if 链在「前序条件为假」的基准上收窄）；联合实参调用返回分支聚合类型。**类型检查与运行是独立分支**：解释器（`interpreter/host.ts` 的 `createInterpretAction`）从不因类型诊断而中断，只拦语法错误；类型检查走 IDE/LSP 校验，或 `interpreter/host.ts` 的 `createTypeCheckAction`（CLI `type-check` 指令用）。
+  - 消息派发顺序（`sendMessage`/`__send`）：**own descriptor 优先**——访问器（getter/setter）单次读取、结果原样返回（函数值也不二次调用，lambda 保留语义）；数据函数按方法调用；数据属性带参写/无参读 → 无 own descriptor 再走回退链：原型链方法/`o?.[value]` 函数调用 → `value in o` 读写 → `send` 动态分发（`对象 send '名字' ...实参`）→ `numDef` → `objectDefine` → 抛「没有定义该方法」。兜底转发不在派发链里——在包了兜底 Proxy 的对象上，未知消息由 get trap 在派发前截走。
+  - **类型注解纯装饰**：`type-checker.ts` 实现联合类型、字面量、可区分联合 guard 收窄、泛型实例化、上下文类型回填。**方法体内 `#guard` 分支链按同一参数判别时做覆盖枚举**（缺联合成员报 `unionUncovered`：无 `#else` 兜底是 error、有则 warning；判别分支之间返回类型豁免一致性；分支按 else-if 链在「前序条件为假」的基准上收窄）；联合实参调用返回分支聚合类型。**类型检查与运行是独立分支**：解释器（`interpreter/host.ts` 的 `createInterpretAction`）从不因类型诊断而中断，只拦语法错误；类型检查走 IDE/LSP 校验，或 `interpreter/host.ts` 的 `createTypeCheckAction`（CLI `type-check` 指令用）。
 - **模块**：`.ooc` 文件最后一条表达式是导出值；`#import` 只做相对路径解析（`module-path.ts` 纯字符串实现，Node/浏览器一致）——无包前缀、无安装机制，跨目录复用源码就写 `../`；`packages/base/src/loop.ooc` 由 example 相对路径直接复用，playground 按 basename 从预载库命中。
 - **运算符无优先级**（左结合、同优先级），需要先算就加括号；`//` 是注释不是除法，除法用消息形式：`12 div 3`；`/` 是级联符。级联/管道可消括号：`(x at i)` 可写 `x/ at i`（`/` 是独立 token，无空格连写也合法）；管道 `v | f $` 把 `v` 作为 `f` 的首参插入（thread-first），等价 `f $ v`——右侧必须是一条消息链，单消息要写 `| f $`；`v | p -> 表达式`（NamedExpression）把 `v` 绑到参数 `p`。**级联 + 管道可以在同一个表达式里**（左嵌套：`x = a b/ c|f $` ⇔ `f $ ((a b) c)`）。要小心的其实是「无括号实参」：实参列表按空格拆成多个 Primary，`text bind et value/ done|statusOf $` 里 `et`、`value` 会被当成两个实参，`value` 变成裸标识符去作用域查找 → 报 `not found define for value`；应把整条管道表达式用括号包住作单个实参：`text bind (et value/ done|statusOf $)`。**`$` 也是中缀运算符**（同加减乘除、左结合）：消息链后直接接 `$` 即直接调用，无需前置 `/`（`close get $ false` ≡ `close get / $ false`），右侧接 0~N 个实参（可省：`x get $` 零参；`h get $ 1 2 3` 三参）。
 - **数组直接用 JS 生态**：`Array` 是 globalThis 全局对象，`(Array of)` 造普通数组（含空数组）；不可变改数据用数组原生 `toSpliced`：`arr / toSpliced 1 0 {...}`（返回新数组，旧数组不动）。playground 还有：`text bind <值/λ>` 派生文本（读到的信号一变就原地重写节点，适合纯文本派生）；列表级重建用区域组件 `forEach $ {...}`（内部走 Ctx.renderForEach，无需自取 ctx）；**受控输入**：`dom input value => 只读 λ`（显示值，λ 读信号自动跟随）+ `onValueChange(v) => 信号 set v`（受控写回——onValueChange 是**带参方法**，宿主把输入框新值作为第一个参数传入，成员体直接引用参数名 v，像 onClick 一样干净）。读当前输入直接 `signal get`，不再 `ui get '选择器'` 去 querySelector 强读（textarea/select 的 value、input 的 checked 同理，checked 是单向显示，勾选状态翻转用 onClick 驱动信号）。
@@ -71,7 +75,7 @@ npm run test                # language 包：tsc 编译测试后跑 node --test�
 - **加诊断规则** → `type-checker.ts` 中 `accept('warning', ..., data: diagnosticData(code))`，code 注册进 `diagnostics-config.ts` 的 `DIAGNOSTIC_CODES`
 - **跑类型检查** → IDE 里由 LSP 实时校验；命令行用 `ooc type-check <file>`（返回诊断，有 error 级则 exit 1）
 - **浏览器运行** → 用 `EmptyFileSystem`；Node 读文件/`#import` 用 `NodeFileSystem`。宿主桥接对象 `storage`（可变 cell）、`js`（`throw` 抛错 / `new` 实例化 JS 类 / `fn` 把 OOC lambda 包装成真 JS 函数）由语言包导出（`interpreter/bridges.ts`），浏览器 demo（`main.ts`）与 `test/examples.test.ts` 共用同一份；`loop`（`$`=遵守真值的 while、`repeat`=恰好 n 次）是 base 库 OOC 实现（`#import './loop'`），不再桥接。`console`、`Math` 等 JS 全局走 `globalThis` 回退，无需注入。宿主侧调用 lambda 直接当 JS 函数调用（lambda 就是真 JS 函数，`sendMessage` 对函数接收者的 `$` 调用特判为直接调用；`fn(x)` 或 `fn $ x` 皆可）。
-- **编译给打包器** → `ooc build <entry> -o <dir>` / `ooc compile <file> -d <dir>` 把整棵 `.ooc` 依赖图编译成**纯 ES 模块**（`cli/src/tsgen/esm.ts`，两命令同一套产物）：所有顶层声明都 `export`、`#import` 编译成与 TS import 等价的真 ES import、模块在 ES 导入时按依赖顺序自动执行，产物与源码几乎一一对应；typedef 以 `export type` 进产物（不旁挂 `.d.ts`——TS 解析同名 `.ts` 优先）。共享产物只有 `_ooc_runtime.ts`（`__send`/`__createObject`，按需 import）。**宿主依赖没有特殊待遇**：视图/信号/storage 等就是普通 TS 模块，OOC 侧 `#import { dom, createSignal } './bridge.ts'` 显式导入（`.ts` 依赖不解析不产码，类型导入走 `import type`、值走真 ESM named import 指向源文件；无扩展名相对路径按 `.ooc`→`.ts` 回退）；浏览器全局（window/document/console）本来就是自由标识符，无需注入。**globals 注入已在 codegen 侧移除**（`_ooc_globals.ts`/`virtual:ooc-globals`/`__globalsOf`/`--globals` 全删）；解释器路径（`createInterpretAction`、playground 笔记本）暂留「宿主对象注入」这套运行时 API，OOC demo 源码里仍是裸名。vite 走 `vite-plugin-ooc`（无磁盘中间产物）。
+- **编译给打包器** → `ooc build <entry> -o <dir>` / `ooc compile <file> -d <dir>` 把整棵 `.ooc` 依赖图编译成**纯 ES 模块**（`cli/src/tsgen/esm.ts`，两命令同一套产物）：所有顶层声明都 `export`、`#import` 编译成与 TS import 等价的真 ES import、模块在 ES 导入时按依赖顺序自动执行，产物与源码几乎一一对应；typedef 以 `export type` 进产物（不旁挂 `.d.ts`——TS 解析同名 `.ts` 优先）。共享产物只有 `_ooc_runtime.ts`（`__send`/`__spread`/`__mutable`，按需 import）。**宿主依赖没有特殊待遇**：视图/信号/storage 等就是普通 TS 模块，OOC 侧 `#import { dom, createSignal } './bridge.ts'` 显式导入（`.ts` 依赖不解析不产码，类型导入走 `import type`、值走真 ESM named import 指向源文件；无扩展名相对路径按 `.ooc`→`.ts` 回退）；浏览器全局（window/document/console）本来就是自由标识符，无需注入。**globals 注入已在 codegen 侧移除**（`_ooc_globals.ts`/`virtual:ooc-globals`/`__globalsOf`/`--globals` 全删）；解释器路径（`createInterpretAction`、playground 笔记本）暂留「宿主对象注入」这套运行时 API，OOC demo 源码里仍是裸名。vite 走 `vite-plugin-ooc`（无磁盘中间产物）。
 
 ## 注意
 

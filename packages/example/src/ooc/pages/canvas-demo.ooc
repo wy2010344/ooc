@@ -1,12 +1,12 @@
 // canvas-demo.ooc — 画布渲染示例：fc/merge/信号与 DOM 组件完全同构，
 // 只是把 dom 标签换成 canvas 节点（canvasRender 负责布局 + 命中 + 重绘）。
 // 计数写在画布节点里也写在下方 DOM 里，方便对比「同一信号驱动两种渲染」。
-#import { dom, text, fc, multiBind, createSignal } '../bridge.ts';
+#import { dom, text, fc, bindSignal } '../bridge.ts';
 #import { canvas, flex } '../bridge.ts';
 #import { CanvasHeader, CanvasStat, CanvasButton, CanvasProgress } '../ui/canvas-kit.ooc';
 
 CanvasDemo = fc $ [ctx =>
-    count = multiBind $ (createSignal $ 0);
+    count = bindSignal $ 0;
 
     (dom section { className = 'space-y-3' }
         (dom div { className = 'flex items-baseline justify-between' }

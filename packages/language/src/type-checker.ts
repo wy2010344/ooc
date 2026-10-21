@@ -600,7 +600,17 @@ export class ObjectOrientedCTypeChecker {
         params: member.params.map((p) =>
           this.resolveParamAnnotation(p, accept, inScope, env),
         ),
-        rest: undefined,
+        // typedef 的 rest 参数与实现方法同形：解析后存入签名，调用方可按展开校验
+        rest: member.restParam
+          ? member.restParam.typeAnnotation
+            ? this.resolveAnnotation(
+                member.restParam.typeAnnotation,
+                accept,
+                inScope,
+                env,
+              )
+            : anyType
+          : undefined,
         returns: member.typeAnnotation
           ? this.resolveAnnotation(member.typeAnnotation, accept, inScope, env)
           : anyType,
@@ -878,24 +888,28 @@ export class ObjectOrientedCTypeChecker {
     // 赋值进 env，表达式做校验，之后 guard 条件/分支才能引用到它们。
     const branches = method.body?.guardBranches ?? []
     const blockReturns: TypeInfo[] = []
-    const returnOf = (stmts: Expression[]): TypeInfo => {
+    const returnOf = (stmts: Expression[], env: TypeEnv): TypeInfo => {
       let t: TypeInfo = nilType
       for (const stmt of stmts) {
         if (isAssignment(stmt)) {
-          this.checkAssignment(stmt, methodEnv, accept)
+          this.checkAssignment(stmt, env, accept)
+          // 尾语句是赋值时运行时返回 nil
+          t = nilType
         } else {
-          t = this.inferExpression(stmt, methodEnv, accept)
+          t = this.inferExpression(stmt, env, accept)
         }
       }
       return t
     }
     // 先执行 #guard 前的语句：校验 + 赋值入 env（无分支时它的最后表达式即返回类型）
-    const preLast = returnOf((method.body?.stmts ?? []) as Expression[])
+    const preLast = returnOf((method.body?.stmts ?? []) as Expression[], methodEnv)
     // else-if 链语义：每个判别目标记录「前序条件为假」的基准类型。
     // 进入每条分支前把目标恢复为基准再按本分支条件收窄——避免上一分支的
     // 收窄结果泄漏到后续分支（修复前第二个分支会看到第一个分支的收窄类型）。
     const bases = new Map<string, TypeInfo>()
     for (const branch of branches) {
+      // 分支是独立块作用域：声明/收窄都落在 child env，不泄漏到后续分支
+      const branchEnv = methodEnv.child()
       const test = this.extractTagTest(branch.guardExpression)
       if (test && !bases.has(test.target)) {
         const cur = methodEnv.lookup(test.target)
@@ -904,15 +918,15 @@ export class ObjectOrientedCTypeChecker {
         }
       }
       for (const [target, base] of bases) {
-        methodEnv.define(target, base)
+        branchEnv.define(target, base)
       }
       // 判别收窄：guard 条件为真时收窄判别目标
       if (test) {
-        this.narrowByTag(branch.guardExpression, methodEnv)
+        this.narrowByTag(branch.guardExpression, branchEnv)
       }
       const guardType = this.inferExpression(
         branch.guardExpression,
-        methodEnv,
+        branchEnv,
         accept,
       )
       if (
@@ -926,7 +940,7 @@ export class ObjectOrientedCTypeChecker {
           { node: branch.guardExpression, data: diagnosticData('guardNotBoolean') },
         )
       }
-      blockReturns.push(returnOf(branch.stmts as Expression[]))
+      blockReturns.push(returnOf(branch.stmts as Expression[], branchEnv))
       // 本分支条件为假的世界：== v 剔除命中成员，!= v 只留命中成员
       if (test) {
         const base = bases.get(test.target)
@@ -947,10 +961,11 @@ export class ObjectOrientedCTypeChecker {
     }
     // else 兜底块：有 guard 分支时它也参与返回类型；看到的是全部条件为假的基准
     if (branches.length > 0 && method.body?.elseBranch) {
+      const elseEnv = methodEnv.child()
       for (const [target, base] of bases) {
-        methodEnv.define(target, base)
+        elseEnv.define(target, base)
       }
-      blockReturns.push(returnOf(method.body.elseBranch.stmts as Expression[]))
+      blockReturns.push(returnOf(method.body.elseBranch.stmts as Expression[], elseEnv))
     }
     let returnType: TypeInfo =
       blockReturns.length > 1

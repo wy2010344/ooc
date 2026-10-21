@@ -34,9 +34,9 @@ export { createSignal, memo, addEffect } from 'wy-helper'
 export { createContext } from 'mve-core'
 export { storage, js, merge } from 'object-oriented-c-language'
 
-// {get,set} 持有者 → 无参读 / 单参写的 lambda
-export { multiBind } from './multi-bind.js'
-export type { Holder } from './multi-bind.js'
+// {get,set} 持有者 → 无参读 / 单参写的 lambda；bindSignal/bindRef 是常用封装
+export { bindSignal, bindRef, multiBind } from './multi-bind.js'
+export type { Bound, Holder } from './multi-bind.js'
 
 // portal 弹层 + 浮层定位（Dropdown / Select / Dialog / Sheet 用）
 export { createPop, renderPop } from './pop.js'

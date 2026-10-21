@@ -1,4 +1,4 @@
-// 语句块代码生成：块内绑定平铺 const；只有 RHS 引用同名外层绑定时才套块隔离。
+// 语句块代码生成：块内绑定平铺 const；#guard / #else 分支是独立块作用域。
 import { test } from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
@@ -39,21 +39,26 @@ obj m 3`,
   if (mod.default !== 8) throw new Error(`(3+1)*2 应为 8，实际 ${mod.default}`)
 })
 
-test('RHS 引用同名外层绑定时先求值再声明（lambda 遮蔽）', async (t) => {
+test('#guard / #else 分支各自独立作用域，允许同名声明', async (t) => {
   const { ts, code } = await compileSource(
-    'shadow',
+    'branch-scope',
     `obj = {
     m(x) {
-        f = [n => x = x + 1; x];
-        f $ 0
+        #guard x > 0;
+            t = x + 1;
+            t
+        #else;
+            t = x - 1;
+            t
     }
 };
 obj m 3`,
   )
-  if (!code.includes('__v0')) {
-    throw new Error(`同名遮蔽应另起块求值 RHS，实际：\n${code}`)
+  if ((code.match(/const t =/g) ?? []).length !== 2) {
+    throw new Error(`两个分支应各自声明 t，实际：\n${code}`)
   }
+  if (code.includes('__v')) throw new Error(`不应生成 __v 兼容中间量：\n${code}`)
   if (!CAN_RUN) return t.skip('Node <23 无原生类型擦除')
   const mod = await import(pathToFileURL(ts).href)
-  if (mod.default !== 4) throw new Error(`外层 x=3 遮蔽后应得 4，实际 ${mod.default}`)
+  if (mod.default !== 4) throw new Error(`x=3 命中第一分支应得 4，实际 ${mod.default}`)
 })

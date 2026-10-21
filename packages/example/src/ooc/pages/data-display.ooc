@@ -1,5 +1,5 @@
 // data-display.ooc —— 数据展示演示：Tabs / Table / Avatar / Separator / Skeleton。
-#import { dom, text, fc, forEach, multiBind, createSignal } '../bridge.ts';
+#import { dom, text, fc, forEach, bindSignal } '../bridge.ts';
 #import { Card, CardHeader, CardTitle, CardDescription, CardContent } '../ui/card.ooc';
 #import { Tabs } '../ui/tabs.ooc';
 #import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } '../ui/table.ooc';
@@ -8,7 +8,7 @@
 #import { Skeleton } '../ui/skeleton.ooc';
 
 DataDisplay = fc $ [ctx =>
-    tab = multiBind $ (createSignal $ 'overview');
+    tab = bindSignal $ 'overview';
     rows = (Array of
         { name = '张晓', email = 'zhang@x.io', role = '管理员' }
         { name = '李四', email = 'li@x.io', role = '成员' }

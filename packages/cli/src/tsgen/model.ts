@@ -7,7 +7,7 @@
 //   #import 'm' { T as U }       → import type { T as U } from '<m>'
 //   #import 'm';                 → import '<m>';（纯副作用导入，模块必执行）
 // 模块在 ES 导入时按其依赖顺序自动执行（解释器也是先执行全部 #import 再跑模块体），
-// 重复的底层辅助（__send/__createObject）从共享 runtime 外部导入，宿主 globals 同样静态导入。
+// 重复的底层辅助（__send/__mutable）从共享 runtime 外部导入，宿主 globals 同样静态导入。
 // 具体发射规则见 esm.ts；这里只做 re-export，保留 modelToTs 这个对外名字。
 import type { Model } from 'object-oriented-c-language'
 import { emitEsmModule, type EsmContext } from './esm.js'

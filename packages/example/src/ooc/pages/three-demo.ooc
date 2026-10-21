@@ -2,7 +2,7 @@
 // 与 canvas/dom 完全同构：fc + 信号，只是节点换成 3D 物体；
 // 变换/材质属性写 lambda 就是响应式的（信号变 → 物体在动画循环里跟着变）。
 // 交互靠 OrbitControls：拖拽旋转、滚轮缩放；命中检测（Raycaster）暂未桥接。
-#import { dom, text, fc, multiBind, createSignal } '../bridge.ts';
+#import { dom, text, fc, bindSignal } '../bridge.ts';
 #import { three } '../bridge.ts';
 #import { Button } '../ui/button.ooc';
 #import { when } '../ui/utils.ooc';
@@ -18,8 +18,8 @@ colorNameOf = {
 };
 
 ThreeDemo = fc $ [ctx =>
-    spin = multiBind $ (createSignal $ 0);
-    flip = multiBind $ (createSignal $ false);
+    spin = bindSignal $ 0;
+    flip = bindSignal $ false;
 
     (dom section { className = 'space-y-3' }
         (dom div { className = 'flex items-baseline justify-between' }

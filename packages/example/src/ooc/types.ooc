@@ -1,5 +1,5 @@
 // 类型注解：只做提示，不影响运行
-x: number = 42;
+#import {merge} './bridge.ts';
 greet: string = 'hi';
 
 // typedef 定义类型形状（方法签名）
@@ -20,7 +20,7 @@ animal = {
   }
 };
 
-console log (animal call5 88);
+console log 'call5' (animal call5 88);
 
 x=merge $ animal {
   abc=9

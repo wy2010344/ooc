@@ -20,6 +20,7 @@ import {
   resolveImportSource,
   collectImports,
   typeExportNames,
+  tsTypeExportNames,
 } from 'object-oriented-c-cli'
 import type { Model } from 'object-oriented-c-language'
 import {
@@ -29,7 +30,7 @@ import {
 } from 'object-oriented-c-language'
 import { NodeFileSystem } from 'langium/node'
 
-/** 共享运行时虚拟模块 id：各 .ooc 产物从它 import __send/__createObject，bundle 只保留一份。 */
+/** 共享运行时虚拟模块 id：各 .ooc 产物从它 import __send/__mutable，bundle 只保留一份。 */
 export const OOC_RUNTIME_VIRTUAL_ID = 'virtual:ooc-runtime'
 const RESOLVED_RUNTIME_ID = '\u0000' + OOC_RUNTIME_VIRTUAL_ID
 
@@ -78,14 +79,8 @@ export function oocPlugin(): Plugin {
   function depTypeNames(fromId: string, raw: string): string[] {
     const target = resolveImportSource(raw, fromId)
     if (target.endsWith('.ts') || target.endsWith('.js') || target.endsWith('.mjs')) {
-      // .ts/.js 依赖：粗略扫 export type/interface 名当类型导出（命名值导出走真 ESM named import）
-      const names: string[] = []
-      for (const m of fs.readFileSync(target, 'utf8').matchAll(
-        /export\s+(?:type\s+([A-Za-z_$][\w$]*)|interface\s+([A-Za-z_$][\w$]*))/g,
-      )) {
-        names.push(m[1] ?? m[2])
-      }
-      return names
+      // 与 CLI build 共用同一套扫描，避免两边对 export type/interface 的判定漂移
+      return tsTypeExportNames(fs.readFileSync(target, 'utf8'))
     }
     let names = depTypeNameCache.get(target)
     if (!names) {

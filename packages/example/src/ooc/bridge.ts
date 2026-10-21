@@ -6,6 +6,8 @@ export {
   memo,
   addEffect,
   createContext,
+  bindSignal,
+  bindRef,
   multiBind,
 } from 'ooc-mve-bridge'
 export {

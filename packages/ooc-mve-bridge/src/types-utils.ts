@@ -47,12 +47,32 @@ forEach = {
     $(config): Component
 };
 
+// 读/写持有者：wy-helper 的 Signal、storage 的 Ref 都满足这个形状
+Holder #type<T> {
+    get: T,
+    set(value: T): any
+};
+
+// 绑定函数：无参读、单参写。两个 $ 重载让类型检查器按实参个数分流。
+Bound #type<T> {
+    $: T,
+    $(value: T): T
+};
+
 createSignal = {
-    $(initial): Signal
+    $<T>(initial: T): Signal<T>
 };
 
 multiBind = {
-    $(holder): Callable
+    $<T>(holder: Holder<T>): Bound<T>
+};
+
+bindSignal = {
+    $<T>(initial: T): Bound<T>
+};
+
+bindRef = {
+    $<T>(initial: T): Bound<T>
 };
 
 memo = {
@@ -110,6 +130,8 @@ config = {
         forEach = forEach,
         createSignal = createSignal,
         multiBind = multiBind,
+        bindSignal = bindSignal,
+        bindRef = bindRef,
         memo = memo,
         addEffect = addEffect,
         createContext = createContext,

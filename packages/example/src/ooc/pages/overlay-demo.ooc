@@ -14,10 +14,9 @@ OverlayDemo = fc $ [ctx =>
         (CardContent $ {}
             (dom div { className = 'flex gap-3' }
                 (Button $ { variant = 'outline', onPress(e){
-                    close = storage ref noop;
-                    Dialog $ {
+                    closeit = Dialog $ {
                             onClose{
-                                close get $
+                                closeit $
                             }
                         } 
                         (DialogHeader $ {}
@@ -27,13 +26,13 @@ OverlayDemo = fc $ [ctx =>
                         (DialogFooter $ {}
                             (Button $ { variant = 'outline',
                                 onPress(e){                                 
-                                    close get $ false
+                                    closeit $ false
                                 }
                             } '取消')
                             (Button $ { onPress(e){                           
-                                    close get $ true
+                                    closeit $ true
                             } } '确认')
-                        ) | close set
+                        )
                 }} '打开对话框')
                 (Button $ { variant = 'outline', onPress(e){
                     close = storage ref noop;

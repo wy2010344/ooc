@@ -1,14 +1,14 @@
 // menu-demo.ooc —— 菜单演示：DropdownMenu（下拉菜单）+ ContextMenu（右键菜单）。
 // 两者都是「函数」：在触发元素的事件里调用（像 Dialog），内部 portal 到 body、floating 定位。
-#import { dom, text, fc, multiBind, createSignal } '../bridge.ts';
+#import { dom, text, fc, bindSignal } '../bridge.ts';
 #import { Card, CardHeader, CardTitle, CardDescription, CardContent } '../ui/card.ooc';
 #import { Button } '../ui/button.ooc';
 #import { DropdownMenu, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuCheckboxItem } '../ui/dropdown-menu.ooc';
 #import { ContextMenu, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, ContextMenuShortcut, ContextMenuCheckboxItem } '../ui/context-menu.ooc';
 
 MenuDemo = fc $ [ctx =>
-    checked = multiBind $ (createSignal $ true);
-    last = multiBind $ (createSignal $ '（未选择）');
+    checked = bindSignal $ true;
+    last = bindSignal $ '（未选择）';
 
     (dom div { className = 'space-y-6' }
         (Card $ {}

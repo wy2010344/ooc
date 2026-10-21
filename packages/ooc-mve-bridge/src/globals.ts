@@ -18,7 +18,7 @@ import {
 } from './canvas.js'
 import { readValue } from './args.js'
 import { three } from './three.js'
-import { multiBind } from './multi-bind.js'
+import { bindSignal, bindRef, multiBind } from './multi-bind.js'
 import { createPop, renderPop } from './pop.js'
 import { floating } from './floating.js'
 import {
@@ -47,6 +47,8 @@ export function createBridgeGlobals() {
     addEffect,
     forEach,
     multiBind,
+    bindSignal,
+    bindRef,
     createPop,
     renderPop,
     floating,

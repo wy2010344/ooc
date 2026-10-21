@@ -7,22 +7,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { compileAction } from 'object-oriented-c-cli'
-
-const CAN_RUN = Number(process.versions.node.split('.')[0]) >= 23
-
-/** 把 .ooc 源编译到临时目录，返回入口产物路径 */
-async function compileSource(name: string, source: string): Promise<{ ts: string; dir: string }> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
-  const srcPath = path.join(dir, `${name}.ooc`)
-  await fs.writeFile(srcPath, source, 'utf-8')
-  await compileAction(srcPath, { destination: dir })
-  return { ts: path.join(dir, `${name}.ts`), dir }
-}
-
-/** 共享 runtime：产物从它 import __send/__createObject/__spread */
-async function loadRuntime(dir: string): Promise<any> {
-  return import(pathToFileURL(path.join(dir, '_ooc_runtime.ts')).href)
-}
+import { CAN_RUN, compileSource, loadRuntime } from './tsgen-helpers.js'
 
 // 精简 loop fixture：guard 分支（递归 $ + nil 兜底）+ repeat（JS 字符串生态 forEach）
 const LOOP_SRC = `
@@ -191,8 +176,8 @@ obj = { v = @{ n = tally + 1; n }, w = @{ m = tally; m * 2 } };
   // v 惰性只算一次（tally+1=6），w 用外层 tally *2=10；合计 6 + 6 + 10
   if (value !== 22) throw new Error(`bind 惰性块应为 22，实际 ${value}`)
   const code = await fs.readFile(path.join(dir, 'bindblock.ts'), 'utf8')
-  if (!/get: function/.test(code) || /type: '/.test(code)) {
-    throw new Error(`bind 应编译成 getter thunk（无 type 判别字段），实际:\n${code}`)
+  if (!/get "v"\(\)/.test(code) || !/__ooc\$d0/.test(code) || /__createObject\(/.test(code)) {
+    throw new Error(`bind 应生成带闭包缓存的对象字面量 getter，且无 __createObject，实际:\n${code}`)
   }
 })
 
@@ -234,98 +219,16 @@ factory
     'export const scale = 2;',
     'export const factory =',
     'export default factory;',
-    "import { __createObject } from './_ooc_runtime.ts';",
+    'Object.freeze({',
+    'Object.freeze({ "x": 1 })',
   ]) {
     if (!code.includes(expect)) throw new Error(`产物应含 ${expect}，实际:\n${code}`)
+  }
+  if (/__createObject/.test(code)) {
+    throw new Error(`对象构造不应再走 __createObject，实际:\n${code}`)
   }
   // 不再有 run()/bag/内联运行时那套模板
   if (/export const __oocNamed|export async function run\(|OOC_NUM_DEF/.test(code)) {
     throw new Error(`产物不应再有自包含模板，实际:\n${code}`)
-  }
-})
-
-test('消息实参 ...array 展开：编译成 __spread，运行语义与解释器一致', async (t) => {
-  const { ts: tsPath, dir } = await compileSource('spread', `
-obj = { $(...xs) { xs } };
-arr = Array of 1 2 3;
-{ collect = (obj $ ...arr), mixed = (obj $ 0 ...arr 9) }
-`)
-  const code = await fs.readFile(tsPath, 'utf8')
-  if (!/__spread\(/.test(code)) {
-    throw new Error(`展开参数应编译成 __spread，实际:\n${code}`)
-  }
-  if (!/import \{ __send, __createObject, __spread \} from '\.\/_ooc_runtime\.ts';/.test(code)) {
-    throw new Error(`应 import __spread，实际:\n${code}`)
-  }
-  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
-  const mod = await import(pathToFileURL(tsPath).href)
-  const rt = await loadRuntime(dir)
-  const collect = rt.__send(mod.default, 'collect', [])
-  if (JSON.stringify(collect) !== JSON.stringify([1, 2, 3])) {
-    throw new Error(`...arr 应展开为 [1,2,3]，实际 ${JSON.stringify(collect)}`)
-  }
-  const mixed = rt.__send(mod.default, 'mixed', [])
-  if (JSON.stringify(mixed) !== JSON.stringify([0, 1, 2, 3, 9])) {
-    throw new Error(`混用应展开为 [0,1,2,3,9]，实际 ${JSON.stringify(mixed)}`)
-  }
-})
-
-test('lambda 保留：成员返回 lambda 本体，读取不二次 $', async (t) => {
-  const { ts: tsPath, dir } = await compileSource('lam', `
-obj = { handler => [x => x + 1], inc = [x => x + 2] };
-obj
-`)
-  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
-  const mod = await import(pathToFileURL(tsPath).href)
-  const rt = await loadRuntime(dir)
-  // __send 读属性成员：拿到 lambda 本体而非执行结果
-  const h = rt.__send(mod.default, 'handler', [])
-  if (typeof h !== 'function') throw new Error('handler 应为 lambda 函数本体')
-  if (h(41) !== 42) throw new Error('lambda 直调应得 42')
-  // bind 形同理
-  const inc = rt.__send(mod.default, 'inc', [])
-  if (typeof inc !== 'function') throw new Error('inc 应为 lambda 函数本体')
-  if (rt.__send(inc, '$', [41]) !== 43) throw new Error('$ 显式调用应得 43')
-  // JS 直读：bind 成员（getter）是 lambda 本体；零参 call 成员是方法本体（调用才执行）
-  if (typeof mod.default.inc !== 'function') throw new Error('JS 直读 inc 应为 lambda 本体')
-  if (mod.default.inc(41) !== 43) throw new Error('JS 直调 inc lambda 应得 43')
-  const viaMethod = mod.default.handler()
-  if (typeof viaMethod !== 'function') throw new Error('handler 调用应返回 lambda 本体')
-  if (viaMethod(1) !== 2) throw new Error('返回的 lambda 直调应得 2')
-})
-
-test('转发属性 <=：编译成 __mutable 转发器，消息原样转发给委托 $', async (t) => {
-  const { ts: tsPath, dir } = await compileSource('fwd', `
-delegate = { $(a, b) => a + b };
-obj = { count <= delegate };
-obj
-`)
-  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
-  const mod = await import(pathToFileURL(tsPath).href)
-  const rt = await loadRuntime(dir)
-  // count 是转发属性：发消息 -> 委托对象 $(3, 4) = 7
-  if (rt.__send(mod.default, 'count', [3, 4]) !== 7) {
-    throw new Error('<= 应把消息转发给委托对象的 $')
-  }
-  if (rt.__send(mod.default, 'count', [5, 6]) !== 11) {
-    throw new Error('<= 委托对象惰性求值一次后持续可用')
-  }
-})
-
-test('模版字符串：编译成 [文本/洞].join("")，运行语义与解释器一致', async (t) => {
-  const { ts: tsPath, dir } = await compileSource('tpl', `
-obj = { greeting(name) { 'hello \${name}! n=\${1 + 2}' } };
-{ msg = (obj greeting 'world') }
-`)
-  const code = await fs.readFile(tsPath, 'utf8')
-  if (!/\]\.join\(''\)/.test(code)) {
-    throw new Error(`模版字符串应编译成 join('')，实际:\n${code}`)
-  }
-  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
-  const mod = await import(pathToFileURL(tsPath).href)
-  const rt = await loadRuntime(dir)
-  const msg = rt.__send(mod.default, 'msg', [])
-  if (msg !== 'hello world! n=3') {
-    throw new Error(`模版结果应为 'hello world! n=3'，实际 ${msg}`)
   }
 })

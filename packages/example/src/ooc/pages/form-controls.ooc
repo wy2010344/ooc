@@ -1,6 +1,6 @@
 // form-controls.ooc —— 表单控件演示：Checkbox / Switch / Select（受控信号）。
-// 信号用 multiBind 包成 lambda：`x $` 读、`x $ v` 写。
-#import { dom, text, fc, multiBind, createSignal } '../bridge.ts';
+// 信号用 bindSignal 包成 lambda：`x $` 读、`x $ v` 写。
+#import { dom, text, fc, bindSignal } '../bridge.ts';
 #import { Card, CardHeader, CardTitle, CardDescription, CardContent } '../ui/card.ooc';
 #import { Checkbox } '../ui/checkbox.ooc';
 #import { Switch } '../ui/switch.ooc';
@@ -9,9 +9,9 @@
 #import { when } '../ui/utils.ooc';
 
 FormControls = fc $ [ctx =>
-    agree = multiBind $ (createSignal $ true);
-    notify = multiBind $ (createSignal $ false);
-    plan = multiBind $ (createSignal $ 'free');
+    agree = bindSignal $ true;
+    notify = bindSignal $ false;
+    plan = bindSignal $ 'free';
     plans = (Array of
         { value = 'free', label = '免费版' }
         { value = 'pro', label = '专业版' }

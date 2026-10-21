@@ -195,7 +195,7 @@ describe('Validating', () => {
     expect(outputOf(document)).toContain('同层作用域不允许重复声明')
   })
 
-  test('#guard 分支不另开作用域：跨分支同名报错', async () => {
+  test('#guard 分支各自独立作用域：跨分支同名不报错', async () => {
     document = await parse(`
             obj = {
                 fun(a) {
@@ -208,7 +208,130 @@ describe('Validating', () => {
                 }
             };
         `)
-    expect(outputOf(document)).toContain('同层作用域不允许重复声明')
+    expect(outputOf(document)).not.toContain('同层作用域不允许重复声明')
+  })
+
+  test('自引用声明 x = x + 1 报错', async () => {
+    document = await parse(`
+            obj = {
+                fun {
+                    x = x + 1;
+                    x
+                }
+            };
+        `)
+    expect(outputOf(document)).toContain('的初始化引用了自身')
+  })
+
+  test('消息名与声明同名不误报自引用', async () => {
+    document = await parse(`
+            obj = { x = 1 };
+            x = obj x;
+            x
+        `)
+    expect(outputOf(document)).not.toContain('初始化引用了自身')
+  })
+
+  test('lambda 体内引用自身允许（闭包延迟）', async () => {
+    document = await parse(`
+            f = [f];
+            f $
+        `)
+    expect(outputOf(document)).not.toContain('初始化引用了自身')
+  })
+
+  test('对象方法体内引用自身允许', async () => {
+    document = await parse(`
+            obj = { get { obj } };
+            obj get
+        `)
+    expect(outputOf(document)).not.toContain('初始化引用了自身')
+  })
+
+  test('绑定体引用自身允许（惰性读取）', async () => {
+    document = await parse(`
+            obj = { get = obj };
+            obj get
+        `)
+    expect(outputOf(document)).not.toContain('初始化引用了自身')
+  })
+
+  test('顶层先使用后声明报暂时性死区', async () => {
+    document = await parse(`
+            x = y + 1;
+            y = 2;
+            x
+        `)
+    expect(outputOf(document)).toContain('暂时性死区')
+  })
+
+  test('方法体内先使用后声明报暂时性死区', async () => {
+    document = await parse(`
+            obj = {
+                fun {
+                    y;
+                    y = 1;
+                    y
+                }
+            };
+            obj fun
+        `)
+    expect(outputOf(document)).toContain('暂时性死区')
+  })
+
+  test('内层后置声明遮蔽外层时仍报暂时性死区', async () => {
+    document = await parse(`
+            x = 1;
+            obj = {
+                fun {
+                    x;
+                    x = 2;
+                    x
+                }
+            };
+            obj fun
+        `)
+    expect(outputOf(document)).toContain('暂时性死区')
+  })
+
+  test('绑定块内先使用后声明报暂时性死区', async () => {
+    document = await parse(`
+            obj = {
+                get = @{
+                    a = b;
+                    b = 1;
+                    a
+                }
+            };
+            obj get
+        `)
+    expect(outputOf(document)).toContain('暂时性死区')
+  })
+
+  test('lambda 可以引用外层稍后声明的名字', async () => {
+    document = await parse(`
+            f = [y];
+            y = 1;
+            f $
+        `)
+    expect(outputOf(document)).not.toContain('暂时性死区')
+  })
+
+  test('对象方法可以引用外层稍后声明的名字', async () => {
+    document = await parse(`
+            obj = { get { y } };
+            y = 1;
+            obj get
+        `)
+    expect(outputOf(document)).not.toContain('暂时性死区')
+  })
+
+  test('参数已初始化，不报暂时性死区', async () => {
+    document = await parse(`
+            obj = { fun(x) { x } };
+            obj fun 1
+        `)
+    expect(outputOf(document)).not.toContain('暂时性死区')
   })
 
   test('参数与方法体内声明同名报错', async () => {

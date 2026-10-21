@@ -16,10 +16,13 @@ import { diagnosticData } from './diagnostics-config.js'
  * 同层作用域内不允许同名重新声明（所有绑定都按 const 处理），包括顶层。
  * 作用域只有四层：
  *  - 模块顶层：#import 绑定 / #type 名 / 顶层赋值
- *  - 方法体：类型参数 + 参数 + 方法体语句（#guard / #else 分支不另开作用域）
+ *  - 方法体：类型参数 + 参数 + 方法体语句；每个 #guard / #else 分支是独立子作用域
  *  - 绑定块 @{ ... }
  *  - lambda 体
  * 对象成员名唯一性由 validator 的 checkMemberNameUniqueness 单独负责。
+ *
+ * 自引用只检查立即求值的 RHS；lambda / 对象方法 / 绑定体要等到调用或读取时
+ * 才执行，此时外层绑定已经初始化，属于合法闭包（如 `f = [f]`）。
  */
 export function checkScopeDuplicates(model: Model, accept: ValidationAcceptor): void {
   checkTopLevel(model, accept)
@@ -85,13 +88,18 @@ function checkMethodScope(body: MethodBody, accept: ValidationAcceptor): void {
   for (const stmt of body.stmts) {
     declareStatement(scope, stmt)
   }
+  // 每个分支是独立块作用域：分支之间允许同名，分支内仍禁止重复
   for (const branch of body.guardBranches) {
+    const branchScope = new ScopeReporter(accept)
     for (const stmt of branch.stmts) {
-      declareStatement(scope, stmt)
+      declareStatement(branchScope, stmt)
     }
   }
-  for (const stmt of body.elseBranch?.stmts ?? []) {
-    declareStatement(scope, stmt)
+  if (body.elseBranch) {
+    const elseScope = new ScopeReporter(accept)
+    for (const stmt of body.elseBranch.stmts) {
+      declareStatement(elseScope, stmt)
+    }
   }
 }
 
@@ -106,9 +114,53 @@ function reserveParams(
   scope.reserve(owner.restParam?.name)
 }
 
-/** 语句只在赋值时引入绑定 */
+/**
+ * RHS 是否直接引用了 name。
+ *
+ * 只检查立即求值的部分：lambda、对象方法、绑定体都要等到调用/读取时才执行，
+ * `a = [a]` 与 `const a = () => a` 一样，调用时外层 a 已经初始化，是合法闭包。
+ * 只有 `a = a + 1` 这类直接读取才判自引用。
+ */
+function referencesName(node: AstNode | undefined, name: string): boolean {
+  if (!node) return false
+  if (
+    isLambdaDef(node) ||
+    isMethodAll(node) ||
+    isBindBlock(node) ||
+    node.$type === 'MethodBind' ||
+    node.$type === 'MethodBindMutable' ||
+    node.$type === 'ObjectDef'
+  ) {
+    return false
+  }
+  // 消息名、对象成员名也是 Ref 节点，但不是变量引用；不要向下遍历
+  if (node.$type === 'MethodCallName' || node.$type === 'MethodDefName') {
+    return false
+  }
+  if (node.$type === 'Ref') {
+    const parent: any = node.$container
+    if (parent && parent.name === node) return false
+    return (node as any).value === name
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith('$')) continue
+    if (Array.isArray(value)) {
+      if (value.some((v) => v && typeof v === 'object' && referencesName(v as AstNode, name))) {
+        return true
+      }
+    } else if (value && typeof value === 'object') {
+      if (referencesName(value as AstNode, name)) return true
+    }
+  }
+  return false
+}
+
+/** 语句只在赋值时引入绑定；`x = x + 1` 这类自引用直接判非法（不再做 __v 兼容）。 */
 function declareStatement(scope: ScopeReporter, stmt: AstNode): void {
   if (isAssignment(stmt)) {
+    if (referencesName(stmt.expression, stmt.name)) {
+      scope.reportSelfReference(stmt.name, stmt)
+    }
     scope.declare(stmt.name, stmt)
   }
 }
@@ -123,6 +175,15 @@ class ScopeReporter {
     if (name) {
       this.seen.add(name)
     }
+  }
+
+  /** 自引用声明：`x = x + 1` 在 JS 里是 TDZ，OOC 直接判非法。 */
+  reportSelfReference(name: string, node: AstNode): void {
+    this.accept('error', `'${name}' 的初始化引用了自身：不允许同名遮蔽，请换一个新名字`, {
+      node,
+      property: 'name',
+      data: diagnosticData('duplicateDeclaration'),
+    })
   }
 
   declare(name: string | undefined, node: AstNode, property?: string): void {

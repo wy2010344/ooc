@@ -18,13 +18,24 @@ export const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
   '>=': (a, b) => a >= b,
   '<=': (a, b) => a <= b,
 }
-export const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
+// 分支参数按 thunk 处理：lambda 调用求值，普通值原样返回
+const callThunk = (v: any) => (typeof v === 'function' ? v() : v)
+
+export const OOC_OBJ_DEF: Record<string, (sender: any, ...args: any[]) => any> = {
   '==': (a: any, v: any) => a == v,
   '!=': (a: any, v: any) => a != v,
   '!!': (a: any) => Boolean(a),
   '~!': (a: any) => !Boolean(a),
+  // && || 保持消息语义（实参先求值，不短路）；惰性请用 and / or
   '&&': (a: any, v: any) => a && v,
   '||': (a: any, v: any) => a || v,
+  // if：条件分支，只有命中的 lambda 会被调用
+  if: (a: any, yes: any, no?: any) => (a ? callThunk(yes) : no === undefined ? null : callThunk(no)),
+  // unless：不满足才执行 no
+  unless: (a: any, no: any) => (a ? null : callThunk(no)),
+  // and / or：惰性逻辑，右侧是 lambda 时按需调用
+  and: (a: any, rhs: any) => (a ? callThunk(rhs) : a),
+  or: (a: any, rhs: any) => (a ? a : callThunk(rhs)),
   not: (a: any) => !Boolean(a),
   include: (a: any, v: any) =>
     typeof a == 'function' ? v instanceof a
@@ -32,22 +43,13 @@ export const OOC_OBJ_DEF: Record<string, (sender: any, v?: any) => any> = {
     : a && typeof a.has == 'function' ? a.has(v)
     : a === v,
 }
-// 成员条目：形态由字段承载，不带 type 判别字段——
-// 有 value 字段＝字面量绑定，有 get 字段＝计算绑定（getter），有 fn 字段＝方法/转发。
-export type OOCEntry =
-  /** 字面量绑定：构造期求值一次，直接写只读数据属性 */
-  | { name: string; value: any }
-  /** 计算绑定：惰性求值一次并缓存（getter） */
-  | { name: string; get: () => any }
-  /** 方法（「=>」）与转发属性（「<=」）：只读数据函数，发消息即调用 */
-  | { name: string; fn: (...args: any[]) => any }
 // 展开参数辅助：'...expr' 求值为数组则摊平，否则整体作单参（与解释器语义一致）
 export function __spread(value: any): any[] {
   return Array.isArray(value) ? value : [value]
 }
 // 转发属性「<=」的构造器：惰性求值委托对象一次并缓存，之后本 key 上的一切消息
 // 原样转发给委托对象的 $（消息名不传，只传实参）。
-export function __mutable(getDelegate: () => any): any {
+export function __mutable(getDelegate: (this: any) => any): any {
   let done = false
   let d: any
   return function (this: any) {
@@ -82,40 +84,17 @@ export function __send(o: any, value: string, args: any[]): any {
     if (args.length) o[value] = args[0]
     return o[value]
   }
+  // send 是普通消息：拿「对象 + 消息名 + 实参列表」在运行时动态分发。
+  // 约定同解释器 runtime.ts：第二个实参是数组时视为实参列表，否则其余实参即列表。
+  if (value === 'send') {
+    const name = args[0]
+    const params = args.length === 2 && Array.isArray(args[1]) ? args[1] : args.slice(1)
+    return __send(o, String(name), params)
+  }
   const num = OOC_NUM_DEF[value]
   if (num) return num(o, args[0])
   const obj = OOC_OBJ_DEF[value]
-  if (obj) return obj(o, args[0])
+  if (obj) return obj(o, ...args)
   throw new Error('OOC 方法未找到: ' + String(o) + ' . ' + value + '(' + args.map((a) => String(a)).join(', ') + ')')
-}
-export function __createObject(entries: OOCEntry[]): any {
-  if (entries.length === 0) return {}
-  const obj: Record<string, unknown> = {}
-  for (const e of entries) {
-    // 同名成员派发取首个定义（唯一性由校验器保证）：已挂载的名字跳过后续定义，
-    // 否则 defineProperty 会因不可重定义而抛错。
-    if (Object.prototype.hasOwnProperty.call(obj, e.name)) continue
-    if ('value' in e) {
-      // 字面量绑定 → 只读数据属性（构造期写值一次，常量不因带参消息被改写）
-      Object.defineProperty(obj, e.name, { enumerable: true, writable: false, value: e.value })
-      continue
-    }
-    if ('get' in e) {
-      let done = false
-      let cached: any
-      const load = e.get
-      Object.defineProperty(obj, e.name, {
-        enumerable: true,
-        get() {
-          if (!done) { done = true; cached = load.call(this) }
-          return cached
-        },
-      })
-      continue
-    }
-    // 方法 / 转发属性：只读数据函数（每次发消息调用）
-    Object.defineProperty(obj, e.name, { enumerable: true, value: e.fn })
-  }
-  return obj
 }
 `

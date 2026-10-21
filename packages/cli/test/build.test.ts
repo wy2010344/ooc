@@ -32,8 +32,7 @@ loop = {
         nil
     },
     repeat(n, fn) {
-        i = 0;
-        [ i < n; fn $ i; i = i + 1 ];
+        (('x' repeat n) split '') forEach [v, i => fn $ i];
         nil
     }
 };
@@ -111,6 +110,39 @@ test('ooc build：依赖图编译成 ES 模块树，运行语义与解释器一�
   if (iterations !== 5) throw new Error(`loop 应跑 5 次，实际 ${iterations}`)
   const double = rt.__send(value, 'double', [])
   if (double !== 8) throw new Error(`math double 4 应为 8，实际 ${double}`)
+})
+
+test('ooc build：未指定 rootDir 时用公共祖先，跨目录依赖不越界', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-build-cross-'))
+  await fs.mkdir(path.join(root, 'src'), { recursive: true })
+  await fs.mkdir(path.join(root, 'shared'), { recursive: true })
+  await fs.writeFile(
+    path.join(root, 'shared', 'lib.ooc'),
+    `{ twice(x) { x * 2 } }
+`,
+    'utf-8',
+  )
+  await fs.writeFile(
+    path.join(root, 'src', 'main.ooc'),
+    `lib = #import '../shared/lib';
+lib twice 21
+`,
+    'utf-8',
+  )
+  const gen = path.join(root, 'generated')
+  const result = await buildProject({
+    entry: path.join(root, 'src', 'main.ooc'),
+    outDir: gen,
+  })
+  const outs = result.files.map((f) => path.relative(gen, f.out).replace(/\\/g, '/'))
+  for (const expected of ['src/main.ts', 'shared/lib.ts']) {
+    if (!outs.includes(expected)) {
+      throw new Error(`跨目录产物缺失 ${expected}，实际 ${outs.join(', ')}`)
+    }
+  }
+  if (Number(process.versions.node.split('.')[0]) < 23) return
+  const mod = await import(pathToFileURL(result.entryOut).href)
+  if (mod.default !== 42) throw new Error(`21*2 应为 42，实际 ${mod.default}`)
 })
 
 test('ooc build：#import 外部 .ts 依赖不参与编译，直接 ES import 源文件', async () => {

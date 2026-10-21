@@ -76,8 +76,9 @@ export function expressionCode(e: Expression): string {
   if (!e) return 'undefined'
   switch (e.$type) {
     case 'CastExpression':
-      // 类型断言静态擦除：保留 as TS 类型（类型标注透传）
-      return `(async () => ${expressionCode((e as any).expression)})() as any`
+      // 类型断言是纯静态的：按 OOC 写的类型发射 as T，让 tsc 参与检查；
+      // 不做任何运行时转换（尤其不能包 async，否则值会变成 Promise）
+      return `(${expressionCode((e as any).expression)} as ${typeCode((e as any).type)})`
     case 'MessageOrChain': {
       const mc = e as any
       const p = mc.primary as Primary
@@ -95,8 +96,7 @@ function piplingCode(e: any): string {
   const left = expressionCode(e.left)
   const r = e.right
   if (!r) {
-    console.error('[tsgen] 未知表达式形态:', e.$type, Object.keys(e).filter((k) => !k.startsWith('$')))
-    return left
+    throw new Error(`[tsgen] 未知表达式形态：${e.$type}`)
   }
   switch (r.$type) {
     case 'MessageChainExt': {
@@ -124,21 +124,36 @@ function piplingCode(e: any): string {
       return `__send(${left}, ${JSON.stringify(r.infix)}, [${args.join(', ')}])`
     }
     default:
-      return left
+      throw new Error(`[tsgen] 未知级联/管道形态：${r.$type}`)
   }
 }
 
-function paramList(node: { params: Array<{ name: string; typeAnnotation?: unknown }>; restParam?: { name: string } }): string {
-  const params = (node.params || []).map((p) => `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
+function paramList(node: { params: Array<{ name: string; typeAnnotation?: unknown }>; restParam?: { name: string; typeAnnotation?: unknown } }): string {
+  // 所有生成的函数都显式声明 this：OOC 的 this 是动态接收者（方法＝对象，
+  // lambda＝lambda 自身），这样 strict/noImplicitThis 下也不会报隐式 any。
+  const params = ['this: any']
+  for (const p of node.params || []) {
+    params.push(`${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
+  }
   if (node.restParam) {
-    params.push(`...${node.restParam.name}`)
+    params.push(`...${node.restParam.name}${restTypeAnnot(node.restParam.typeAnnotation)}`)
   }
   return params.join(', ')
 }
 
-function typeAnnot(t?: unknown): string {
+/** 类型标注 → `: T` 片段；无标注返回空串。 */
+export function typeAnnot(t?: unknown): string {
   if (!t || !isTypeRef(t)) return ''
   return `: ${typeCode(t)}`
+}
+
+/** rest 参数类型：OOC 写 `...xs: number`，TS 需要 `...xs: number[]`。 */
+export function restTypeAnnot(t?: unknown): string {
+  if (!t || !isTypeRef(t)) return ': any[]'
+  const code = typeCode(t)
+  if (/\[\]$/.test(code) || /^Array</.test(code)) return `: ${code}`
+  const needsParens = code.includes('|') || code.includes('&')
+  return `: ${needsParens ? `(${code})[]` : `${code}[]`}`
 }
 
 /** 类型标注 → TS 类型（Route 3：保留类型）。 */
@@ -165,7 +180,8 @@ function typeNameCode(tn: any): string {
       case 'Num':
         return 'number'
       case 'Nil':
-        return 'nil'
+        // OOC 的 nil 类型在 TS 里就是 null（没有全局 nil 类型）
+        return 'null'
       default:
         return n.value
     }
@@ -179,31 +195,71 @@ function typeNameCode(tn: any): string {
   return `${qualified}${name}${args ? `<${args}>` : ''}`
 }
 
-/** 对象定义：ObjectDef → __createObject([...])，成员按解释器 runtime.ts 语义编译。 */
+/**
+ * 对象定义：全部成员直接生成冻结对象字面量，省掉运行时 entries 数组与
+ * defineProperty 循环。计算绑定写成对象字面量 getter，并用 IIFE 闭包缓存
+ * 首次求值结果；`<=` 转发是「惰性求值委托 + 函数」，可和普通方法一样直接写入。
+ * Object.freeze 保持解释器的「成员只读」语义（字面量＝非 writable 数据属性）。
+ */
 export function objectDefCode(obj: any): string {
-  const entries = (obj.methods || [])
+  const all: ObjectEntry[] = (obj.methods || [])
     .map((m: any) => methodCode(m))
-    .filter((s: string | null): s is string => s !== null)
-    .join(', ')
-  return `__createObject([${entries}])`
+    .filter((e: ObjectEntry | null): e is ObjectEntry => e !== null)
+  if (all.length === 0) return '{}'
+  // 同名成员取首个定义（唯一性由校验器保证）
+  const seen = new Set<string>()
+  const entries = all.filter((e) => {
+    if (seen.has(e.name)) return false
+    seen.add(e.name)
+    return true
+  })
+  const decls: string[] = []
+  const props: string[] = []
+  let getterIndex = 0
+  for (const e of entries) {
+    if (!('get' in e)) {
+      props.push(`${propertyKey(e.name)}: ${e.value}`)
+      continue
+    }
+    // getter 的缓存变量用 `$` 避开 OOC 合法标识符，IIFE 内不会遮蔽用户绑定
+    const done = `__ooc$d${getterIndex}`
+    const cached = `__ooc$v${getterIndex}`
+    getterIndex++
+    decls.push(`let ${done} = false, ${cached}: any;`)
+    props.push(
+      `get ${propertyKey(e.name)}() { if (!${done}) { ${done} = true; ${cached} = (${e.get}).call(this) } return ${cached} }`,
+    )
+  }
+  const literal = `(Object.freeze({ ${props.join(', ')} }) as any)`
+  return decls.length > 0 ? `(() => { ${decls.join(' ')} return ${literal} })()` : literal
 }
 
-function methodCode(m: any): string | null {
+type ObjectEntry =
+  /** 数据属性值（字面量/方法/转发函数） */
+  | { name: string; value: string }
+  /** 计算绑定：惰性求值一次并缓存，编译成对象字面量 getter */
+  | { name: string; get: string }
+
+/** `__proto__` 在对象字面量里会改原型，必须用计算键强制成自有属性。 */
+function propertyKey(name: string): string {
+  const quoted = JSON.stringify(name)
+  return name === '__proto__' ? `[${quoted}]` : quoted
+}
+
+function methodCode(m: any): ObjectEntry | null {
   const name = methodName(m.name)
   switch (m.$type) {
-    // 绑定：纯字面量 → 数据属性值（构造期求值一次）；计算式 → thunk（首次求值并
-    // 缓存，getter）。计算式可为单表达式或 @{ 多条语句 } 块。
+    // 绑定：纯字面量 → 数据属性值（构造期求值一次）；计算式 → getter（首次求值并
+    // 缓存）。计算式可为单表达式或 @{ 多条语句 } 块。
     case 'MethodBind': {
       const lit = literalOfBindBody(m.bindBody)
-      if (lit) {
-        return `{ name: ${JSON.stringify(name)}, value: ${literalCode(lit)} }`
-      }
+      if (lit) return { name, value: literalCode(lit) }
       const body = m.bindBody
       const fn =
         body && body.$type === 'BindBlock'
-          ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
-          : `function(){ return ${expressionCode(body.expression)} }`
-      return `{ name: ${JSON.stringify(name)}, get: ${fn} }`
+          ? `function(this: any){ ${bodyCode(body.bindStmts ?? [])} }`
+          : `function(this: any){ return ${expressionCode(body.expression)} }`
+      return { name, get: fn }
     }
     // 转发属性 <=：__mutable(getDelegate) 惰性求值委托对象一次并缓存，之后本 key
     // 上的一切消息原样转发给委托对象的 $（消息名不传，只传实参）。
@@ -211,9 +267,9 @@ function methodCode(m: any): string | null {
       const body = m.bindBody
       const delegate =
         body && body.$type === 'BindBlock'
-          ? `function(){ ${bodyCode(body.bindStmts ?? [])} }`
-          : `function(){ return ${expressionCode(body.expression)} }`
-      return `{ name: ${JSON.stringify(name)}, fn: __mutable(${delegate}) }`
+          ? `function(this: any){ ${bodyCode(body.bindStmts ?? [])} }`
+          : `function(this: any){ return ${expressionCode(body.expression)} }`
+      return { name, value: `__mutable(${delegate})` }
     }
     default: {
       const body = m.body
@@ -222,12 +278,15 @@ function methodCode(m: any): string | null {
       // #guard 分支链（preBranch 是 else 兜底，guardBranches 顺序判别）编译成
       // if / else if / else 链，命中块执行完即 return
       const guards = body.guardBranches ?? []
+      // 保留泛型参数与返回类型，strict tsc 才能沿调用链检查
+      const typeParams = (m.typeParams ?? []).map((p: any) => p.name).join(', ')
+      const signature = `function${typeParams ? `<${typeParams}>` : ''}(${paramList(m)})${typeAnnot(m.returnType)}`
       const fn =
         guards.length > 0
-          ? `function(${paramList(m)}){ ${guardedBodyCode(body)} }`
-          : `function(${paramList(m)}){ ${bodyCode(body.stmts ?? [])} }`
+          ? `${signature}{ ${guardedBodyCode(body)} }`
+          : `${signature}{ ${bodyCode(body.stmts ?? [])} }`
       // 零参/带参统一为只读数据函数（方法）；形态由 descriptor 承载，不打标记
-      return `{ name: ${JSON.stringify(name)}, fn: ${fn} }`
+      return { name, value: fn }
     }
   }
 }
@@ -241,30 +300,19 @@ function methodName(n: any): string {
   return raw.value ?? ''
 }
 
-/** RHS 里是否引用了 name（含嵌套 lambda/对象体；跳过 Langium 的 $ 内部字段避免环）。 */
-function referencesName(node: unknown, name: string): boolean {
-  if (Array.isArray(node)) return node.some((n) => referencesName(n, name))
-  if (!node || typeof node !== 'object') return false
-  const rec = node as Record<string, unknown>
-  if (rec.$type === 'Ref' && rec.value === name) return true
-  return Object.keys(rec).some((k) => !k.startsWith('$') && referencesName(rec[k], name))
-}
-
 /**
- * 块 → JS 语句序列。块内绑定一律 const（同层已禁止重复声明），平铺输出即可；
- * 仅当 RHS 引用了同名外层绑定（`x = x + 1` 遮蔽场景）时，才另起块先求值再声明，
- * 复刻解释器「用外层作用域求值 RHS，再遮蔽绑定」的语义（避免 TDZ 与错误闭包捕获）。
+ * 块 → JS 语句序列。绑定一律 const，平铺输出即与 JS 块级作用域一致。
+ * `x = x + 1` 这类自引用声明由 validator 判非法，这里不再做 `__v` 遮蔽兼容。
+ * 尾语句是赋值时返回 null，与解释器 `execDocument` 的“语句值”一致。
  */
-function bodyCode(stmts: any[], offset = 0, returnLast = true): string {
+function bodyCode(stmts: any[], returnLast = true): string {
   if (stmts.length === 0) return returnLast ? 'return null' : ''
   const [st, ...rest] = stmts
-  const restCode = bodyCode(rest, offset + 1, returnLast)
+  const restCode = bodyCode(rest, returnLast)
   if (st.$type === 'Assignment') {
-    const rhs = expressionCode(st.expression)
-    const tail = rest.length > 0 ? restCode : returnLast ? `return ${st.name}` : ''
-    const decl = `const ${st.name} = ${rhs};`
-    if (!referencesName(st.expression, st.name)) return `${decl} ${tail}`.trim()
-    return `{ const __v${offset} = ${rhs}; { const ${st.name} = __v${offset}; ${tail} } }`
+    const decl = `const ${st.name} = ${expressionCode(st.expression)};`
+    const tail = rest.length > 0 ? restCode : returnLast ? 'return null' : ''
+    return `${decl} ${tail}`.trim()
   }
   const code = expressionCode(st)
   if (rest.length > 0) return `${code}; ${restCode}`
@@ -277,7 +325,7 @@ function bodyCode(stmts: any[], offset = 0, returnLast = true): string {
  */
 function guardedBodyCode(body: any): string {
   const chain = guardChainCode(body)
-  const pre = bodyCode(body.stmts ?? [], 0, false)
+  const pre = bodyCode(body.stmts ?? [], false)
   return pre ? `${pre} ${chain}` : chain
 }
 
@@ -297,10 +345,17 @@ function guardChainCode(body: any): string {
   return parts.join(' ')
 }
 
-/** lambda [x => body]：等价 { $ { ... } }，编译成真正的 JS 函数（解释器语义：既是值又是函数）。 */
+/**
+ * lambda [x => body]：编译成真正的 JS 函数（既是值又是函数）。
+ * OOC 的 `$` 调用用 `o.apply(o, args)`，所以普通调用时 this 就是 lambda 自身；
+ * 显式 `this: any` 只为让 strict tsc 不报隐式 any，不改变运行时语义。
+ */
 function lambdaDefCode(e: any): string {
   if (!e || e.$type !== 'LambdaDef') return expressionCode(e)
-  const params = (e.params || []).map((p: any) => `${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
-  if (e.restParam) params.push(`...${e.restParam.name}`)
+  const params = ['this: any']
+  for (const p of e.params || []) {
+    params.push(`${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
+  }
+  if (e.restParam) params.push(`...${e.restParam.name}${restTypeAnnot(e.restParam.typeAnnotation)}`)
   return `(function(${params.join(', ')}){ ${bodyCode(e.expressions ?? [])} })`
 }

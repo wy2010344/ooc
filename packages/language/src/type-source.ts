@@ -17,13 +17,13 @@ import type { TypeInfo } from './type-system.js'
 /** 语言内置桥接的类型源：storage / js / merge / console（运行时实现见 interpreter/bridges.ts，console 是自由全局） */
 export const coreBridgeTypesSource = `// 语言内置桥接类型源（storage / js / merge / console）
 // 运行时实现见 interpreter/bridges.ts，这里只声明类型（签名方法不落地）。
-Ref #type {
-    get: any,
-    set(value): any
+Ref #type<T> {
+    get: T,
+    set(value: T): any
 };
 
 storage = {
-    ref(initial): Ref
+    ref<T>(initial: T): Ref<T>
 };
 
 js = {
