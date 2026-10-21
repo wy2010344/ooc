@@ -1,4 +1,4 @@
-name: Deploy docs to GitHub Pages
+name: Deploy docs and example to GitHub Pages
 
 on:
   push:
@@ -6,6 +6,14 @@ on:
     paths:
       - 'docs/**'
       - 'packages/language/**'
+      - 'packages/cli/**'
+      - 'packages/vite-plugin-ooc/**'
+      - 'packages/ooc-mve-bridge/**'
+      - 'packages/example/**'
+      - 'packages/base/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
@@ -26,13 +34,52 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
+          cache: npm
 
+      # 本地通过 workspace 复用的兄弟仓库，CI 需要放到相同相对路径。
+      - name: Clone sibling workspace
+        run: git clone --depth 1 https://github.com/wy2010344/es-pseudo-monorepo.git ../es-pseudo-monorepo
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+          run_install: false
+
+      # 兄弟仓库默认不带 dist，先按依赖顺序编译 example 需要的包。
+      - name: Build sibling packages
+        working-directory: ../es-pseudo-monorepo
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm \
+            --filter mve-core \
+            --filter mve-dom \
+            --filter mve-helper \
+            --filter mve-dom-helper \
+            --filter mve-three \
+            --filter wy-helper \
+            --filter wy-dom-helper \
+            run build
+
+      # --ignore-scripts 跳过 prepare，避免在 grammar 生成前构建 example。
       - name: Install workspace dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Generate ooc grammar
         run: npm run langium:generate
+
+      - name: Build OOC packages
+        run: >-
+          npx tsc -b
+          packages/language/tsconfig.src.json
+          packages/ooc-mve-bridge/tsconfig.json
+          packages/cli/tsconfig.json
+          packages/vite-plugin-ooc/tsconfig.json
+
+      - name: Build example
+        run: npm run --workspace packages/example build
+        env:
+          OOC_BASE: /ooc/example/
 
       - name: Install docs dependencies
         working-directory: docs
@@ -41,6 +88,12 @@ jobs:
       - name: Build docs
         working-directory: docs
         run: npm run build
+
+      # 同一个 Pages 站点：docs 占根路径，example 放到 /ooc/example/。
+      - name: Add example to docs site
+        run: |
+          mkdir -p docs/doc_build/example
+          cp -R packages/example/dist/. docs/doc_build/example/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
