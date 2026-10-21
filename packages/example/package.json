@@ -11,8 +11,10 @@
     },
     "dependencies": {
         "object-oriented-c-language": "0.0.1",
+        "history": "^5.3.0",
         "mve-core": "*",
         "mve-dom": "*",
+        "mve-helper": "*",
         "ooc-mve-bridge": "*",
         "wy-dom-helper": "*",
         "wy-helper": "*"

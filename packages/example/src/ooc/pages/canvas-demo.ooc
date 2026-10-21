@@ -3,7 +3,7 @@
 // 计数写在画布节点里也写在下方 DOM 里，方便对比「同一信号驱动两种渲染」。
 #import { dom, text, fc, bindSignal } '../bridge.ts';
 #import { canvas, flex } '../bridge.ts';
-#import { CanvasHeader, CanvasStat, CanvasButton, CanvasProgress } '../ui/canvas-kit.ooc';
+#import { CanvasHeader, CanvasStat, CanvasButton, CanvasProgress, canvasSurface, themeColor } '../ui/canvas-kit.ooc';
 
 CanvasDemo = fc $ [ctx =>
     count = bindSignal $ 0;
@@ -15,7 +15,8 @@ CanvasDemo = fc $ [ctx =>
         )
         (canvas stage {
             id = 'canvas-demo-stage',
-            className = 'block h-[340px] w-full rounded-xl border bg-white',
+            className = 'block h-[340px] w-full rounded-xl border bg-card',
+            backgroundColor = [themeColor $ canvasSurface],
             padding = 20,
             layout = (flex $ { direction = 'y', alignItem = 'stretch', alignFix = true, gap = 16 })
         }

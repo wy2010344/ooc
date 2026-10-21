@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OOC 浏览器示例</title>
+    <script>
+      // 首屏前同步主题，避免刷新时闪回浅色
+      try {
+        var saved = localStorage.getItem('ooc-theme')
+        var dark = saved
+          ? saved === 'dark'
+          : matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.classList.toggle('dark', dark)
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <main id="app"></main>

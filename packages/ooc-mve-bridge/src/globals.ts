@@ -21,6 +21,7 @@ import { three } from './three.js'
 import { bindSignal, bindRef, multiBind } from './multi-bind.js'
 import { createPop, renderPop } from './pop.js'
 import { floating } from './floating.js'
+import { dark, toggleTheme } from './theme.js'
 import {
   iconCheck,
   iconChevronDown,
@@ -65,6 +66,8 @@ export function createBridgeGlobals() {
     layoutSize,
     layoutSizeDirection,
     readValue,
+    dark,
+    toggleTheme,
     iconCheck,
     iconChevronDown,
     iconX,

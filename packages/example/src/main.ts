@@ -1,12 +1,31 @@
 import './style.css'
-import { sendMessage } from 'object-oriented-c-language'
 import { createRoot } from 'mve-dom'
-import { createPop, provideIconContext, renderPop } from 'ooc-mve-bridge'
-// .ooc 是一等源码模块：vite-plugin-ooc 在内存 transform 成纯 ES 模块
-//（默认导出 = 模块最后一条表达式，所有顶层声明都会 export），
-// 宿主依赖（dom/text/fc/storage/信号）由 OOC 侧 #import './ooc/bridge.ts' 显式导入。
-// 无 prebuild、无磁盘中间产物；文件改动走 vite 热更新直接重解析。
-import app from './ooc/app.ooc'
+import { createHashHistory } from 'history'
+import { renderOneKey } from 'mve-helper'
+import { hookCurrentStateHolder } from 'mve-core'
+import { provideIconContext, renderPop, routerProvide } from 'ooc-mve-bridge'
+import home from './ooc/pages/home.ooc'
+import components from './ooc/pages/components.ooc'
+import componentsBasic from './ooc/pages/components-basic.ooc'
+import componentsForms from './ooc/pages/components-forms.ooc'
+import componentsData from './ooc/pages/components-data.ooc'
+import componentsOverlays from './ooc/pages/components-overlays.ooc'
+import componentsVisual from './ooc/pages/components-visual.ooc'
+
+// .ooc 是一等源码模块：vite-plugin-ooc 在内存里 transform 成纯 ES 模块。
+// hash 路由只负责选页，每个页面仍是普通的 OOC fc 组件。
+// .ooc 默认导出是 fc 工厂：调用一次得到真正的组件函数。
+type PageFactory = () => (ctx: unknown) => void
+
+const routes: Record<string, PageFactory> = {
+  '/': home,
+  '/components': components,
+  '/components/basic': componentsBasic,
+  '/components/forms': componentsForms,
+  '/components/data': componentsData,
+  '/components/overlays': componentsOverlays,
+  '/components/visual': componentsVisual,
+}
 
 const container = document.getElementById('app')!
 const errBox = document.getElementById('error')!
@@ -17,7 +36,21 @@ async function boot() {
     errBox.textContent = ''
     createRoot(container, function (this) {
       provideIconContext(this)
-      sendMessage(app, 'preview', [this])
+      const { getHistoryState } = routerProvide(createHashHistory())
+
+      renderOneKey(
+        () => {
+          const path = getHistoryState().pathname
+          return routes[path] ? path : '/'
+        },
+        (path) => path,
+        function (_path, getPath) {
+          const page = routes[getPath()] ?? home
+          // .ooc 默认导出是 fc 工厂：先取组件函数，再挂到当前路由子 holder。
+          page()(hookCurrentStateHolder(true))
+        },
+      )
+
       renderPop()
     })
   } catch (err) {

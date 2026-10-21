@@ -25,6 +25,7 @@ import {
   ignoreFlex,
   layoutSize,
   layoutSizeDirection,
+  outerSize,
   renderCanvas,
   renderEditableText,
   renderImage,
@@ -88,6 +89,34 @@ function makeTag(render: (props: any) => unknown): CanvasTagFactory {
  * 默认纵向 flex、交叉轴拉伸；尺寸由 className/style 控制（CSS 生效后 ResizeObserver 同步）。
  * renderCanvas 只注册重绘回调、不做首帧渲染，这里补一次。
  */
+/**
+ * mve-dom-helper 的 Renderer.render 固定先铺白底。这里按 stage 的 backgroundColor
+ * 重新实现同一段渲染：复用它的 signal.collect，draw 期间读到的主题/状态信号仍会被订阅。
+ * backgroundColor 支持普通 ColorInt 或 lambda（lambda 内读 dark 信号即可跟随主题重绘）。
+ */
+function bindStageBackground(renderer: any, background: unknown) {
+  const signal = renderer.signal as { collect(fn: () => void): void }
+  renderer.render = function (canvas: CanvasRenderingContext2D) {
+    renderer.scheduled = true
+    try {
+      signal.collect(() => {
+        const w = outerSize.call(renderer, 'x')
+        const h = outerSize.call(renderer, 'y')
+        const value = readValue(background)
+        canvas.fillStyle =
+          typeof value === 'string'
+            ? value
+            : colorToCSS((value as number | undefined) ?? rgba(255, 255, 255))
+        canvas.fillRect(0, 0, w, h)
+        renderer.draw(canvas)
+      })
+    } catch (err) {
+      console.error('渲染出错', err)
+    }
+    renderer.scheduled = false
+  }
+}
+
 export const canvasStage = fc(function (
   ctx: StateHolderWithNode<Node, readonly Node[]>,
   arg?: unknown,
@@ -108,6 +137,10 @@ export const canvasStage = fc(function (
       renderChildrenList(children, this)
     },
   } as any)
+  const background = props['backgroundColor']
+  if (background !== undefined) {
+    bindStageBackground(renderer, background)
+  }
   const ctx2d = el.getContext('2d')
   if (ctx2d) {
     renderer.render(ctx2d)

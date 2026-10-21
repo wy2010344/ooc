@@ -57,6 +57,12 @@ export type { IconProps } from './icons.js'
 // 响应式订阅（Dialog/Sheet 跟随外部 open 信号）
 export { hookTrackSignal } from 'mve-helper'
 
+// hash 路由（example 用；页面仍是普通 OOC 组件）
+export { routerProvide, routerConsume, fLink } from 'mve-dom-helper/history'
+
+// 主题切换（跟随 <html class="dark">，localStorage 持久化）
+export { dark, toggleTheme } from './theme.js'
+
 // 桥接类型源与 loader（供 OOC 类型检查器解析全局类型，Route A）
 export { createBridgeGlobalsTypes, bridgeTypesSource } from './types.js'
 

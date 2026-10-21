@@ -35,3 +35,4 @@ export {
   iconX,
   provideIconContext,
 } from 'ooc-mve-bridge'
+export { dark, toggleTheme } from 'ooc-mve-bridge'

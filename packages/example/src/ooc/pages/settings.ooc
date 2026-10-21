@@ -1,4 +1,4 @@
-// settings.ooc —— 账户设置页：受控输入 + 计数器 + 保存/重置，组合各 demo 区块。
+// settings.ooc —— 账户设置：受控输入 + 计数器 + 保存/重置。
 // 信号用 bindSignal、storage ref 用 bindRef 包成 lambda：`x $` 读、`x $ v` 写。
 #import { dom, text, fc, bindSignal, bindRef } '../bridge.ts';
 #import { Button } '../ui/button.ooc';
@@ -6,11 +6,6 @@
 #import { Input } '../ui/input.ooc';
 #import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } '../ui/card.ooc';
 #import { StatCard } './stat-card.ooc';
-#import { Showcase } './showcase.ooc';
-#import { VariantDemo } './variant-demo.ooc';
-#import { Kit } './kit.ooc';
-#import { CanvasDemo } './canvas-demo.ooc';
-#import { ThreeDemo } './three-demo.ooc';
 
 SettingsPanel = fc $ [ctx =>
     name = bindSignal $ 'OOC';
@@ -19,16 +14,10 @@ SettingsPanel = fc $ [ctx =>
     // storage ref 是普通可变 cell（非响应式）：bindRef 包成同样的读写 lambda。
     saves = bindRef $ 0;
 
-    (dom div { className = 'mx-auto max-w-2xl space-y-6 p-6' }
-        (dom header { className = 'space-y-1' }
-            (dom h1 { className = 'text-3xl font-bold tracking-tight' } (text $ '组件库示例'))
-            (dom p { className = 'text-sm text-muted-foreground' }
-                (text $ '用 OOC 复刻 shadcn 风格组件：Button / Badge / Input / Card，Tailwind v4 主题令牌。'))
-        )
-
+    (dom div { className = 'space-y-6' }
         (dom div { className = 'grid grid-cols-2 gap-4' }
-            (StatCard $ '组件数量' '4' 'NEW' 'default')
-            (StatCard $ '当前计数' count 'live' 'secondary')
+            (StatCard $ '当前昵称' name 'live' 'secondary')
+            (StatCard $ '当前计数' count 'demo' 'outline')
         )
 
         (Card $ {}
@@ -66,16 +55,6 @@ SettingsPanel = fc $ [ctx =>
                 )
             )
         )
-
-        (Showcase $)
-
-        (VariantDemo $)
-
-        (Kit $)
-
-        (CanvasDemo $)
-
-        (ThreeDemo $)
 
         (dom p { className = 'text-xs text-muted-foreground' } (text $ saved))
     ) $ ctx

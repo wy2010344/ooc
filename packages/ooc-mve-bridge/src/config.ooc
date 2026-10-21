@@ -114,6 +114,15 @@ readValue = {
     $(value): any => js any
 };
 
+// 主题：dark 无参读、toggleTheme 无参切换
+dark = {
+    $: bool
+};
+
+toggleTheme = {
+    $: bool
+};
+
 flex = {
     $(props): any => js any
 };
@@ -221,7 +230,9 @@ config = {
         colorToCSS = colorToCSS,
         layoutSize = layoutSize,
         layoutSizeDirection = layoutSizeDirection,
-        readValue = readValue
+        readValue = readValue,
+        dark = dark,
+        toggleTheme = toggleTheme
     }
 };
 
