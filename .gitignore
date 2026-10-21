@@ -15,6 +15,8 @@ debug-*.mjs
 test-marker.mjs
 *.d.ts
 *.d.ts.map
+# 手写的 .ooc 模块声明，必须入库（其余 *.d.ts 都是生成产物）
+!packages/example/src/vite-env.d.ts
 *.js.map
 generated/
 # tsc 误把产物吐到 src 的散落 .js（源码统一 .ts/.tsx；残留 .js 会被 vite/tsc 优先解析，挡住源码）
