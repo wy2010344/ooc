@@ -20,15 +20,13 @@ selectDefaults = { options = (Array of), placeholder = '请选择', getValue = n
 
 // 由选项表按 value 找 label，找不到退回原值。
 // 用 #guard 而非 when：when 是普通函数，两个分支都会被求值，found 为空时 (found label) 会炸。
-selectLabel = {
-    $(opts, v) {
-        found = opts / find [o => (o value) == v];
-        #guard found;
-        found label
-        #else;
-        v
-    }
-};
+selectLabel = [opts, v =>
+    found = opts / find [o => (o value) == v];
+    #guard found;
+    found label
+    #else;
+    v
+];
 
 Select = fc $ [ctx, props =>
     p = merge $ props selectDefaults;
@@ -36,52 +34,46 @@ Select = fc $ [ctx, props =>
     triggerEl = bindRef $ (nil #as any);
     closeRef = bindRef $ (nil #as any);
 
-    closeNow = {
-        $ {
-            // 注意：连写的 #guard 是 if / else-if（命中即返回），所以「置 false」必须写在 #guard 之前，
-            // 否则开着的状态下第一条命中就返回，pop 永远不会被关掉。
-            open $ false;
-            #guard (closeRef $);
-            c = (closeRef $);
-            c $;
-            closeRef $ nil
+    closeNow = [
+        // 注意：连写的 #guard 是 if / else-if（命中即返回），所以「置 false」必须写在 #guard 之前，
+        // 否则开着的状态下第一条命中就返回，pop 永远不会被关掉。
+        open $ false;
+        #guard (closeRef $);
+        c = (closeRef $);
+        c $;
+        closeRef $ nil
+    ];
+    content = [ctx =>
+        (floating $ {
+            reference = [(triggerEl $)],
+            placement = 'bottom-start',
+            matchWidth = true,
+            className = '${selectContentBase} ${p className}',
+            onDismiss = [closeNow $],
+            dismissIgnore = [(triggerEl $)]
         }
-    };
-    content = {
-        $(ctx) {
-            (floating $ {
-                reference = [(triggerEl $)],
-                placement = 'bottom-start',
-                matchWidth = true,
-                className = '${selectContentBase} ${p className}',
-                onDismiss = [closeNow $],
-                dismissIgnore = [(triggerEl $)]
-            }
-                (forEach $ {
-                    forEach(block){ (p options) forEach [o, i => block $ (o value) o] },
-                    creater(ic, et, key){
-                        (dom button {
-                            type = 'button',
-                            className => '${selectItemBase} ${when $ (((et value) value) == ((p getValue) $)) itemOnClass itemOffClass}',
-                            onClick(e){ (p setValue) $ ((et value) value); closeNow $ }
-                        }
-                            (text $ ((et value) label))
-                        ) $ ic
+            (forEach $ {
+                forEach(block){ (p options) forEach [o, i => block $ (o value) o] },
+                creater(ic, et, key){
+                    (dom button {
+                        type = 'button',
+                        className => '${selectItemBase} ${when $ (((et value) value) == ((p getValue) $)) itemOnClass itemOffClass}',
+                        onClick(e){ (p setValue) $ ((et value) value); closeNow $ }
                     }
-                })
-            ) $ ctx
-        }
-    };
-    toggle = {
-        $(e) {
-            #guard (open $);
-            closeNow $;
-            #else;
-            triggerEl $ (e currentTarget);
-            closeRef $ (createPop $ [ctx, close => content $ ctx]);
-            open $ true
-        }
-    };
+                        (text $ [((et value) label)])
+                    ) $ ic
+                }
+            })
+        ) $ ctx
+    ];
+    toggle = [e =>
+        #guard (open $);
+        closeNow $;
+        #else;
+        triggerEl $ (e currentTarget);
+        closeRef $ (createPop $ [ctx, close => content $ ctx]);
+        open $ true
+    ];
 
     (dom div { className = 'relative w-full' }
         (dom button {

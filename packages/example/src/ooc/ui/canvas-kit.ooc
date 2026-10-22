@@ -44,11 +44,9 @@ canvasTrack = {
 };
 
 // 按当前主题取色：dark 是响应式信号，画布 draw 期间读取即可订阅重绘
-themeColor = {
-    $(token) {
-        when $ (dark $) (token dark) (token light)
-    }
-};
+themeColor = [token =>
+    when $ (dark $) (token dark) (token light)
+];
 
 // 标题块：标题 + 说明（两块文本节点，纵向 flex）
 canvasHeaderDefaults = { title = '', description = '' };

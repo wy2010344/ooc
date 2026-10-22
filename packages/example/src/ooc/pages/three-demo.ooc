@@ -8,14 +8,12 @@
 #import { when } '../ui/utils.ooc';
 
 // 色号名：模板洞内不能再出现单引号（整段是一个字符串 token），所以放成顶层函数
-colorNameOf = {
-    $(b) {
-        #guard b;
-        '暖调'
-        #else;
-        '冷调'
-    }
-};
+colorNameOf = [b =>
+    #guard b;
+    '暖调'
+    #else;
+    '冷调'
+];
 
 ThreeDemo = fc $ [ctx =>
     spin = bindSignal $ 0;

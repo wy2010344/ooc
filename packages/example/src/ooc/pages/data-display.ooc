@@ -50,9 +50,9 @@ DataDisplay = fc $ [ctx =>
                                 forEach(block){ rows forEach [r, i => block $ (r email) r] },
                                 creater(ic, et, key){
                                     (TableRow $ {}
-                                        (TableCell $ {} (text $ ((et value) name)))
-                                        (TableCell $ {} (text $ ((et value) email)))
-                                        (TableCell $ {} (text $ ((et value) role)))
+                                        (TableCell $ {} (text $ [((et value) name)]))
+                                        (TableCell $ {} (text $ [((et value) email)]))
+                                        (TableCell $ {} (text $ [((et value) role)]))
                                     ) $ ic
                                 }
                             })

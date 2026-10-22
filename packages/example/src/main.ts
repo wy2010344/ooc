@@ -11,6 +11,7 @@ import componentsForms from './ooc/pages/components-forms.ooc'
 import componentsData from './ooc/pages/components-data.ooc'
 import componentsOverlays from './ooc/pages/components-overlays.ooc'
 import componentsVisual from './ooc/pages/components-visual.ooc'
+import financeDashboard from './ooc/pages/finance-dashboard.ooc'
 
 // .ooc 是一等源码模块：vite-plugin-ooc 在内存里 transform 成纯 ES 模块。
 // hash 路由只负责选页，每个页面仍是普通的 OOC fc 组件。
@@ -25,6 +26,7 @@ const routes: Record<string, PageFactory> = {
   '/components/data': componentsData,
   '/components/overlays': componentsOverlays,
   '/components/visual': componentsVisual,
+  '/dashboard': financeDashboard,
 }
 
 const container = document.getElementById('app')!

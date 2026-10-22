@@ -27,7 +27,7 @@ Tabs = fc $ [ctx, props =>
                         className => '${tabsTriggerBase} ${when $ (((et value) value) == ((p getValue) $)) tabsTriggerOn tabsTriggerOff}',
                         onClick(e){ (p setValue) $ ((et value) value) }
                     }
-                        (text $ ((et value) label))
+                        (text $ [((et value) label)])
                     ) $ ic
                 }
             })

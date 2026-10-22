@@ -12,6 +12,7 @@ SiteNav = fc $ [ctx =>
             (dom nav { className = 'flex items-center gap-1' }
                 (dom a { href = '#/', className = navLinkClass } (text $ '首页'))
                 (dom a { href = '#/components', className = navLinkClass } (text $ '组件'))
+                (dom a { href = '#/dashboard', className = navLinkClass } (text $ '行情'))
                 (dom button {
                     className = themeButtonClass,
                     title = '切换主题',
