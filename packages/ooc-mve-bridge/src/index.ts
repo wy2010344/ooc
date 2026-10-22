@@ -1,5 +1,5 @@
 // DOM 元素组件
-export { dom, text, html } from './dom.js'
+export { dom, text, html, svg } from './dom.js'
 export type { DComponent } from './dom.js'
 
 // 组件包装 / forEach

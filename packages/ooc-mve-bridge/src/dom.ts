@@ -1,5 +1,5 @@
 import type { StateHolderWithNode } from 'mve-core'
-import { renderFDom, renderHtmlContent, renderTextContent } from 'mve-dom'
+import { renderFDom, renderFSvg, renderHtmlContent, renderTextContent } from 'mve-dom'
 import type { GetValue } from 'wy-helper'
 
 import { fc } from './fc.js'
@@ -19,30 +19,49 @@ export type TagFactory = (
 //宽泛元素：任意标签名都可调用（TS 侧 Proxy 暴露方法，接受 lambda children），
 //未知标签在类型上静默退化为 any（见 type-checker），运行时经 Proxy 动态创建，
 //不依赖语言级 methodNotFound——methodNotFound 让位给 JS Proxy 的动态派发。
+/** 把 OOC 属性对象的 descriptor 分流成 mve 认识的 props（数据属性/函数/事件）。 */
+function propsOf(arg: unknown): Record<string, unknown> {
+  const to: Record<string, unknown> = {}
+  if (!arg || typeof arg !== 'object') return to
+  for (const key of Object.keys(arg)) {
+    const desc = Object.getOwnPropertyDescriptor(arg, key)
+    if (!desc) continue
+    if (desc.get || desc.set) {
+      // 计算绑定（getter）：惰性一次缓存，读一次（常量语义）
+      to[key] = (arg as Record<string, unknown>)[key]
+    } else if (typeof desc.value === 'function') {
+      // 方法/转发器（只读数据函数）：绑到接收者。零参方法 → GetValue（每次读重算）；
+      // 带参方法 → 事件处理器（mve 传入事件实参）
+      to[key] = desc.value.bind(arg)
+    } else {
+      // 字面量绑定值 / 宿主属性：原样透传
+      to[key] = (arg as Record<string, unknown>)[key]
+    }
+  }
+  return to
+}
+
 const makeTagFn = (tag: string): TagFactory => {
   return function (arg: any, ...children: DComponent[]) {
     //这里在 build 窗口已由调用方执行，属性按 descriptor 分流
     return function (this: StateHolderWithNode<Node, readonly Node[]>) {
-      const to: Record<string, unknown> = {}
-      if (arg && typeof arg === 'object') {
-        for (const key of Object.keys(arg)) {
-          const desc = Object.getOwnPropertyDescriptor(arg, key)
-          if (!desc) continue
-          if (desc.get || desc.set) {
-            // 计算绑定（getter）：惰性一次缓存，读一次（常量语义）
-            to[key] = arg[key]
-          } else if (typeof desc.value === 'function') {
-            // 方法/转发器（只读数据函数）：绑到接收者。零参方法 → GetValue（每次读重算）；
-            // 带参方法 → 事件处理器（mve 传入事件实参）
-            to[key] = desc.value.bind(arg)
-          } else {
-            // 字面量绑定值 / 宿主属性：原样透传
-            to[key] = arg[key]
-          }
-        }
-      }
       return renderFDom(tag as any, {
-        ...to,
+        ...propsOf(arg),
+        children() {
+          renderChildren(children, this)
+        },
+      }) as any
+    }
+  }
+}
+
+// SVG 同理，但走 createElementNS 的 renderFSvg；mve-dom 自带的 svg 只接收 props，
+// 不支持子节点，OOC 侧需要统一的 (props?, ...children) 标签调用形态。
+const makeSvgTagFn = (tag: string): TagFactory => {
+  return function (arg: any, ...children: DComponent[]) {
+    return function (this: StateHolderWithNode<Node, readonly Node[]>) {
+      return renderFSvg(tag as any, {
+        ...propsOf(arg),
         children() {
           renderChildren(children, this)
         },
@@ -62,6 +81,23 @@ export const dom: { readonly [tag: string]: TagFactory } = new Proxy(
       if (!fn) {
         fn = makeTagFn(tag)
         tagFns.set(tag, fn)
+      }
+      return fn
+    },
+  },
+)
+
+const svgTagFns = new Map<string, TagFactory>()
+
+export const svg: { readonly [tag: string]: TagFactory } = new Proxy(
+  Object.create(null) as Record<string, TagFactory>,
+  {
+    get(_target, tag) {
+      if (typeof tag !== 'string') return undefined
+      let fn = svgTagFns.get(tag)
+      if (!fn) {
+        fn = makeSvgTagFn(tag)
+        svgTagFns.set(tag, fn)
       }
       return fn
     },
