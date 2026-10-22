@@ -5,6 +5,8 @@
 ## 定位与原则
 
 - **不是桌面 IDE**，是记事本 App：笔记（IndexedDB）→ 编辑 → 运行。
+- 响应式布局：移动端「列表 ⇄ 编辑器」单页切换；桌面端（≥768px，`md` 断点）左侧列表 + 右侧编辑器并排，编辑器默认可编辑、不显示符号快捷条（`Editor.tsx` 的 `useIsDesktop`）。
+- 部署：GitHub Pages `/ooc/playground/`（`vite.config.ts` 用 `OOC_BASE` 注前缀，hash 路由无需回退），由根 `.github/workflows/deploy.yml` 自动发布。
 - 执行结果是「行为」而不是「弹窗」：通过注入的宿主桥接对象持久改变这个 App（类似 Smalltalk）。
 - 运行时不拦截类型错误：解释器跑通即可，类型诊断只作提示（黄条），不阻断运行。
 - 复用 `object-oriented-c-language`（本仓库 `packages/language`）的 interpret + type-check，**不重复实现语言逻辑**。

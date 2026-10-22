@@ -10,6 +10,7 @@ on:
       - 'packages/vite-plugin-ooc/**'
       - 'packages/ooc-mve-bridge/**'
       - 'packages/example/**'
+      - 'packages/playground/**'
       - 'packages/base/**'
       - 'package.json'
       - 'package-lock.json'
@@ -88,6 +89,11 @@ jobs:
         env:
           OOC_BASE: /ooc/example/
 
+      - name: Build playground
+        run: npm run --workspace packages/playground build
+        env:
+          OOC_BASE: /ooc/playground/
+
       - name: Install docs dependencies
         working-directory: docs
         run: npm ci
@@ -96,11 +102,12 @@ jobs:
         working-directory: docs
         run: npm run build
 
-      # 同一个 Pages 站点：docs 占根路径，example 放到 /ooc/example/。
-      - name: Add example to docs site
+      # 同一个 Pages 站点：docs 占根路径，example 放到 /ooc/example/，playground 放到 /ooc/playground/。
+      - name: Add example and playground to docs site
         run: |
-          mkdir -p docs/doc_build/example
+          mkdir -p docs/doc_build/example docs/doc_build/playground
           cp -R packages/example/dist/. docs/doc_build/example/
+          cp -R packages/playground/dist/. docs/doc_build/playground/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

@@ -26,6 +26,15 @@ npm run build -w packages/playground  # 产物在 packages/playground/dist
 npm run preview -w packages/playground
 ```
 
+## 部署
+
+随 `.github/workflows/deploy.yml` 自动发布到 GitHub Pages：<https://wy2010344.github.io/ooc/playground/>。
+构建时用 `OOC_BASE=/ooc/playground/` 注入资源前缀；路由是 hash 定位（`#/note/xxx`），Pages 上无需 404 回退。
+
+## 桌面端适配
+
+移动端保持「列表 ⇄ 编辑器」单页切换；桌面端（≥768px）为左侧笔记列表 + 右侧编辑器的并排布局，编辑器默认可编辑，不显示虚拟键盘符号快捷条。
+
 ## 怎么玩
 
 内置三条演示笔记（首次打开自动播种）：

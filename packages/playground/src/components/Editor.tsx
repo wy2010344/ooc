@@ -33,8 +33,11 @@ export function Editor({ nb, note }: Props) {
   const [renameErr, setRenameErr] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
-  // 编辑器默认只读：阅读/滚动不弹键盘，点按正文也不解锁；编辑经菜单「解除只读」
-  const [readOnly, setReadOnly] = useState(true)
+  // 桌面端（md+，与 Tailwind 断点一致）：列表常驻侧边、无虚拟键盘，
+  // 不需要移动端那套「默认只读 + 符号快捷条」
+  const isDesktop = useIsDesktop()
+  // 编辑器默认只读：移动端阅读/滚动不弹键盘，编辑经菜单「解除只读」；桌面端默认可编辑
+  const [readOnly, setReadOnly] = useState(() => !isDesktop)
   const [wrap, setWrap] = useState(false)
   const codeRef = useRef<CodeAreaHandle>(null)
   const [codeFocused, setCodeFocused] = useState(false)
@@ -152,13 +155,13 @@ export function Editor({ nb, note }: Props) {
   const hasDiagnostics = (result?.diagnostics.length ?? 0) > 0
 
   return (
-    <div className="mx-auto flex h-dvh w-full max-w-xl flex-col overflow-hidden bg-stone-100 dark:bg-zinc-950">
+    <div className="mx-auto flex h-dvh w-full max-w-xl flex-col overflow-hidden bg-stone-100 dark:bg-zinc-950 md:mx-0 md:max-w-none">
       {/* 顶栏 */}
       <header className="sticky top-0 z-20 flex shrink-0 items-center gap-1 border-b border-stone-200/70 bg-stone-100/90 px-2 py-2 backdrop-blur dark:border-zinc-800/70 dark:bg-zinc-950/90">
         <button
           onClick={() => nb.setActive(null)}
           aria-label="返回列表"
-          className="rounded-full p-2 text-stone-600 transition-colors active:bg-stone-200 dark:text-zinc-400 dark:active:bg-zinc-800"
+          className="rounded-full p-2 text-stone-600 transition-colors active:bg-stone-200 dark:text-zinc-400 dark:active:bg-zinc-800 md:hidden"
         >
           <ArrowLeft size={20} />
         </button>
@@ -293,10 +296,14 @@ export function Editor({ nb, note }: Props) {
         />
       )}
 
-      {/* 代码区（聚焦时底部留出快捷条高度，避免行被盖住） */}
+      {/* 代码区（聚焦时底部留出快捷条高度，避免行被盖住；桌面端无快捷条不留） */}
       <main
         className="min-h-0 flex-1"
-        style={codeFocused ? { paddingBottom: QUICK_KEYS_BAR_H } : undefined}
+        style={
+          codeFocused && !isDesktop
+            ? { paddingBottom: QUICK_KEYS_BAR_H }
+            : undefined
+        }
       >
         <CodeArea
           key={note.name}
@@ -358,8 +365,8 @@ export function Editor({ nb, note }: Props) {
         </section>
       )}
 
-      {/* 键盘上方的符号快捷条（跟随视口收缩，聚焦时显示） */}
-      {codeFocused && (
+      {/* 键盘上方的符号快捷条（跟随视口收缩，聚焦时显示；仅移动端） */}
+      {codeFocused && !isDesktop && (
         <QuickKeysBar
           top={barTop}
           onInsert={(s) => codeRef.current?.insert(s)}
@@ -377,4 +384,18 @@ function OutputRow({ value }: { value: string }) {
       {value}
     </pre>
   )
+}
+
+/** 是否桌面端宽度（md 断点 768px）：监听窗口缩放实时切换 */
+function useIsDesktop() {
+  const [desktop, setDesktop] = useState(
+    () => window.matchMedia('(min-width: 768px)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    const onChange = () => setDesktop(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return desktop
 }

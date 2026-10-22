@@ -20,7 +20,17 @@ export function App() {
   if (!ready) return null
 
   if (activeNote) {
-    return <Editor nb={nb} note={activeNote} />
+    // 桌面端（md+）：左侧固定列表 + 右侧编辑器并排；移动端保持单页切换
+    return (
+      <div className="md:flex">
+        <aside className="hidden md:block md:h-dvh md:w-80 md:shrink-0 md:overflow-y-auto md:border-r md:border-stone-200/70 md:dark:border-zinc-800/70">
+          <NoteList nb={nb} />
+        </aside>
+        <div className="min-w-0 flex-1">
+          <Editor nb={nb} note={activeNote} />
+        </div>
+      </div>
+    )
   }
   return <NoteList nb={nb} />
 }

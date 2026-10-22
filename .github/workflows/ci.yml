@@ -1,0 +1,76 @@
+name: CI
+
+# 只跑测试与类型检查：徽章挂在真实运行结果上，不写死「NNN tests passing」。
+# 本地依赖 ../es-pseudo-monorepo（mve / wy-helper 的兄弟仓库），CI 按同样目录结构 clone 还原。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与根 package.json 的 volta.node 一致；24.x 才有原生 TS 类型剥离，
+          # 否则 cli 里依赖它的 20 个用例会被跳过（本地 Node 22 就是这种情况）。
+          node-version: 24.15.0
+          cache: npm
+
+      - name: Clone sibling workspace
+        run: |
+          git clone --depth 1 https://github.com/wy2010344/es-pseudo-monorepo.git ../es-pseudo-monorepo
+          git clone --depth 1 https://github.com/wy2010344/mve.git ../es-pseudo-monorepo/packages/mve
+          git clone --depth 1 https://github.com/wy2010344/wy-helper.git ../es-pseudo-monorepo/packages/wy-helper
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.3.0
+          run_install: false
+
+      # --ignore-scripts 跳过 prepare：grammar 还没生成，example 现在构建会失败。
+      # 必须先执行：npm ci 会清理兄弟仓库里的嵌套 node_modules。
+      - name: Install workspace dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build sibling packages
+        working-directory: ../es-pseudo-monorepo
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm \
+            --filter mve-core \
+            --filter mve-dom \
+            --filter mve-helper \
+            --filter mve-dom-helper \
+            --filter mve-three \
+            --filter wy-helper \
+            --filter wy-dom-helper \
+            run build
+
+      - name: Generate ooc grammar
+        run: npm run langium:generate
+
+      # language（node:test）+ cli（先 tsc 再跑编译产物），根脚本已串好。
+      - name: Run tests
+        run: npm test
+
+      - name: Type-check OOC toolchain
+        run: >-
+          npx tsc -b
+          packages/language/tsconfig.src.json
+          packages/ooc-mve-bridge/tsconfig.json
+          packages/cli/tsconfig.json
+          packages/vite-plugin-ooc/tsconfig.json
+
+      # README 与 docs/guide 里的 ```ooc 示例跑同一套类型检查：
+      # 少一个 `;` 就会把两条语句并成一条消息链，靠人眼是看不出来的。
+      - name: Check documentation snippets
+        run: npm run test:docs

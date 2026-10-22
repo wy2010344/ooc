@@ -23,3 +23,6 @@ generated/
 packages/**/src/**/*.js
 packages/playground/test/**/*.js
 
+
+# 本地 agent 工作区（记忆/临时脚本），不入库
+.workbuddy/
