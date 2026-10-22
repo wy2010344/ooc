@@ -1977,13 +1977,33 @@ export class ObjectOrientedCTypeChecker {
           this.bindParam(p, bodyEnv, accept, applySig?.params[i]),
         )
       }
-      let returns: TypeInfo = nilType
-      for (const stmt of e.expressions) {
-        if (isAssignment(stmt)) {
-          this.checkAssignment(stmt, bodyEnv, accept)
-        } else {
-          returns = this.inferExpression(stmt, bodyEnv, accept)
+      const returnOf = (stmts: Array<Expression | Assignment>, targetEnv: TypeEnv): TypeInfo => {
+        let t: TypeInfo = nilType
+        for (const stmt of stmts) {
+          if (isAssignment(stmt)) {
+            this.checkAssignment(stmt, targetEnv, accept)
+            t = nilType
+          } else {
+            t = this.inferExpression(stmt, targetEnv, accept)
+          }
         }
+        return t
+      }
+      let returns = returnOf(e.expressions, bodyEnv)
+      // lambda 的 #guard 分支：条件先推断（暴露引用错误），各分支是独立作用域。
+      const branchReturns: TypeInfo[] = []
+      for (const branch of e.guardBranches) {
+        this.inferExpression(branch.guardExpression, bodyEnv, accept)
+        branchReturns.push(returnOf(branch.stmts, bodyEnv.child()))
+      }
+      const elseBranch = e.elseBranch
+      if (elseBranch) {
+        branchReturns.push(returnOf(elseBranch.stmts, bodyEnv.child()))
+      }
+      if (branchReturns.length === 1) {
+        returns = branchReturns[0]!
+      } else if (branchReturns.length > 1) {
+        returns = { kind: 'union', types: branchReturns }
       }
       const t: ObjectTypeInfo = {
         kind: 'object',

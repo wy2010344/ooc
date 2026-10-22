@@ -403,6 +403,19 @@ describe('真实示例无类型告警', () => {
     expect(messages(diags)).toEqual([])
   })
 
+  test('lambda 支持 #guard / #else 分支', async () => {
+    const diags = await diagnostics(`
+        f = [x: number =>
+            #guard x > 0;
+            x
+            #else;
+            0 - x
+        ];
+        f $ 5
+    `)
+    expect(messages(diags)).toEqual([])
+  })
+
   test('lambda 与 $ 对象在实参位置双向兼容（同像）', async () => {
     const diags = await diagnostics(`
         Callback #type { $(x: number): number };

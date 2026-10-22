@@ -97,6 +97,23 @@ obj
   }
 })
 
+test('lambda 的 #guard / #else 分支可编译并执行', async (t) => {
+  const { ts: tsPath } = await compileSource('lambdaguard', `
+f = [x =>
+    #guard x > 0;
+    x
+    #else;
+    0 - x
+];
+Array of (f $ 5) (f $ (0 - 3))
+`)
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  if (JSON.stringify(mod.default) !== JSON.stringify([5, 3])) {
+    throw new Error(`lambda guard 求值应为 [5,3]，实际 ${JSON.stringify(mod.default)}`)
+  }
+})
+
 test('跨模块 import + 宿主模块 import：storage ref 与 loop 组合', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(path.join(dir, 'loop.ooc'), LOOP_SRC, 'utf-8')

@@ -92,8 +92,6 @@ const commonMethods: Map<string, MethodSig[]> = new Map([
   ['not', [builtinMethod([], booleanType)]],
   // include：容器成员判定（类/数组/Set/Map 统一），返回布尔
   ['include', [builtinMethod([anyType], booleanType)]],
-  // send：动态派发——`receiver send name ...args`，返回值类型不可静态确定
-  ['send', [builtinMethod([anyType], anyType, anyType)]],
 ])
 
 export function getBuiltinMethods(typeName: string): Map<string, MethodSig[]> {

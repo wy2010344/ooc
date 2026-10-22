@@ -17,6 +17,7 @@ import {
 import { interpret, type InterpretAction, consumeErrorPosition } from './evaluate.js'
 import { OocCircularImportError } from './errors.js'
 import { type Globals, withGlobals } from './scope.js'
+import { graftTemplates, makeHoleParser } from '../template-graft.js'
 import {
   codeOfDiagnostic,
   collectConfigGlobalsFromText,
@@ -125,6 +126,11 @@ export function createInterpretAction(
 ) {
   const services = createObjectOrientedCServices(context).ObjectOrientedC
   const fs = context.fileSystemProvider(services.shared)
+  // getOrCreateDocument 是「创建即解析」：它不经过 DocumentBuilder 的 Parsed 阶段，
+  // 挂在那里的模版 graft 不会跑，所以解释器这条路要自己补一次。
+  const parseHole = makeHoleParser((source) =>
+    services.parser.LangiumParser.parse(source),
+  )
   function interpretPath(
     rawName: string,
     basePath?: string,
@@ -172,7 +178,9 @@ export function createInterpretAction(
     if (syntax) {
       throw syntax
     }
-const model = document.parseResult.value as Model
+    const model = document.parseResult.value as Model
+    // 文件走解释器时补 graft（幂等：按 CST 原文重算整份 parts）
+    graftTemplates(model, parseHole)
     const importAction: InterpretAction = (name, basePath) =>
       interpretPath(name, basePath, importChain)
     try {

@@ -17,7 +17,7 @@ import {
   sendMessageWith,
   interpretMessageArgs,
   bindMethod,
-  runBody,
+  runStatementsWithGuards,
 } from './runtime.js'
 import { addScope, getScope, type Scope } from './scope.js'
 import { templateStringify } from '../template.js'
@@ -242,7 +242,12 @@ function createLambdaValue(e: LambdaDef, scope: Scope): Function {
   // 箭头式：函数体始终在自己的作用域 + 参数作用域中求值，self 即函数本身
   const fn = function (...args: unknown[]) {
     const s = bindMethod(e, scope, fn, args)
-    return runBody(e.expressions, s)
+    return runStatementsWithGuards(
+      e.expressions,
+      e.guardBranches,
+      e.elseBranch ?? undefined,
+      s,
+    )
   }
   return fn
 }

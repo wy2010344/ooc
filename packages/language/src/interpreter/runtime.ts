@@ -1,6 +1,8 @@
 import { literalOfBindBody, literalToValue } from '../member-kind.js'
 import {
+  ElseBranch,
   Expression,
+  GuardBranch,
   Method,
   MethodCallName,
   MethodDefName,
@@ -183,12 +185,39 @@ export function objectValue(methods: Method[], scope: Scope) {
 }
 
 /**
- * 执行一个方法体，支持 #guard 分支链（if / else-if / else 语义）：
- *   先执行 #guard 之前的语句（赋值更新作用域，表达式求值有副作用），
+ * 执行带 #guard 分支链的函数体（方法体 / lambda 共用，if / else-if / else 语义）：
+ *   先执行分支前的语句（赋值更新作用域，表达式求值有副作用），
  *   再进入分支判别：命中即执行该分支语句并返回；
  *   全不命中则执行 #else 分支（无 #else 时返回 nil）；
  *   无分支时返回前置语句最后一条的值（与 runBody 一致）。
  */
+export function runStatementsWithGuards(
+  stmts: Array<Expression | Statement>,
+  guardBranches: GuardBranch[],
+  elseBranch: ElseBranch | undefined,
+  s: Scope,
+): unknown {
+  let scope = s
+  let last: unknown = null
+  for (const e of stmts) {
+    if (e.$type === 'Assignment') {
+      scope = addScope(scope, e.name, interpretExpression(e.expression, scope))
+    } else {
+      last = interpretExpression(e, scope)
+    }
+  }
+  if (guardBranches.length === 0 && !elseBranch) {
+    return last
+  }
+  for (const branch of guardBranches) {
+    if (interpretExpression(branch.guardExpression, scope)) {
+      return runBody(branch.stmts as Expression[], scope)
+    }
+  }
+  return elseBranch ? runBody(elseBranch.stmts as Expression[], scope) : null
+}
+
+/** 方法体的 #guard 入口：绑定参数后交给共用执行器。 */
 function runGuardedBody(
   method: MethodAll,
   scope: Scope,
@@ -196,28 +225,13 @@ function runGuardedBody(
   args: unknown[],
 ): unknown {
   const body = method.body
-  let s = bindMethod(method, scope, receiver, args)
-  const preStmts = (body?.stmts ?? []) as Array<Expression | Statement>
-  let last: unknown = null
-  for (const e of preStmts) {
-    if (e.$type === 'Assignment') {
-      s = addScope(s, e.name, interpretExpression(e.expression, s))
-    } else {
-      last = interpretExpression(e, s)
-    }
-  }
-  const branches = body?.guardBranches ?? []
-  if (branches.length === 0 && !body?.elseBranch) {
-    return last
-  }
-  for (const branch of branches) {
-    if (interpretExpression(branch.guardExpression, s)) {
-      return runBody(branch.stmts as Expression[], s)
-    }
-  }
-  return body?.elseBranch
-    ? runBody(body.elseBranch.stmts as Expression[], s)
-    : null
+  const s = bindMethod(method, scope, receiver, args)
+  return runStatementsWithGuards(
+    (body?.stmts ?? []) as Array<Expression | Statement>,
+    [...(body?.guardBranches ?? [])],
+    body?.elseBranch,
+    s,
+  )
 }
 
 export function getMethodCallName({ value }: MethodCallName) {
@@ -306,14 +320,14 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     }
     return o[value]
   }
-  // send：通用消息——把「接收者 + 消息名 + 参数」交回运行时动态派发。
-  // 任意值都可接收：`map send 'key'` ≡ 读取 map 上的 key（等价 JS 的 map[key]）。
-  // 参数约定同 js send：唯一数组参数视为完整参数列表（便于 rest 转发）。
-  if (value === 'send') {
-    const name = args[0]
-    const params =
-      args.length === 2 && Array.isArray(args[1]) ? args[1] : args.slice(1)
-    return sendMessage(o, String(name), params)
+  // 动态消息名（Smalltalk perform: 的等价物）是 Object 这个类对象的专属消息：
+  //   Object send 目标 '名字' 实参…   ≡ 给「目标」发一条名叫「名字」的消息
+  // 只有 Object 响应它——普通对象不响应 send，消息链里不会出现隐式的第二套派发。
+  // 唯一数组实参视为完整实参列表，便于把 rest 原样转发。
+  if (value === 'send' && o === Object) {
+    const [target, name, ...rest] = args
+    const params = rest.length === 1 && Array.isArray(rest[0]) ? rest[0] : rest
+    return sendMessage(target, String(name), params)
   }
   const num = numDef[value as '<']
   if (num) {

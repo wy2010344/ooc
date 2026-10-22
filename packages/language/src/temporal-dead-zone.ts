@@ -22,6 +22,7 @@ import type {
   Ref,
 } from './generated/ast.js'
 import { diagnosticData } from './diagnostics-config.js'
+import { holeDocOffset } from './template-offsets.js'
 
 /**
  * 同作用域内的暂时性死区（TDZ）检查：直接引用出现在声明之前时报错。
@@ -199,6 +200,23 @@ function walkLambda(lambda: LambdaDef, accept: ValidationAcceptor): void {
     if (isAssignment(stmt)) scope.declare(stmt)
   }
   walkStatements(lambda.expressions, scope, accept)
+
+  for (const branch of lambda.guardBranches) {
+    const branchScope = new TdzScope(scope)
+    for (const stmt of branch.stmts) {
+      if (isAssignment(stmt)) branchScope.declare(stmt)
+    }
+    walkExpression(branch.guardExpression, branchScope, undefined, accept)
+    walkStatements(branch.stmts, branchScope, accept)
+  }
+
+  if (lambda.elseBranch) {
+    const elseScope = new TdzScope(scope)
+    for (const stmt of lambda.elseBranch.stmts) {
+      if (isAssignment(stmt)) elseScope.declare(stmt)
+    }
+    walkStatements(lambda.elseBranch.stmts, elseScope, accept)
+  }
 }
 
 /** 绑定块：延迟执行，内部自成一作用域 */
@@ -243,7 +261,9 @@ function checkRef(
     if (!declaration) continue
     // 自引用已由 scope-duplicates 报告，避免同级重复报错
     if (declaration.node === self) return
-    const refOffset = ref.$cstNode?.offset ?? 0
+    // 模板洞内的子 AST 使用洞源码的相对偏移，需换算回文档绝对偏移，
+    // 否则洞内引用会被误判成位于文首（声明之前）。
+    const refOffset = holeDocOffset(ref) ?? ref.$cstNode?.offset ?? 0
     if (declaration.offset > refOffset) {
       accept(
         'error',

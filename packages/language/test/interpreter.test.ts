@@ -540,6 +540,38 @@ good = 3;`
     }
   })
 
+  test('send 是 Object 的专属消息：Object send 目标 名字 实参', async () => {
+    expect(
+      await interpreter.interpret(`
+            obj = { k = 42, add(a, b) => a + b };
+            Object send obj 'add' 1 2
+        `),
+    ).toBe(3)
+    // 唯一数组实参原样当实参列表（便于转发 rest）
+    expect(
+      await interpreter.interpret(`
+            obj = { add(a, b) => a + b };
+            Object send obj 'add' (Array of 20 22)
+        `),
+    ).toBe(42)
+    // 属性读取同样按名字分发
+    expect(
+      await interpreter.interpret(`
+            obj = { k = 42 };
+            Object send obj 'k'
+        `),
+    ).toBe(42)
+  })
+
+  test('普通对象不响应 send：动态派发只挂在 Object 上', async () => {
+    await expect(
+      interpreter.interpret(`
+            obj = { m(a) => a };
+            obj send 'm' 5
+        `),
+    ).rejects.toThrow('没有定义该方法 send')
+  })
+
   test('lambda 表达式函数体', async () => {
     const result = await interpreter.interpret(`
             f = [x => x + 1];
@@ -587,6 +619,33 @@ good = 3;`
             f $ 20
         `)
     expect(result).toBe(42)
+  })
+
+  test('lambda #guard 分支', async () => {
+    const result = await interpreter.interpret(`
+            f = [x =>
+                #guard x > 0;
+                x
+                #else;
+                0 - x
+            ];
+            Array of (f $ 5) (f $ (0 - 3))
+        `)
+    expect(result).toEqual([5, 3])
+  })
+
+  test('lambda #guard 前的赋值对条件与分支可见', async () => {
+    const result = await interpreter.interpret(`
+            f = [x =>
+                t = x * 2;
+                #guard t > 10;
+                t + 1
+                #else;
+                t
+            ];
+            Array of (f $ 3) (f $ 8)
+        `)
+    expect(result).toEqual([6, 17])
   })
 
   test('lambda 闭包捕获', async () => {

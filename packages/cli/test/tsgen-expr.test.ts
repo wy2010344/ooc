@@ -145,7 +145,7 @@ test('if / unless / and / or 惰性：未命中的 lambda 不执行', async (t) 
 test('send 动态消息：编译产物运行时支持按名字 + 实参列表分发', async (t) => {
   const { ts: tsPath, dir } = await compileSource('send', `
 obj = { k = 42, add(a, b) => a + b };
-{ read = (obj send 'k'), call = (obj send 'add' 1 2), list = (obj send 'add' (Array of 1 2)) }
+{ read = (Object send obj 'k'), call = (Object send obj 'add' 1 2), list = (Object send obj 'add' (Array of 1 2)) }
 `)
   if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
   const mod = await import(pathToFileURL(tsPath).href)

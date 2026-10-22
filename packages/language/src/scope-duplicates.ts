@@ -44,6 +44,19 @@ export function checkScopeDuplicates(model: Model, accept: ValidationAcceptor): 
       for (const stmt of node.expressions) {
         declareStatement(scope, stmt)
       }
+      // 与对象方法一致：#guard / #else 分支各自是独立块作用域。
+      for (const branch of node.guardBranches) {
+        const branchScope = new ScopeReporter(accept)
+        for (const stmt of branch.stmts) {
+          declareStatement(branchScope, stmt)
+        }
+      }
+      if (node.elseBranch) {
+        const elseScope = new ScopeReporter(accept)
+        for (const stmt of node.elseBranch.stmts) {
+          declareStatement(elseScope, stmt)
+        }
+      }
     }
   }
 }

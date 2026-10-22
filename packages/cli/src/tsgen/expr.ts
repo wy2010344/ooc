@@ -357,5 +357,14 @@ function lambdaDefCode(e: any): string {
     params.push(`${p.name}${typeAnnot(p.typeAnnotation) || ': any'}`)
   }
   if (e.restParam) params.push(`...${e.restParam.name}${restTypeAnnot(e.restParam.typeAnnotation)}`)
-  return `(function(${params.join(', ')}){ ${bodyCode(e.expressions ?? [])} })`
+  const guards = e.guardBranches ?? []
+  const body =
+    guards.length > 0
+      ? guardedBodyCode({
+          stmts: e.expressions ?? [],
+          guardBranches: guards,
+          elseBranch: e.elseBranch,
+        })
+      : bodyCode(e.expressions ?? [])
+  return `(function(${params.join(', ')}){ ${body} })`
 }

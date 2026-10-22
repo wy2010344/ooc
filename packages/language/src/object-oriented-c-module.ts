@@ -25,6 +25,7 @@ import { ObjectOrientedCDefinitionProvider } from './object-oriented-c-definitio
 import { ObjectOrientedCReferencesProvider } from './object-oriented-c-references-provider.js'
 import type { TypeInfo } from './type-system.js'
 import { graftTemplates, makeHoleParser } from './template-graft.js'
+import { ObjectOrientedCTokenBuilder } from './token-builder.js'
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -51,6 +52,10 @@ export const ObjectOrientedCModule: Module<
   ObjectOrientedCServices,
   PartialLangiumServices & ObjectOrientedCAddedServices
 > = {
+  parser: {
+    // STRING 换成能感知 `${}` 深度的自定义 matcher（洞内允许再写单引号字符串）
+    TokenBuilder: () => new ObjectOrientedCTokenBuilder(),
+  },
   validation: {
     ObjectOrientedCValidator: (services) =>
       new ObjectOrientedCValidator(services),

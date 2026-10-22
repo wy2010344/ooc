@@ -326,6 +326,28 @@ describe('Validating', () => {
     expect(outputOf(document)).not.toContain('暂时性死区')
   })
 
+  test('模板洞内引用按文档偏移判断 TDZ', async () => {
+    document = await parse(`
+            f = [x =>
+                p = x;
+                '\${p toFixed 1}%'
+            ];
+            f $ 1
+        `)
+    expect(outputOf(document)).not.toContain('暂时性死区')
+  })
+
+  test('模板洞内仍能检出真正的先使用后声明', async () => {
+    document = await parse(`
+            f = [
+                '\${y}';
+                y = 1
+            ];
+            f $
+        `)
+    expect(outputOf(document)).toContain('暂时性死区')
+  })
+
   test('参数已初始化，不报暂时性死区', async () => {
     document = await parse(`
             obj = { fun(x) { x } };

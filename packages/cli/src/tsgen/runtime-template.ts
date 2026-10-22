@@ -84,12 +84,12 @@ export function __send(o: any, value: string, args: any[]): any {
     if (args.length) o[value] = args[0]
     return o[value]
   }
-  // send 是普通消息：拿「对象 + 消息名 + 实参列表」在运行时动态分发。
-  // 约定同解释器 runtime.ts：第二个实参是数组时视为实参列表，否则其余实参即列表。
-  if (value === 'send') {
-    const name = args[0]
-    const params = args.length === 2 && Array.isArray(args[1]) ? args[1] : args.slice(1)
-    return __send(o, String(name), params)
+  // 动态消息名是 Object 的专属消息：Object send 目标 '名字' 实参…
+  // 约定同解释器 runtime.ts：唯一数组实参视为完整实参列表，否则其余实参即列表。
+  if (value === 'send' && o === Object) {
+    const [target, name, ...rest] = args
+    const params = rest.length === 1 && Array.isArray(rest[0]) ? rest[0] : rest
+    return __send(target, String(name), params)
   }
   const num = OOC_NUM_DEF[value]
   if (num) return num(o, args[0])

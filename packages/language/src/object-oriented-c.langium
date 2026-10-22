@@ -195,10 +195,13 @@ ObjectDef:
 //  [a, b => a + b]       多参数，逗号分割，参数可带类型注解
 //  [x => y = x + 1; y*2] 函数体为分号分割的多条语句（与方法体一致）
 //  [42]                  无参 lambda，函数体为表达式
+//  [x => #guard x > 0; x #else; -x]  lambda 也支持 #guard / #else 分支链
 LambdaDef:
     '['
         (ParamAll '=>')?
         (expressions+=Statement (';' expressions+=Statement)* ';'?)?
+        (guardBranches+=GuardBranch)*
+        (elseBranch=ElseBranch)?
     ']';
 
 ComplexPrimary:
@@ -209,9 +212,10 @@ Primary:
 
 Ref:
     value=ID;
-// 字符串字面量：单引号整段作为单个 token 解析；含 ${表达式}（模版）时，由解析后的
+// 字符串字面量：单引号整段作为单个 token；含 ${表达式}（模版）时，由解析后的
 // graft 子解析洞并填充 parts（见 template-graft.ts）——Langium 无 lexer mode，词法层
-// 无法切分「文本 vs 代码」，故整段交给一个 token，洞在 parse 后再解析。
+// 不切分「文本 vs 代码」，但**到哪里收尾**由自定义 matcher 算准（见 token-builder.ts：
+// 洞内可以再写单引号字符串），洞仍留到 parse 之后再解析。
 Str:
     value=STRING parts+=TemplatePart*;
 TemplatePart:
@@ -232,7 +236,8 @@ Nil:
 hidden terminal WS: /\s+/;
 terminal CAST: /#as/;
 terminal BOOL: /true|false/;
-//允许了转义
+// 允许了转义。注意：实际词法不用这条正则，而是 token-builder.ts 里认 ${} 深度的自定义
+// matcher（洞内可写单引号）；这里保留正则供 Langium 工具链分析（如关键字前缀判断）。
 terminal STRING: /'(\\.|[^'\\])*'/;
 // 仅为生成 TemplateText 的 AST 类型而声明；实际永不匹配（文本段由 graft 生成，源码不含 NUL）。
 terminal TEMPLATE_TEXT: /\u0000/;
