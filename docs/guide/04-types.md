@@ -5,8 +5,8 @@
 ## 变量注解
 
 ```ooc
-x: Number = 42
-greet: string = 'hi'
+x: number = 42;
+greet: string = 'hi';
 ```
 
 ## 类型别名 `#type`
@@ -18,7 +18,8 @@ Animal #type { speak: string };
 ## 联合类型
 
 ```ooc
-Value: Number | string
+// 注解写在名字后面，值照常赋
+Value: number | string = 'hi';
 ```
 
 ## 字面量类型与可区分联合
@@ -30,7 +31,7 @@ Circle #type { kind: 'circle', radius: number };
 Square #type { kind: 'square', side: number };
 
 // 字面量可以直接注解变量
-shape: 'circle' | 'square' = 'circle'
+shape: 'circle' | 'square' = 'circle';
 
 // 用 guard 判别收窄：guard 通过后 s 的类型自动收窄为对应成员
 area = {
@@ -43,7 +44,7 @@ area = {
         nil                               // 末尾兜底
     }
 };
-area calc { kind = 'circle', radius = 3 }   // 28.26
+area calc { kind = 'circle', radius = 3 };   // 28.26
 ```
 
 - 判别测试支持 `==` 与 `!=`（`#guard (s kind) != 'circle'` 收窄为其余成员）
@@ -55,6 +56,7 @@ area calc { kind = 'circle', radius = 3 }   // 28.26
 
 方法体用**同一个参数**做 `#guard` 判别时，检查器会枚举联合成员，**缺一个成员的分支报「可区分联合覆盖不全」**（`unionUncovered`）。级别按有无兜底分流：**没有 `#else` 时是错误**（运行时全不命中会静默返回 nil，与声明的返回类型不符）；有 `#else` 兜底时维持警告（运行时安全）。`#else` 兜底段本身不做判别：
 
+<!-- ooc-check: warning — 类型定义取自上文的 Circle / Square，本块只演示覆盖检查 -->
 ```ooc
 // 联合是 Circle | Square，却只有 circle 一个判别分支 →
 // 有 #else：警告：方法 'area' 的可区分联合覆盖不全：联合成员 Square 没有对应的 #guard 判别分支
@@ -65,7 +67,7 @@ area = {
         #else;
         nil    // 末尾兜底：运行时兜底，不算判别
     }
-}
+};
 ```
 
 - `!=` 判别同样计入覆盖（`#guard (s kind) != 'circle'` 覆盖其余成员）。
@@ -74,6 +76,7 @@ area = {
 - **else-if 链收窄**：每条分支都看到「前序条件为假」的基准类型——`== 'circle'` 通过后剔除 Circle，下一条分支（或 `#else`）里参数只剩 Square，专属成员精确可用，不会被上一条分支的收窄结果污染。
 - **分支感知返回**：联合实参调用时返回类型按分支聚合。下面 `area calc shape`（`shape: Circle | Square`）的返回类型是 `number | string`——两个判别分支的返回类型各走各的，而不是只取第一条：
 
+<!-- ooc-check: warning — 末行是故意演示的类型不匹配告警 -->
 ```ooc
 area = {
     calc(s: Circle | Square) {
@@ -86,8 +89,8 @@ area = {
     }
 };
 shape: Circle | Square = { kind = 'circle', radius = 3 };
-r: number | string = area calc shape   // number | string，正确
-bad: string = area calc shape          // 警告：可能命中 number 分支
+r: number | string = area calc shape;   // number | string，正确
+bad: string = area calc shape           // 警告：可能命中 number 分支
 ```
 
 ## 泛型
@@ -110,11 +113,12 @@ b get    // 42
 
 对象字面量方法（含 lambda 回调）和 `#type` 的方法签名都可以声明自己的类型参数 `<T>`，调用时从实参推断：
 
+<!-- ooc-check: warning — 末行是故意演示的类型不匹配告警 -->
 ```ooc
 list = {
     map<T>(f: T): T { f }        // 调用 map 42 时 T 推断为 number
 };
-r: number = list map 42
+r: number = list map 42;
 
 // #type 方法签名同样支持
 Container #type { wrap<T>(x: T): T };
@@ -150,8 +154,8 @@ Callback #type { $(x: number) };
 Processor #type { run(cb: Callback) };
 
 p: Processor = { run(cb) { cb $ 1 } };
-p run { $(x) { x * 2 } }   // 匿名回调对象：x 自动是 number
-p run [x => x + 1]             // lambda 回调：x 自动是 number
+p run { $(x) { x * 2 } };   // 匿名回调对象：x 自动是 number
+p run [x => x + 1]          // lambda 回调：x 自动是 number
 ```
 
 - 支持泛型实例化的回调签名（`forEach(cb: T)` 实例化为 `Callback` 时同样回填）
@@ -160,12 +164,13 @@ p run [x => x + 1]             // lambda 回调：x 自动是 number
 
 ## 检查对象是否符合类型
 
+<!-- ooc-check: warning — 末行是故意演示的类型不匹配告警 -->
 ```ooc
 Animal #type { speak: string };
-animal = { speak = 'voice' };
 
-dog: Animal = { ...animal, bark = 'wang' };   // 通过
-bad: Animal = { bark = 'wang' };              // 警告：缺少 speak
+// 成员可以多、不能少：多出来的 bark 不影响通过
+dog: Animal = { speak = 'voice', bark = 'wang' };   // 通过
+bad: Animal = { bark = 'wang' };                    // 警告：缺少 speak
 ```
 
-类型不符时给出 warning 诊断，代码仍可正常运行。
+类型不符时给出 warning 诊断，代码仍可正常运行。要复用已有对象的成员，走 `merge $` 委托（见[委托组合](./02-objects#委托组合-merge)），普通对象就把成员写全。

@@ -13,6 +13,14 @@ hero:
       text: GitHub
       link: https://github.com/wy2010344/ooc
 features:
+  - title: 在线试玩
+    details: 点开就能写：记事本形态的 Playground，笔记存在本地，点「运行」直接看结果。
+    icon: 🎮
+    link: https://wy2010344.github.io/ooc/playground/
+  - title: 真实界面
+    details: 行情终端 demo——K 线缩放拖动、盘口增量同步、深度图、三栏拖拽，界面代码全部用 OOC 写。
+    icon: 📈
+    link: https://wy2010344.github.io/ooc/example/#/dashboard
   - title: 极简语法
     details: 没有函数调用，只有「给对象发消息」，用空格分隔消息名与参数。
     icon: ⚡

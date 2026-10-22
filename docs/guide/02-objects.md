@@ -8,9 +8,9 @@ calc = {
     sub(a, b) { a - b },     // 方法体，最后一行是返回值
     cached = 1 + 2,          // 计算绑定：惰性求值，首次读取时算一次并缓存
     lazy = @{                // 多语句绑定块：用 @{ 引导（与对象字面量 { } 区分）
-        a = 1,
-        b = 2,
-        a + b               // 最后一条是值
+        a = 1;
+        b = 2;
+        a + b                // 最后一条是值
     }
 };
 ```
@@ -28,7 +28,7 @@ config = {
         r = this radius;
         r * r * 3.14
     },
-    radius => base div 5
+    radius => (this base) div 5
 };
 config area        // → 12.56
 ```
@@ -58,13 +58,14 @@ JS 侧对应形状：字面量绑定是数据属性（`.x` 直读值），计算
 
 `name <= delegate` 把**名字上的所有消息**原样转发给 `delegate` 的 `$` 执行（消息名不传给 `$`，只传实参）：
 
+<!-- ooc-check: warning — 末行是故意的运行时错误演示，只要求不出现语法错误 -->
 ```ooc
 double = { $(v) => v * 2 };
 box = { value <= double };
 
-box value 21     // 42（→ double $ 21）
-box value        // undefined（→ double $，无参）
-box value 1 2    // 会按 $ 的形参匹配（这里 $ 只有 1 参，运行时抛「没有定义该方法」）
+box value 21;    // 42（→ double $ 21）
+box value;       // undefined（→ double $，无参）
+box value 1 2    // 2：实参按 $ 的形参位置匹配，多出的第二个被忽略（类型检查给参数数量告警）
 ```
 
 - 委托对象必须含 `$`（像 lambda 或可调用对象）；没有时类型检查会报错。
@@ -83,12 +84,29 @@ calc = {
 calc inc 3       // 8
 ```
 
+`this` 后面跟的是**一条消息**，不是一条消息链：`this base div 5` 会被解析成「给 `this` 发 `base`，实参是
+`div` 和 `5`」。取到成员后还想继续发消息，要加括号 `(this base) div 5`，或走级联 `this base / div 5`。
+
 ## 剩余参数
 
 ```ooc
 obj = { $(a, ...rest) { rest } };
 obj $ 1 2 3 4        // [2, 3, 4]
 ```
+
+## 动态消息名（Object send）
+
+消息名通常写在源码里，静态上完全可见。少数场景（事件转发、按配置查表）需要**运行时拼出来的名字**，这时用 `Object` 的专属消息 `send`：
+
+```ooc
+obj = { k = 42, add(a, b) => a + b };
+Object send obj 'add' 1 2;     // 3
+Object send obj 'k'            // 42（属性也按名字分发）
+```
+
+只有 `Object` 响应 `send`：动态派发是「关于消息」的操作，不属于对象自身的能力，所以 `obj send 'add' 1 2` 会抛「没有定义该方法 send」。实参列表可以整个作为唯一数组传进来（`Object send obj 'add' (Array of 1 2)`），便于把 `rest` 原样转发。
+
+代价要说清：消息名一旦是运行时值，补全、悬停、跳转都退化为 unknown，类型检查也不参与——这条路是给「静态分析帮不上」的场景留的。
 
 ## 守卫 #guard
 
@@ -105,10 +123,14 @@ f = {
         'small'
     }
 };
-f r 9    // 'big'
-f r 2    // 'small'
-f r -1   // 'neg'
+f r 9;         // 'big'
+f r 2;         // 'small'
+neg = 0 - 1;
+f r neg        // 'neg'
 ```
+
+> **没有一元负号**：`-1` 不是字面量，`f r -1` 会被解析成 `(f r) - 1`，静默得到 `NaN`。
+> 负数写成 `0 - 1` 或先绑定再传。
 
 `#guard` 前的语句对条件与分支可见：
 
@@ -122,8 +144,8 @@ g = {
         t
     }
 };
-g r 8    // 17（t = 16，条件成立）
-g r 3    // 6（t = 6，落入 else）
+g r 8;    // 17（t = 16，条件成立）
+g r 3     // 6（t = 6，落入 else）
 ```
 
 ## 签名方法（TS 式签名类型标注）
@@ -132,8 +154,8 @@ g r 3    // 6（t = 6，落入 else）
 
 ```ooc
 calc = {
-    area(radius: number): number;   // 签名
-    area(radius: string): string;   // 签名
+    area(radius: number): number,   // 签名（成员之间用 , 分隔，和普通方法一致）
+    area(radius: string): string,   // 签名
     area(r) {                       // 实现（运行时按名字落到唯一实现）
         r
     }
@@ -146,14 +168,14 @@ calc = {
 
 ## 委托组合 merge
 
-OOC **没有继承**（没有 `{ ...base }` 原型合并）。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。
+OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。
 
 ```ooc
 defaults = { speak = 'voice', bark = 'wang' };
 spec = { fly = 'fly' };
 w = merge $ spec defaults;
 
-w fly      // 'fly'（spec 自有）
+w fly;     // 'fly'（spec 自有）
 w speak    // 'voice'（转给 defaults）
 ```
 

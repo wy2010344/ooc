@@ -26,6 +26,7 @@ math run 2 3    // 5
 
 没有包安装或包前缀机制：共享源码就是普通文件，按相对路径引用即可。
 
+<!-- ooc-check: skip — 路径依赖所在目录的深度（示例文件在 packages/example/src/ooc/），单独抽出来无法解析 -->
 ```ooc
 // example 里的示例库位于 packages/base/src/loop.ooc
 loop = #import '../../../base/src/loop';
@@ -44,12 +45,19 @@ loop = #import '../../../base/src/loop';
 
 不加花括号时，导入模块的默认导出（最后一条表达式的结果）与全部类型：
 
+被导入的 `geometry.ooc`：
+
 ```ooc
 // geometry.ooc
 Circle #type { kind: 'circle', radius: number };
 Box #type { width: number, height: number };
-{ make: Circle { { kind = 'circle', radius = 3 } } }
+factory = { make: Circle { { kind = 'circle', radius = 3 } } };
+factory
+```
 
+`main.ooc` 里整体导入它：
+
+```ooc
 // main.ooc
 geom = #import 'geometry.ooc';
 c: geom#Circle = geom make;
@@ -66,18 +74,20 @@ b: geom#Box = { width = 10, height = 20 };
 用 `#import { ... } '模块'` 显式导入目标模块的顶层声明，支持别名与多项目，
 类型（`#type`）和值（顶层赋值、导入绑定）都可以导入：
 
-```ooc
-// geometry.ooc
-Circle #type { kind: 'circle', radius: number };
-Box #type { width : number, height: number };
-factory = { make: Circle { { kind = 'circle', radius = 3 } } };
+`geometry.ooc`（同上），`main.ooc` 里按名字导入：
 
+```ooc
 // main.ooc：只导入需要的类型和值
 #import { Circle, factory } 'geometry.ooc';
 c: Circle = factory make;
+```
 
-// 多类型 + 别名
+也可以用别名一次导入多个：
+
+```ooc
+// main.ooc：多类型 + 别名
 #import { Circle as C, Box } 'geometry.ooc';
+#import { factory } 'geometry.ooc';
 c: C = factory make;
 b: Box = { width = 10, height = 20 };
 ```
