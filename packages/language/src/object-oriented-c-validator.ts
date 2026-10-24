@@ -1,6 +1,6 @@
 import { URI } from 'langium'
 import type { ValidationAcceptor, ValidationChecks, ValidationSeverity } from 'langium'
-import { isModel } from './generated/ast.js'
+import { isModel, isObjectSpread } from './generated/ast.js'
 import type {
   ObjectOrientedCAstType,
   ObjectDef,
@@ -259,6 +259,10 @@ function checkMemberNameUniqueness(
 ): void {
   const seen = new Set<string>()
   for (const method of methods) {
+    // 对象展开没有成员名，不参与唯一性检查
+    if (isObjectSpread(method)) {
+      continue
+    }
     // 签名方法（无 body）：只作类型声明，不占名字、不与实现冲突
     if (method.$type === 'MethodAll' && !method.body) {
       continue

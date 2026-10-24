@@ -202,21 +202,20 @@ function typeNameCode(tn: any): string {
  * Object.freeze 保持解释器的「成员只读」语义（字面量＝非 writable 数据属性）。
  */
 export function objectDefCode(obj: any): string {
-  const all: ObjectEntry[] = (obj.methods || [])
+  const entries: ObjectEntry[] = (obj.methods || [])
     .map((m: any) => methodCode(m))
     .filter((e: ObjectEntry | null): e is ObjectEntry => e !== null)
-  if (all.length === 0) return '{}'
-  // 同名成员取首个定义（唯一性由校验器保证）
-  const seen = new Set<string>()
-  const entries = all.filter((e) => {
-    if (seen.has(e.name)) return false
-    seen.add(e.name)
-    return true
-  })
+  if (entries.length === 0) return '{}'
+  // 按书写顺序输出：对象展开 `...base` 用 JS 原生展开，后面的同名成员覆盖前面的，
+  // 与解释器（runtime.ts objectValue 的 spreadInto）语义一致。
   const decls: string[] = []
   const props: string[] = []
   let getterIndex = 0
   for (const e of entries) {
+    if ('spread' in e) {
+      props.push(`...(${e.spread} as any)`)
+      continue
+    }
     if (!('get' in e)) {
       props.push(`${propertyKey(e.name)}: ${e.value}`)
       continue
@@ -235,6 +234,8 @@ export function objectDefCode(obj: any): string {
 }
 
 type ObjectEntry =
+  /** 对象展开：`...base`，按位置并入并允许后面成员覆盖 */
+  | { spread: string }
   /** 数据属性值（字面量/方法/转发函数） */
   | { name: string; value: string }
   /** 计算绑定：惰性求值一次并缓存，编译成对象字面量 getter */
@@ -247,6 +248,10 @@ function propertyKey(name: string): string {
 }
 
 function methodCode(m: any): ObjectEntry | null {
+  // 对象展开不是成员：直接编译成 JS 展开表达式，按位置并入对象字面量
+  if (m.$type === 'ObjectSpread') {
+    return { spread: expressionCode(m.expression) }
+  }
   const name = methodName(m.name)
   switch (m.$type) {
     // 绑定：纯字面量 → 数据属性值（构造期求值一次）；计算式 → getter（首次求值并

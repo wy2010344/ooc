@@ -97,6 +97,24 @@ describe('OOC Interpreter', () => {
     expect(result).toBe(7)
   })
 
+  test('对象展开 ...base：合并属性并允许后写覆盖', async () => {
+    const result = await interpreter.interpret(`
+            base = { a = 1, b = 2, double(x) => x * 2 };
+            obj = { ...base, b = 9, c = 3 };
+            (obj a) + (obj b) + (obj c) + (obj double 4)
+        `)
+    expect(result).toBe(21)
+  })
+
+  test('对象展开 ...base：展开放在后面时覆盖前面的同名成员', async () => {
+    const result = await interpreter.interpret(`
+            base = { n = 2 };
+            obj = { n = 1, ...base };
+            obj n
+        `)
+    expect(result).toBe(2)
+  })
+
   test('字符串拼接', async () => {
     const result = await interpreter.interpret(`
             'hello' + ' world'

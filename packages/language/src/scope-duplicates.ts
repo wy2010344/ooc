@@ -7,6 +7,8 @@ import {
   isLambdaDef,
   isMethodAll,
   isMethodBody,
+  isObjectDef,
+  isObjectSpread,
   isTypeDef,
 } from './generated/ast.js'
 import type { MethodBody, Model } from './generated/ast.js'
@@ -136,13 +138,18 @@ function reserveParams(
  */
 function referencesName(node: AstNode | undefined, name: string): boolean {
   if (!node) return false
+  // 对象展开是构造时立即求值（其余成员/绑定体延迟），要单独检查
+  if (isObjectDef(node)) {
+    return node.methods.some(
+      (m) => isObjectSpread(m) && referencesName(m.expression, name),
+    )
+  }
   if (
     isLambdaDef(node) ||
     isMethodAll(node) ||
     isBindBlock(node) ||
     node.$type === 'MethodBind' ||
-    node.$type === 'MethodBindMutable' ||
-    node.$type === 'ObjectDef'
+    node.$type === 'MethodBindMutable'
   ) {
     return false
   }

@@ -122,10 +122,12 @@ export function objectValue(methods: Method[], scope: Scope) {
     return bind.value
   }
   // 字面量绑定 → 数据属性（构造期求值一次，语义恒定）。定为只读：常量不因
-  // 发消息带参而被改写（与旧 getter 行为一致）。
+  // 发消息带参而被改写（与旧 getter 行为一致）。configurable 让展开/后写的同名
+  // 成员可以覆盖前一个定义（展开的覆盖语义与 JS 一致）。
   const writeValue = (name: string, value: unknown) => {
     Object.defineProperty(obj, name, {
       enumerable: true,
+      configurable: true,
       writable: false,
       value,
     })
@@ -133,16 +135,45 @@ export function objectValue(methods: Method[], scope: Scope) {
   // 方法属性：只读数据函数（每次发消息调用）。成员形态只看 descriptor——
   // getter＝绑定值原样返回，数据函数＝方法调用。
   const writeMethod = (name: string, fn: (...args: unknown[]) => unknown) => {
-    Object.defineProperty(obj, name, { enumerable: true, value: fn })
+    Object.defineProperty(obj, name, {
+      enumerable: true,
+      configurable: true,
+      value: fn,
+    })
   }
+  // 对象展开 `...base`：读取 base 的自有可枚举属性（getter 此时求值一次）后
+  // 作为只读数据属性并入当前对象，后续成员可覆盖。
+  const spreadInto = (source: unknown) => {
+    if (
+      source === null ||
+      (typeof source !== 'object' && typeof source !== 'function')
+    ) {
+      return
+    }
+    for (const key of Object.keys(source)) {
+      writeValue(key, (source as Record<string, unknown>)[key])
+    }
+  }
+  // 同名显式成员派发取首个定义（唯一性由校验器保证）；展开带入的名字不算显式，
+  // 后写的显式成员可以覆盖它。
+  const explicitNames = new Set<string>()
   for (const method of methods) {
-    const name = getObjDefineName(method.name)
-    // 同名成员派发取首个定义（唯一性由校验器保证）：已挂载的名字跳过后续定义，
-    // 否则 defineProperty 会因不可重定义而抛错。签名方法（无 body）不挂载，
-    // 故不会挡住同名的实现方法。
-    if (name === undefined || Object.prototype.hasOwnProperty.call(obj, name)) {
+    if (method.$type === 'ObjectSpread') {
+      spreadInto(interpretExpression(method.expression, scope))
       continue
     }
+    const name = getObjDefineName(method.name)
+    if (name === undefined) {
+      continue
+    }
+    // 签名方法（无 body）是纯书写期类型契约，不挂载也不占名字
+    if (method.$type === 'MethodAll' && !method.body) {
+      continue
+    }
+    if (explicitNames.has(name)) {
+      continue
+    }
+    explicitNames.add(name)
     switch (method.$type) {
       case 'MethodBind': {
         // 纯字面量绑定 → 构造期求值一次写成数据属性；计算绑定 → getter 惰性一次缓存
@@ -154,6 +185,7 @@ export function objectValue(methods: Method[], scope: Scope) {
         const bind: LazyBind = { method, scope, done: false, value: undefined }
         Object.defineProperty(obj, name, {
           enumerable: true,
+          configurable: true,
           get() {
             return lazyValue(bind)
           },
@@ -170,13 +202,9 @@ export function objectValue(methods: Method[], scope: Scope) {
         break
       }
       default: {
-        // 签名方法（无 body）是纯书写期类型契约，运行时无行为，不烧录
-        if (method.$type === 'MethodAll' && !method.body) {
-          break
-        }
-        const m = method as MethodAll
+        // 带体方法：只读数据函数，每次发消息时执行
         writeMethod(name, function (this: unknown) {
-          return runGuardedBody(m, scope, this, Array.from(arguments))
+          return runGuardedBody(method, scope, this, Array.from(arguments))
         })
       }
     }

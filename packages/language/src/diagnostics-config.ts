@@ -127,6 +127,7 @@ export const DIAGNOSTIC_CODES = {
   constMethodBody: 'constMethodBody',
   unionUncovered: 'unionUncovered',
   delegateNotCallable: 'delegateNotCallable',
+  spreadOverrideMismatch: 'spreadOverrideMismatch',
 } as const
 
 /**

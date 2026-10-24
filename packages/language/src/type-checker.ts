@@ -21,6 +21,7 @@ import {
   isNil,
   isNum,
   isObjectDef,
+  isObjectSpread,
   isPiplingExpression,
   isPrimary,
   isRef,
@@ -34,8 +35,9 @@ import {
   type Expression,
   type ImportStatement,
   type Message,
-  type Method,
   type MethodAll,
+  type MethodBind,
+  type MethodBindMutable,
   type MethodDefName,
   type Model,
   type NamedExpression,
@@ -698,14 +700,163 @@ export class ObjectOrientedCTypeChecker {
     accept: ValidationAcceptor,
     objType: ObjectTypeInfo = { kind: 'object', methods: new Map() },
   ): ObjectTypeInfo {
-    for (const method of objDef.methods) {
-      this.collectMethod(method, objType, accept, env)
+    // 展开进来的成员名：后写的显式成员要覆盖它（运行时后写者胜）
+    const fromSpread = new Set<string>()
+    for (const entry of objDef.methods) {
+      if (isObjectSpread(entry)) {
+        const spreadType = this.inferExpression(entry.expression, env, accept)
+        this.mergeSpreadType(objType, spreadType, fromSpread, entry, accept)
+        continue
+      }
+      const name = this.getMethodName(entry.name)
+      // 显式成员覆盖展开来的同名成员时，新类型必须是原类型的子类型
+      // （里氏替换）：来源对象的方法会被复制过来，运行时 this 指向新对象，
+      // 若覆盖后的成员类型不兼容，方法体里的 this 访问就可能失效。
+      const inheritedSigs = fromSpread.delete(name)
+        ? objType.methods.get(name)
+        : undefined
+      if (inheritedSigs) {
+        objType.methods.delete(name)
+      }
+      this.collectMethod(entry, objType, accept, env)
+      if (inheritedSigs) {
+        this.checkSpreadOverride(
+          name,
+          inheritedSigs,
+          objType.methods.get(name) ?? [],
+          entry,
+          accept,
+        )
+      }
     }
     return objType
   }
 
+  /** 把 `...base` 的类型并进当前对象类型：对象成员直接合并，交叉类型逐项展开。 */
+  private mergeSpreadType(
+    objType: ObjectTypeInfo,
+    spreadType: TypeInfo,
+    fromSpread: Set<string>,
+    node: AstNode,
+    accept: ValidationAcceptor,
+  ): void {
+    if (spreadType.kind === 'object') {
+      for (const [name, sigs] of spreadType.methods) {
+        // 后一个展开覆盖前一个展开的同名成员时同样受里氏替换约束
+        const inheritedSigs = fromSpread.has(name)
+          ? objType.methods.get(name)
+          : undefined
+        objType.methods.set(name, sigs)
+        fromSpread.add(name)
+        if (inheritedSigs) {
+          this.checkSpreadOverride(name, inheritedSigs, sigs, node, accept)
+        }
+      }
+      if (spreadType.typeMembers) {
+        objType.typeMembers = new Map([
+          ...(objType.typeMembers ?? []),
+          ...spreadType.typeMembers,
+        ])
+      }
+      return
+    }
+    if (spreadType.kind === 'intersection') {
+      for (const sub of spreadType.types) {
+        this.mergeSpreadType(objType, sub, fromSpread, node, accept)
+      }
+    }
+  }
+
+  /** 展开覆盖检查：actual 必须能当作 inherited 使用（方法参数/返回结构兼容）。 */
+  private checkSpreadOverride(
+    name: string,
+    inherited: MethodSig[],
+    actual: MethodSig[],
+    node: AstNode,
+    accept: ValidationAcceptor,
+  ): void {
+    if (actual.length === 0) {
+      return
+    }
+    // 字面量类型放宽到基础类型再比较：`n = 1` → `n = 2`、`size = 'md'` →
+    // `size = 'lg'` 属于同一家族的正常覆盖，不应因字面量不同而告警；
+    // 真正要抓的是 number→string、方法签名变化这类结构不兼容。
+    const inheritedObj: ObjectTypeInfo = {
+      kind: 'object',
+      methods: new Map([[name, inherited.map((s) => this.widenSig(s))]]),
+    }
+    const actualObj: ObjectTypeInfo = {
+      kind: 'object',
+      methods: new Map([[name, actual.map((s) => this.widenSig(s))]]),
+    }
+    if (isSubtype(actualObj, inheritedObj)) {
+      return
+    }
+    accept(
+      'warning',
+      `展开后被覆盖的成员 '${name}' 类型不兼容：原 ${this.describeSigs(inherited)}，新 ${this.describeSigs(actual)}；来源对象的方法会以新对象为 this 执行，可能失效`,
+      { node, data: diagnosticData('spreadOverrideMismatch') },
+    )
+  }
+
+  /** 覆盖兼容检查前把字面量放宽成基础类型（仅用于比较，不改真实推断结果）。 */
+  private widenSig(sig: MethodSig): MethodSig {
+    return {
+      ...sig,
+      params: sig.params.map((p) =>
+        p ? this.widenLiterals(p) : p,
+      ),
+      rest: sig.rest ? this.widenLiterals(sig.rest) : sig.rest,
+      returns: this.widenLiterals(sig.returns),
+    }
+  }
+
+  private widenLiterals(t: TypeInfo): TypeInfo {
+    switch (t.kind) {
+      case 'literal':
+        return { kind: 'name', name: literalBaseName(t.value) }
+      case 'union':
+        return unionOf(t.types.map((sub) => this.widenLiterals(sub)))
+      case 'intersection':
+        return intersectionOf(
+          t.types.map((sub) => this.widenLiterals(sub)),
+          t.delegation,
+        )
+      case 'object':
+        return {
+          kind: 'object',
+          name: t.name,
+          typeMembers: t.typeMembers,
+          methods: new Map(
+            [...t.methods].map(([name, sigs]) => [
+              name,
+              sigs.map((s) => this.widenSig(s)),
+            ]),
+          ),
+        }
+      default:
+        return t
+    }
+  }
+
+  /** 成员签名 → 可读类型文本（单个签名取最后一个）。 */
+  private describeSigs(sigs: MethodSig[]): string {
+    const sig = sigs[sigs.length - 1]
+    if (!sig) {
+      return 'unknown'
+    }
+    const params = sig.params.map((p) => describeType(p ?? anyType))
+    if (sig.rest) {
+      params.push(`...${describeType(sig.rest)}`)
+    }
+    if (params.length === 0) {
+      return describeType(sig.returns)
+    }
+    return `(${params.join(', ')}) => ${describeType(sig.returns)}`
+  }
+
   private collectMethod(
-    method: Method,
+    method: MethodAll | MethodBind | MethodBindMutable,
     objType: ObjectTypeInfo,
     accept: ValidationAcceptor,
     env: TypeEnv,
@@ -804,6 +955,10 @@ export class ObjectOrientedCTypeChecker {
     bodyEnv.define('this', objType)
     const overloads: { method: MethodAll; returns: TypeInfo }[] = []
     for (const method of objDef.methods) {
+      // 展开表达式已在 collectObject 推断过，这里不再重复求值/报诊断
+      if (isObjectSpread(method)) {
+        continue
+      }
       const name = this.getMethodName(method.name)
       // 上下文类型：注解声明的同名方法签名，用于回填无注解参数
       const contextSigs =

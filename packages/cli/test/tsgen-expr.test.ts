@@ -31,6 +31,26 @@ arr = Array of 1 2 3;
   }
 })
 
+test('对象展开 ...base：编译成原生对象展开，语义与解释器一致', async (t) => {
+  const { ts: tsPath, dir } = await compileSource('objspread', `
+base = { a = 1, b = 2, double(x) => x * 2 };
+obj = { ...base, b = 9, c = 3 };
+obj
+`)
+  const code = await fs.readFile(tsPath, 'utf8')
+  if (!/\.\.\.\(base as any\)/.test(code)) {
+    throw new Error(`对象展开应编译成原生 ...，实际：\n${code}`)
+  }
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const mod = await import(pathToFileURL(tsPath).href)
+  const rt = await loadRuntime(dir)
+  const obj = mod.default
+  if (rt.__send(obj, 'a', []) !== 1) throw new Error('a 应为 1')
+  if (rt.__send(obj, 'b', []) !== 9) throw new Error('后写的 b 应覆盖为 9')
+  if (rt.__send(obj, 'c', []) !== 3) throw new Error('c 应为 3')
+  if (rt.__send(obj, 'double', [4]) !== 8) throw new Error('展开方法应可调用')
+})
+
 test('lambda 保留：成员返回 lambda 本体，读取不二次 $', async (t) => {
   const { ts: tsPath, dir } = await compileSource('lam', `
 obj = { handler => [x => x + 1], inc = [x => x + 2] };

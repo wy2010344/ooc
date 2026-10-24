@@ -153,6 +153,46 @@ describe('类型检查（warning）', () => {
     expect(messages(diags).join('\n')).toContain("未知类型 'Foo'")
   })
 
+  test('对象展开覆盖成员类型不兼容时告警（里氏替换）', async () => {
+    const diags = await diagnostics(`
+        base = { n = 1, double { this n * 2 } };
+        obj = { ...base, n = 'hi' };
+        obj double
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不兼容')
+  })
+
+  test('对象展开覆盖成员类型兼容时不告警', async () => {
+    const diags = await diagnostics(`
+        base = { n = 1, double { this n * 2 } };
+        obj = { ...base, n = 2 };
+        obj double
+    `)
+    expect(messages(diags).join('\n')).not.toContain('类型不兼容')
+  })
+
+  test('两个展开对象同名成员类型不兼容时告警', async () => {
+    const diags = await diagnostics(`
+        a = { n = 1 };
+        b = { n = 'hi' };
+        obj = { ...a, ...b };
+        obj n
+    `)
+    expect(messages(diags).join('\n')).toContain('类型不兼容')
+  })
+
+  test('对象展开合并成员类型', async () => {
+    const diags = await diagnostics(`
+        base = {
+            a = 1,
+            double(x: number) => x * 2
+        };
+        obj = { ...base, a = 'hi' };
+        obj double 'x'
+    `)
+    expect(messages(diags).join('\n')).toContain('调用参数不匹配')
+  })
+
   test('方法参数类型检查', async () => {
     const diags = await diagnostics(`
         calc = {

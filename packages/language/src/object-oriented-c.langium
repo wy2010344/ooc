@@ -62,8 +62,13 @@ Assignment:
     name=ID (':' typeAnnotation=Type)? '=' expression=Expression;
 
 //object的方法
+// ObjectSpread：对象展开 `{ ...base, x = 1 }`——按书写顺序把 base 的自有可枚举
+// 属性并入当前对象，后面的成员覆盖前面的（与 JS 对象展开一致）。
 Method:
-    MethodAll | MethodBind | MethodBindMutable;
+    MethodAll | MethodBind | MethodBindMutable | ObjectSpread;
+
+ObjectSpread:
+    '...' expression=Expression;
 
 // 参数列表：括号内至少一个参数——无参方法不写括号（禁止空括号 `f()`）。
 fragment ParamAll:

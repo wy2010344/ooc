@@ -223,6 +223,20 @@ describe('Validating', () => {
     expect(outputOf(document)).toContain('的初始化引用了自身')
   })
 
+  test('对象展开是立即求值，x = { ...x } 报自引用', async () => {
+    document = await parse(`
+            x = { ...x };
+        `)
+    expect(outputOf(document)).toContain('的初始化引用了自身')
+  })
+
+  test('对象成员体延迟执行，x = { a = x } 不报自引用', async () => {
+    document = await parse(`
+            x = { a = x };
+        `)
+    expect(outputOf(document)).not.toContain('的初始化引用了自身')
+  })
+
   test('消息名与声明同名不误报自引用', async () => {
     document = await parse(`
             obj = { x = 1 };
