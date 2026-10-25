@@ -40,15 +40,6 @@ changeClass = [value =>
     #else;
     'text-rose-400'
 ];
-hideUnless = [visible =>
-    #guard visible;
-    ''
-    #else;
-    'hidden'
-];
-// 模版洞内不能再出现未转义单引号，活动区 key 提到洞外做比较。
-depthActivity = 'Depth';
-tradesActivity = 'Trades';
 lastText = [t =>
     #guard t;
     formatPrice $ (t last)
@@ -100,12 +91,12 @@ FinanceDashboard = fc $ [ctx =>
     leftWidth = bindSignal $ (layout leftWidth);
     rightWidth = bindSignal $ (layout rightWidth);
     leftBottom = bindSignal $ (layout leftBottom);
+    centerMiddle = bindSignal $ (layout centerMiddle);
     centerBottom = bindSignal $ (layout centerBottom);
     rightBottom = bindSignal $ (layout rightBottom);
 
     symbol = bindSignal $ 'BTCUSDT';
     interval = bindSignal $ '15m';
-    activity = bindSignal $ 'Depth';
     ticker = bindSignal $ nil;
     klines = bindSignal $ (Array of);
     depth = bindSignal $ nil;
@@ -130,6 +121,7 @@ FinanceDashboard = fc $ [ctx =>
             leftWidth = (leftWidth $),
             rightWidth = (rightWidth $),
             leftBottom = (leftBottom $),
+            centerMiddle = (centerMiddle $),
             centerBottom = (centerBottom $),
             rightBottom = (rightBottom $)
         }
@@ -139,6 +131,7 @@ FinanceDashboard = fc $ [ctx =>
         leftWidth $ (next leftWidth);
         rightWidth $ (next rightWidth);
         leftBottom $ (next leftBottom);
+        centerMiddle $ (next centerMiddle);
         centerBottom $ (next centerBottom);
         rightBottom $ (next rightBottom)
     ];
@@ -146,6 +139,7 @@ FinanceDashboard = fc $ [ctx =>
     dragLeft = [e => dragSplit $ e 'x' (leftWidth $) 1 176 420 [v => leftWidth $ v] [saveNow $]];
     dragRight = [e => dragSplit $ e 'x' (rightWidth $) (0 - 1) 224 520 [v => rightWidth $ v] [saveNow $]];
     dragLeftBottom = [e => dragSplit $ e 'y' (leftBottom $) (0 - 1) 120 420 [v => leftBottom $ v] [saveNow $]];
+    dragCenterMiddle = [e => dragSplit $ e 'y' (centerMiddle $) (0 - 1) 120 420 [v => centerMiddle $ v] [saveNow $]];
     dragCenterBottom = [e => dragSplit $ e 'y' (centerBottom $) (0 - 1) 120 420 [v => centerBottom $ v] [saveNow $]];
     dragRightBottom = [e => dragSplit $ e 'y' (rightBottom $) (0 - 1) 120 420 [v => rightBottom $ v] [saveNow $]];
 
@@ -305,35 +299,29 @@ FinanceDashboard = fc $ [ctx =>
 
             (VSplit $ dragLeft)
 
-            // 中列：K 线 + 成交
+            // 中列：K 线 / 深度 / 逐笔，三个独立窗格各自拖高度。
+            // 深度与逐笔是两条不同的流（未成交的挂单 vs 已成交的逐笔），不做 tab：
+            // 前者怕矮、后者怕短，各自一份高度条才不用互相将就。
             (dom div { className = 'flex min-w-0 flex-1 flex-col' }
                 (Pane $ { title = 'Chart', hint = 'Live', className = 'min-h-[180px] flex-1' }
                     (Chart $ { klines = klines, interval = interval })
                 )
+                (HSplit $ dragCenterMiddle)
+                (dom div {
+                    className = 'flex min-h-0 shrink-0 flex-col',
+                    s_height => '${centerMiddle $}px'
+                }
+                    (Pane $ { title = 'Depth', hint = 'Cumulative', className = 'flex-1' }
+                        (DepthChart $ { depth = depth })
+                    )
+                )
                 (HSplit $ dragCenterBottom)
                 (dom div {
-                    className = 'flex min-h-0 flex-col',
+                    className = 'flex min-h-0 shrink-0 flex-col',
                     s_height => '${centerBottom $}px'
                 }
-                    (Pane $ { title = 'Market activity', hint = 'Trades / Depth', className = 'flex-1' }
-                        (dom div { className = 'flex h-full flex-col' }
-                            (dom div {
-                                className = 'flex shrink-0 items-center gap-1 border-b border-white/5 px-2 py-1'
-                            }
-                                (Tab $ 'Depth' activity [v => activity $ v])
-                                (Tab $ 'Trades' activity [v => activity $ v])
-                            )
-                            (dom div {
-                                className => 'min-h-0 flex-1 ${hideUnless $ ((activity $) == depthActivity)}'
-                            }
-                                (DepthChart $ { depth = depth })
-                            )
-                            (dom div {
-                                className => 'min-h-0 flex-1 ${hideUnless $ ((activity $) == tradesActivity)}'
-                            }
-                                (Trades $ { trades = trades })
-                            )
-                        )
+                    (Pane $ { title = 'Trades', hint = 'Tape', className = 'flex-1' }
+                        (Trades $ { trades = trades })
                     )
                 )
             )

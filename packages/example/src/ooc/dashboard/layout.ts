@@ -55,16 +55,20 @@ export type LayoutState = {
   leftWidth: number
   rightWidth: number
   leftBottom: number
+  // 中列竖切三段：K 线吃掉剩余高度，下面是两个固定高的独立窗格
+  centerMiddle: number
   centerBottom: number
   rightBottom: number
 }
 
 const LAYOUT_KEY = 'ooc-finance-layout-v1'
+// 深度图要留够纵向刻度（约 4 段），逐笔要比它再高一点才看得到 7~8 行。
 const DEFAULT_LAYOUT: LayoutState = {
   leftWidth: 248,
   rightWidth: 316,
   leftBottom: 224,
-  centerBottom: 218,
+  centerMiddle: 200,
+  centerBottom: 216,
   rightBottom: 226,
 }
 
@@ -77,6 +81,12 @@ export function loadLayout(): LayoutState {
       leftWidth: clampSize(Number(parsed.leftWidth) || DEFAULT_LAYOUT.leftWidth, 176, 420),
       rightWidth: clampSize(Number(parsed.rightWidth) || DEFAULT_LAYOUT.rightWidth, 224, 520),
       leftBottom: clampSize(Number(parsed.leftBottom) || DEFAULT_LAYOUT.leftBottom, 120, 420),
+      // 老版本存档没有 centerMiddle：缺失时落回默认，不用升 key 丢用户的宽度设置。
+      centerMiddle: clampSize(
+        Number(parsed.centerMiddle) || DEFAULT_LAYOUT.centerMiddle,
+        120,
+        420,
+      ),
       centerBottom: clampSize(
         Number(parsed.centerBottom) || DEFAULT_LAYOUT.centerBottom,
         120,
