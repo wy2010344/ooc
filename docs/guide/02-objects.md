@@ -200,7 +200,9 @@ calc = {
 
 ## 委托组合 merge
 
-OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。
+OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。**命中即停**——某一层定义了该成员就由该层负责，即使方法返回 `nil` / `undefined` 也不再向后查；只有这一层没有这个成员才继续委托。
+
+同名成员的覆盖同样受里氏替换约束：覆盖层必须能当作兜底层使用（参数不能收窄、返回不能放宽），不兼容时给 `mergeOverrideMismatch` warning。引擎只按兜底层的契约发消息，覆盖层签名对不上时运行时可能失效。
 
 ```ooc
 defaults = { speak = 'voice', bark = 'wang' };

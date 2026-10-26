@@ -110,26 +110,29 @@ function chainWrap(entries: unknown[]): unknown {
   const wrapped = proxyCatchAll(wrapper, (name, ...args) => {
     for (const o of entries) {
       if (o == null) continue
-      // descriptor 优先：属性成员（getter）以包装对象为 receiver 单次读取，
-      // 结果原样返回（可为 lambda，绝不二次调用）；未命中（undefined）继续向后查找
+      // 命中即停：本层存在该成员就由本层负责，返回 undefined / nil 也不再
+      // 向后查找。只有“这一层没有这个成员”才继续委托。
       const desc =
         typeof o === 'object' || typeof o === 'function'
           ? Object.getOwnPropertyDescriptor(o, name)
           : undefined
-      if (desc && (desc.get || desc.set)) {
-        if (desc.get) {
-          const v = desc.get.call(receiverHolder.v ?? o)
-          if (v !== undefined) return v
+      if (desc) {
+        // 属性成员（getter）以包装对象为 receiver 单次读取，结果原样返回
+        //（可为 lambda，绝不二次调用）。
+        if (desc.get || desc.set) {
+          return desc.get ? desc.get.call(receiverHolder.v ?? o) : undefined
         }
-        continue
+        const v = desc.value
+        if (typeof v === 'function') {
+          return v.apply(receiverHolder.v, args)
+        }
+        return v
       }
+      // 非 own 成员（原型链方法等）：用 in 判断存在性，存在即命中
+      if (!(name in Object(o))) continue
       const v = (o as Record<string, unknown>)[name]
-      if (v === undefined) continue
       if (typeof v === 'function') {
-        // 真方法返回 undefined 视为无返回值，继续向后查找（委托查找的固有取舍）
-        const r = v.apply(receiverHolder.v, args)
-        if (r !== undefined) return r
-        continue
+        return v.apply(receiverHolder.v, args)
       }
       return v
     }

@@ -1507,6 +1507,73 @@ describe('merge 交集类型（宿主端 merge 全局）', () => {
     expect(messages(diags).join('\n')).toContain('类型不匹配')
   })
 
+  test('merge 覆盖成员与兜底层签名不兼容时告警', async () => {
+    const diags = await checkModule(
+      'wd-merge-override1.ooc',
+      `defaults = { size(x: number): number { x } };
+       spec = { size(x: number): string { 'x' } };
+       w = merge $ spec defaults;
+       w size 1`,
+    )
+    expect(messages(diags).join('\n')).toContain('merge 覆盖成员')
+    expect(messages(diags).join('\n')).toContain('不兼容')
+  })
+
+  test('merge 覆盖成员收窄参数类型时告警（参数逆变）', async () => {
+    const diags = await checkModule(
+      'wd-merge-override-param.ooc',
+      `defaults = { size(x: number): number { x } };
+       spec = { size(x: 'a'): number { 1 } };
+       w = merge $ spec defaults;
+       w size 1`,
+    )
+    expect(messages(diags).join('\n')).toContain("merge 覆盖成员 'size'")
+  })
+
+  test('merge 覆盖成员收窄 rest 类型时告警（参数逆变）', async () => {
+    const diags = await checkModule(
+      'wd-merge-override-rest.ooc',
+      `defaults = { f(...xs: number): number { xs length } };
+       spec = { f(...xs: string): number { xs length } };
+       w = merge $ spec defaults;
+       w f 1`,
+    )
+    expect(messages(diags).join('\n')).toContain("merge 覆盖成员 'f'")
+  })
+
+  test('merge 覆盖成员签名兼容时不告警', async () => {
+    const diags = await checkModule(
+      'wd-merge-override2.ooc',
+      `defaults = { size(x: number): number { x } };
+       spec = { size(x: number): number { x + 1 } };
+       w = merge $ spec defaults;
+       w size 1`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('merge 覆盖字面量成员：放宽到基础类型后比较', async () => {
+    const diags = await checkModule(
+      'wd-merge-override3.ooc',
+      `defaults = { kind = 'a' };
+       spec = { kind = 'b' };
+       w = merge $ spec defaults;
+       w kind`,
+    )
+    expect(messages(diags)).toEqual([])
+  })
+
+  test('merge 嵌套：展平后按首次出现的成员检查', async () => {
+    const diags = await checkModule(
+      'wd-merge-override4.ooc',
+      `base = { n = 1 };
+       a = merge $ { n = 2 } base;
+       w = merge $ a { n = 'x' };
+       w n`,
+    )
+    expect(messages(diags).join('\n')).toContain("merge 覆盖成员 'n'")
+  })
+
   describe('转发属性 <=：签名取自委托 $', () => {
     test('实参按 $ 参数类型校验，返回类型取自 $', async () => {
       const diags = await checkModule(

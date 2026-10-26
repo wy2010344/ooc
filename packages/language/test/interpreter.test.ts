@@ -1260,6 +1260,26 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
       expect(result).toBe('miaoo')
     })
 
+    test('命中即停：前层方法返回 undefined 也不回落 defaults', () => {
+      const calls: string[] = []
+      const w = merge.$(
+        {
+          m() {
+            calls.push('spec')
+            return undefined
+          },
+        },
+        {
+          m() {
+            calls.push('defaults')
+            return 'default'
+          },
+        },
+      )
+      expect(sendMessage(w, 'm', [])).toBeUndefined()
+      expect(calls).toEqual(['spec'])
+    })
+
     test('lambda 保留：委托链原样透传 getter 返回的 lambda', async () => {
       const result = await delegateInterpreter().interpret(
         `

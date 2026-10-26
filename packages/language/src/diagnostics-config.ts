@@ -128,6 +128,7 @@ export const DIAGNOSTIC_CODES = {
   unionUncovered: 'unionUncovered',
   delegateNotCallable: 'delegateNotCallable',
   spreadOverrideMismatch: 'spreadOverrideMismatch',
+  mergeOverrideMismatch: 'mergeOverrideMismatch',
 } as const
 
 /**

@@ -767,7 +767,68 @@ export class ObjectOrientedCTypeChecker {
     }
   }
 
-  /** 展开覆盖检查：actual 必须能当作 inherited 使用（方法参数/返回结构兼容）。 */
+  /** 覆盖兼容检查：覆盖实现必须能接住兜底契约的调用（参数逆变、返回协变）。 */
+  private overrideCompatible(
+    inherited: MethodSig[],
+    actual: MethodSig[],
+  ): boolean {
+    if (actual.length === 0) {
+      return true
+    }
+    return inherited.every((base) =>
+      actual.some((impl) => this.overrideSigCompatible(impl, base)),
+    )
+  }
+
+  /**
+   * 单个签名的覆盖检查。字面量先放宽到基础类型：`n = 1` → `n = 2`、`size =
+   * 'md'` → `size = 'lg'` 属于同一家族的正常覆盖；真正要抓的是 number→string、
+   * 参数收窄、返回放宽这类结构不兼容。
+   *
+   * 参数位取**逆变**（兜底层会按自己的参数类型调用），返回位取协变。
+   */
+  private overrideSigCompatible(
+    actual: MethodSig,
+    inherited: MethodSig,
+  ): boolean {
+    if (actual.typeParams || inherited.typeParams) {
+      // 泛型占位无法静态精确比较，沿用宽松策略：只比参数容量
+      return actual.rest !== undefined || inherited.params.length <= actual.params.length
+    }
+    for (let i = 0; i < inherited.params.length; i++) {
+      const base = inherited.params[i] ?? inherited.rest
+      const impl = i < actual.params.length ? actual.params[i] : actual.rest
+      if (!base) {
+        continue
+      }
+      if (!impl || !isSubtype(this.widenLiterals(base), this.widenLiterals(impl))) {
+        return false
+      }
+    }
+    // 兜底层带 rest 时调用方可能传任意多个，覆盖层也必须能接住
+    if (inherited.rest) {
+      if (!actual.rest) {
+        return false
+      }
+      const baseRest = this.widenLiterals(inherited.rest)
+      // 覆盖层落在 rest 区间的固定参数也要接受兜底 rest 的值
+      for (let i = inherited.params.length; i < actual.params.length; i++) {
+        const impl = actual.params[i]
+        if (impl && !isSubtype(baseRest, this.widenLiterals(impl))) {
+          return false
+        }
+      }
+      if (!isSubtype(baseRest, this.widenLiterals(actual.rest))) {
+        return false
+      }
+    }
+    return isSubtype(
+      this.widenLiterals(actual.returns),
+      this.widenLiterals(inherited.returns),
+    )
+  }
+
+  /** 展开覆盖检查：后写成员必须能替代展开来源的同名成员。 */
   private checkSpreadOverride(
     name: string,
     inherited: MethodSig[],
@@ -775,21 +836,7 @@ export class ObjectOrientedCTypeChecker {
     node: AstNode,
     accept: ValidationAcceptor,
   ): void {
-    if (actual.length === 0) {
-      return
-    }
-    // 字面量类型放宽到基础类型再比较：`n = 1` → `n = 2`、`size = 'md'` →
-    // `size = 'lg'` 属于同一家族的正常覆盖，不应因字面量不同而告警；
-    // 真正要抓的是 number→string、方法签名变化这类结构不兼容。
-    const inheritedObj: ObjectTypeInfo = {
-      kind: 'object',
-      methods: new Map([[name, inherited.map((s) => this.widenSig(s))]]),
-    }
-    const actualObj: ObjectTypeInfo = {
-      kind: 'object',
-      methods: new Map([[name, actual.map((s) => this.widenSig(s))]]),
-    }
-    if (isSubtype(actualObj, inheritedObj)) {
+    if (this.overrideCompatible(inherited, actual)) {
       return
     }
     accept(
@@ -797,6 +844,49 @@ export class ObjectOrientedCTypeChecker {
       `展开后被覆盖的成员 '${name}' 类型不兼容：原 ${this.describeSigs(inherited)}，新 ${this.describeSigs(actual)}；来源对象的方法会以新对象为 this 执行，可能失效`,
       { node, data: diagnosticData('spreadOverrideMismatch') },
     )
+  }
+
+  /**
+   * merge 覆盖检查：链上首次出现的成员胜出，后续层是它的兜底实现。
+   * 胜出层必须能替代每一个被它覆盖的兜底层（引擎按兜底层的契约调用）。
+   */
+  private checkMergeOverrides(
+    args: TypeInfo[],
+    node: AstNode,
+    accept: ValidationAcceptor,
+  ): void {
+    // 已组合的 merge 结果在运行时被展平，按展平后的层序检查
+    const layers = args.flatMap((t) => this.flattenDelegation(t))
+    const winners = new Map<string, MethodSig[]>()
+    const reported = new Set<string>()
+    for (const layer of layers) {
+      if (layer.kind !== 'object') {
+        continue
+      }
+      for (const [name, sigs] of layer.methods) {
+        const winner = winners.get(name)
+        if (!winner) {
+          winners.set(name, sigs)
+          continue
+        }
+        if (reported.has(name) || this.overrideCompatible(sigs, winner)) {
+          continue
+        }
+        reported.add(name)
+        accept(
+          'warning',
+          `merge 覆盖成员 '${name}' 与兜底层类型不兼容：覆盖 ${this.describeSigs(winner)}，兜底 ${this.describeSigs(sigs)}；引擎按兜底层契约调用时可能失效`,
+          { node, data: diagnosticData('mergeOverrideMismatch') },
+        )
+      }
+    }
+  }
+
+  /** 委托交集（merge 产物）按链展开；普通交集/命名类型视为单独一层。 */
+  private flattenDelegation(t: TypeInfo): TypeInfo[] {
+    return t.kind === 'intersection' && t.delegation
+      ? t.types.flatMap((sub) => this.flattenDelegation(sub))
+      : [t]
   }
 
   /** 覆盖兼容检查前把字面量放宽成基础类型（仅用于比较，不改真实推断结果）。 */
@@ -1924,6 +2014,7 @@ export class ObjectOrientedCTypeChecker {
         }
         // merge 库签名（宿主端 merge 的 `$`）：返回委托交集（任一侧定义即可）
         if (name === '$' && receiver.name === 'merge' && args.length >= 2) {
+          this.checkMergeOverrides(args, node, accept)
           return intersectionOf(args, true)
         }
         return this.checkArgs(

@@ -16,7 +16,8 @@ export function readValue(value: unknown): unknown {
 
 /**
  * 读取属性对象：支持 merge 链（自身带 `__chain` 的委托包装）。
- * 链段按 merge 语义从前往后查，先定义者生效；`undefined` 视为未定义继续后查。
+ * 这是属性收集快照：链段从前往后扫，第一个非 `undefined` 值生效。
+ * （消息派发另见 `bridges.chainWrap`：那边是命中即停，方法返回 `undefined` 也不后查。）
  */
 export function collectProps(arg: unknown): Record<string, unknown> {
   const result: Record<string, unknown> = {}
