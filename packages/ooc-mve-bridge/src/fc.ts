@@ -6,12 +6,12 @@ import type { GetValue } from 'wy-helper'
  * 其余是用户实参。fc $ <arg>... 生成惰性组件（(ctx) => …），挂载期再执行 f。
  * 与 preview/dom.ts 的 DComponent 一致：调用方传 (ctx: unknown) 即可。
  */
-export function fc<A extends unknown[], R>(
-  f: (ctx: StateHolderWithNode<Node, readonly Node[]>, ...args: A) => R,
+export function fc<N = Node, A extends unknown[] = unknown[], R = unknown>(
+  f: (ctx: StateHolderWithNode<N, readonly N[]>, ...args: A) => R,
 ) {
   return function (...vs: A) {
     return function (ctx: unknown) {
-      f.apply(f, [ctx as StateHolderWithNode<Node, readonly Node[]>, ...vs])
+      f.apply(f, [ctx as StateHolderWithNode<N, readonly N[]>, ...vs])
     }
   }
 }
@@ -22,7 +22,7 @@ export interface ForEachConfig<T> {
   creater(
     this: StateHolder<Node, readonly Node[]>,
     key: unknown,
-    eachTime: EachTime<T>,
+    eachTime: EachTime<T, unknown>,
   ): unknown
 }
 
@@ -31,12 +31,13 @@ export interface ForEachConfig<T> {
  * 双函数：forEach $ <提供者> <渲染回调>（TODO demo）；
  * config 对象：forEach $ { forEach(block){…}, creater(ic, et, key){…} }（PREVIEW demo）。
  * creater 的包装：mve 传 (key, eachValue)；eachValue 就是本行 SubHolder（有 addNode / value / index），
- * 因此把 ic=et=eachValue、key 放第三参交给 OOC 回调（demo 里 ic addNode 收集到该行、et value 取项）。
+ * 因此把 ic=et=eachValue、key 放第三参交给 OOC 回调。OOC 里用 `canvas2 rect {...} $ ic`
+ * 让节点工厂自己挂到该行；`ic addNode` 只会把 Fc 塞进数组，节点不会构建。
  */
 export const forEach = fc(function (
   ctx: StateHolderWithNode<Node, readonly Node[]>,
   configOrEach: ForEachConfig<unknown> | ((callback: (key: unknown, value: unknown) => unknown) => unknown),
-  callbackCreater?: (key: unknown, eachValue: EachTime<unknown>) => unknown,
+  callbackCreater?: (key: unknown, eachValue: EachTime<unknown, unknown>) => unknown,
 ) {
   const each =
     typeof configOrEach === 'function'
