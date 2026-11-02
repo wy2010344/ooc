@@ -34,7 +34,7 @@
 | this | 委托进 defaults 方法时 this 仍是包装对象（方法体 this 回读继续走整条链，spec 优先） |
 | 静态分析 | defaults 的签名以交集类型（D∩S）合并进包装类型，检查器可分析 |
 
-**结论**：派发链固定四格——own descriptor → 原型链 / `in`（JS 原生对象的属性与方法）→ `numDef`（数字内建协议）→ `objectDefine`（值类型内建协议）→ 抛「没有定义该方法」。动态消息名不在链上：它是 `Object` 的专属消息（§8）。没有 methodNotFound 魔法：不存在「把未知消息自动转给某个默认对象」的隐式兜底；要拦截未知消息就把对象显式包成兜底 Proxy（`js proxy 对象 handler`，handler 是 `(name, ...args)` 转发函数；宿主侧对应 `proxyCatchAll(target, handler)`）。结构级复用走 `merge` 的显式委托（宿主端 merge，写进调用面，不做隐式链）。
+**结论**：派发链固定四格——own descriptor → 原型链 / `in`（JS 原生对象的属性与方法）→ `numDef`（数字内建协议）→ `objectDefine`（值类型内建协议）→ 抛「没有定义该方法」。动态消息名不在链上：它是 `Object` 的专属消息（§8）。没有 methodNotFound 魔法：不存在「把未知消息自动转给某个默认对象」的隐式兜底；要拦截未知消息就把对象显式包成兜底 Proxy（`js proxy 对象 handler`，handler 是 `(name, ...args)` 转发函数；宿主侧对应 `proxyCatchAll(target, handler)`）。结构级复用走 `...base` 展开（复制自有成员，不做隐式链，覆盖成员过里氏替换检查）或 `merge` 的显式委托（宿主端 merge，写进调用面）。
 
 ## 5. 类型是字典不是法条（soft typing）
 

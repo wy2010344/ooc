@@ -8,9 +8,9 @@
 
 **▶ [在线 Playground](https://wy2010344.github.io/ooc/playground/)** ｜ **[行情终端 Demo](https://wy2010344.github.io/ooc/example/#/dashboard)** ｜ [文档](https://wy2010344.github.io/ooc/) ｜ [设计取舍](DESIGN.md)
 
-![行情终端：K 线 / 盘口 / 深度图 / 可拖拽分栏](docs/public/demo-terminal.gif)
+![行情终端：K 线 / 盘口 / 深度图 / 逐笔成交 / 可拖拽窗格](docs/public/demo-terminal.gif)
 
-> 这个行情终端（K 线缩放拖动、盘口增量同步、深度图、三栏拖拽）**界面代码全部用 OOC 写**，
+> 这个行情终端（K 线缩放拖动、盘口增量同步与点价、深度图、逐笔成交、七窗格拖拽）**界面代码全部用 OOC 写**，
 > 数据接币安公开行情，无 API Key。它存在的意义只有一个：证明这门语言能扛住真实界面。
 
 > ⚠️ 仅技术演示：只读展示行情，不提供任何交易服务，不构成投资建议。市场数据来自币安公开接口。
@@ -30,7 +30,7 @@ calc cached;      // 3
 
 `calc add 3 4` = 给 `calc` 发 `add` 消息，载荷 `[3, 4]`。**语句之间必须用 `;` 分隔**——换行只是空白，
 少了 `;` 两条语句会被并成一条消息链（本项目最常见的坑，见 [DESIGN.md](DESIGN.md) §13）。循环、抛错、类型判别也都是消息
-（`loop $`、`js throw`、`#guard`），不给语言开语法洞。没有继承——复用靠 `merge` 委托；
+（`loop $`、`js throw`、`#guard`），不给语言开语法洞。没有继承——复用靠 `merge` 委托与 `...base` 对象展开；
 运行时类型靠 `#guard` 执法，静态类型只做导航（soft typing），**从不因类型诊断中断执行**。
 
 ## 跑起来
@@ -60,8 +60,8 @@ await ooc.interpretPath('src/main.ooc')     // 执行整个文件（支持 #impo
 
 | 包 | 做什么 | 规模 |
 | --- | --- | --- |
-| `packages/language` | Langium 语法 → 解释器 → 类型检查 → LSP（补全 / 悬停 / 诊断 / 跳转） | 438 tests |
-| `packages/cli` | `ooc type-check`；把 `.ooc` 编译成 TS / ES 模块（含共享运行时） | 29 tests |
+| `packages/language` | Langium 语法 → 解释器 → 类型检查 → LSP（补全 / 悬停 / 诊断 / 跳转） | 467 tests |
+| `packages/cli` | `ooc type-check`；把 `.ooc` 编译成 TS / ES 模块（含共享运行时） | 31 tests |
 | `packages/extension` | VS Code 扩展：LSP 客户端 + 语法高亮 | — |
 | `packages/vite-plugin-ooc` | 让 `.ooc` 像 `.vue` 一样被 `import`，无磁盘中间产物 | — |
 | `packages/ooc-mve-bridge` | OOC 侧的 DOM / 组件桥（`dom` `text` `fc` `forEach` + 信号） | — |
@@ -79,11 +79,12 @@ await ooc.interpretPath('src/main.ooc')     // 执行整个文件（支持 #impo
 | 分支 | `#guard cond; a #else; b` |
 | 联合类型 | `Circle \| Square`，`#guard` 逐条判别 |
 | 委托 / 兜底 | `merge $ 子对象 默认值` |
+| 对象展开 | `{ ...base, extra = 1 }`（复制自有成员，覆盖成员做里氏替换检查） |
 | 模块 / 管道 | `#import { x } './m.ooc'`；`v \| add call 5` |
 
 ## 状态
 
-- **467 个测试**（438 language + 29 cli），GitHub Actions 每次 push 都跑一遍
+- **498 个测试**（467 language + 31 cli），GitHub Actions 每次 push 都跑一遍
 - **文档示例可校验**：README 与本指南里的 ```ooc 代码块由 `npm run test:docs` 抽出来跑同一套类型检查，
   示例「复制就能跑」是 CI 保证的，不是口头承诺
 - 文档站 <https://wy2010344.github.io/ooc/>（Rspress，含语法高亮与示例）

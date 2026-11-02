@@ -18,7 +18,7 @@ features:
     icon: 🎮
     link: https://wy2010344.github.io/ooc/playground/
   - title: 真实界面
-    details: 行情终端 demo——K 线缩放拖动、盘口增量同步、深度图、三栏拖拽，界面代码全部用 OOC 写。
+    details: 行情终端 demo——K 线缩放拖动、盘口增量同步与点价、深度图、逐笔成交、七窗格拖拽，界面代码全部用 OOC 写。
     icon: 📈
     link: https://wy2010344.github.io/ooc/example/#/dashboard
   - title: 极简语法
