@@ -31,6 +31,24 @@ describe('Validating', () => {
     ).toHaveLength(0)
   })
 
+  test('[method] 是合法的 #type 成员注解', async () => {
+    document = await parse(`
+            Foo #type { [method] width: number };
+        `)
+
+    expect(document.diagnostics ?? []).toEqual([])
+  })
+
+  test('未知 #type 成员注解报错', async () => {
+    document = await parse(`
+            Foo #type { [foo] width: number };
+        `)
+
+    expect(
+      (document.diagnostics ?? []).map((item) => item.message).join('\n'),
+    ).toContain("未知的成员注解 '[foo]'，目前只支持 [method]")
+  })
+
   test('签名方法（无 body）必须声明返回类型', async () => {
     document = await parse(`
             obj = { f };

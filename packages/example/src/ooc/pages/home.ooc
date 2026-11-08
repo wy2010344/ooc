@@ -1,5 +1,5 @@
 // home.ooc — 首页：项目介绍 + OOC 语言特性演示
-#import { dom, text, fc } '../bridge.ts';
+#import { dom, text, fc,merge } '../bridge.ts';
 #import { Card, CardHeader, CardTitle } '../ui/card.ooc';
 #import { SiteNav } './site-nav.ooc';
 
@@ -38,6 +38,36 @@ FeatureCard = fc $ [ctx, title, value =>
         )
     ) $ ctx
 ];
+
+a={
+    k=8,
+    x(n){
+        n+(this k)
+    },
+    call{
+        this x 9
+    }
+};
+
+b={
+    f(n)=>n+8,
+    ...a,
+    k=9,
+    z(n){
+        this x n
+    }
+};
+
+c= merge $ a {
+    x(n){
+        console log 'cx' n;
+    },
+    call{
+        this x 9
+    }
+};
+console log (b z 9);
+console log 'merge' (c call);
 
 Home = fc $ [ctx =>
     (dom div { className = 'min-h-screen bg-muted/40 pb-12' }

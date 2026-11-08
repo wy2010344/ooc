@@ -39,13 +39,21 @@ TypeParam:
 TypeMemberList:
     '{' (members+=TypeMember (',' members+=TypeMember)*)? '}';
 
+// 成员注解只服务于「OOC 类型 → TS 桥接」的形态提示，例如 `[method] width: number`
+// 让零参成员在 .ts 里输出 `width(): number` 而不是 `width: number`。
+// 普通 OOC 示例不需要写；运行时对象的方法形态本来就由 descriptor 决定。
 TypeMember:
+    annotations+=Annotation*
     name=MethodDefName 
         ('<' typeParams+=TypeParam (',' typeParams+=TypeParam)* '>')?
         ('(' 
             ParamAll
           ')')? 
         (':' typeAnnotation=Type)?
+;
+
+Annotation:
+    '[' value=ID ']'
 ;
 
 // 语句：

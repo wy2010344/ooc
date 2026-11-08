@@ -22,7 +22,7 @@ export interface ForEachConfig<T> {
   creater(
     this: StateHolder<Node, readonly Node[]>,
     key: unknown,
-    eachTime: EachTime<T, unknown>,
+    eachTime: EachTime<T>,
   ): unknown
 }
 
@@ -37,7 +37,7 @@ export interface ForEachConfig<T> {
 export const forEach = fc(function (
   ctx: StateHolderWithNode<Node, readonly Node[]>,
   configOrEach: ForEachConfig<unknown> | ((callback: (key: unknown, value: unknown) => unknown) => unknown),
-  callbackCreater?: (key: unknown, eachValue: EachTime<unknown, unknown>) => unknown,
+  callbackCreater?: (key: unknown, eachValue: EachTime<unknown>) => unknown,
 ) {
   const each =
     typeof configOrEach === 'function'

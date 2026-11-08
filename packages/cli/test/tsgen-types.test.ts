@@ -46,6 +46,27 @@ origin
   }
 })
 
+test('零参成员默认是属性，[method] 强制输出方法形态', async () => {
+  const { ts: tsPath } = await compileSource('methodanno', `
+Size #type {
+    width: number,
+    [method] height: number,
+    [method] label<T>: T
+};
+0
+`)
+  const code = await fs.readFile(tsPath, 'utf8')
+  if (!/width: number;/.test(code)) {
+    throw new Error(`未加注解的零参成员应保持属性形态，实际：\n${code}`)
+  }
+  if (!/height\(\): number;/.test(code)) {
+    throw new Error(`[method] 零参成员应输出 height(): number，实际：\n${code}`)
+  }
+  if (!/label<T>\(\): T/.test(code)) {
+    throw new Error(`[method] 泛型零参成员应输出 label<T>(): T，实际：\n${code}`)
+  }
+})
+
 test('命名空间类型 math#Circle：值走默认导入，类型位补 ns$ns 命名空间导入', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ooc-tsgen-'))
   await fs.writeFile(

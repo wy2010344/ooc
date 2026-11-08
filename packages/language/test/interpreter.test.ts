@@ -16,6 +16,8 @@ import {
   OocCircularImportError,
   OocMethodNotFoundError,
   sendMessage,
+  respondsTo,
+  proxyCatchAll,
   js,
   storage,
 } from 'object-oriented-c-language'
@@ -1210,6 +1212,23 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
     expect(result).toBe('hay fb:ping')
   })
 
+  describe('respondsTo：宿主桥接按名询问（不枚举对象成员）', () => {
+    test('普通对象只应答存在的成员', async () => {
+      const result = await interpreter.interpret(`
+          o = { width => 10, height = 20 };
+          o
+      `) as Record<string, unknown>
+      expect(respondsTo(result, 'height')).toBe(true)
+      expect(respondsTo(result, 'radius')).toBe(false)
+      expect(respondsTo(null, 'width')).toBe(false)
+    })
+
+    test('兜底代理对任何名字都应答', () => {
+      const wrapped = proxyCatchAll({}, () => 'fallback')
+      expect(respondsTo(wrapped, 'anything')).toBe(true)
+    })
+  })
+
   describe('宿主端 merge：$ 链式委托（host 桥上实现）', () => {
     function delegateInterpreter() {
       // merge 是宿主注入的全局桥（bridges.ts），语言包导出与浏览器 demo 同一份
@@ -1232,7 +1251,7 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
       expect(result).toBe('miao hi gadget')
     })
 
-    test('转发时 this 也是包装对象：defaults 方法体内 this 回读 spec', async () => {
+    test('home-object 语义：defaults 方法体内 this 是 defaults 自己', async () => {
       const result = await delegateInterpreter().interpret(
         `
           defaults = { name => 'D', who { this name } };
@@ -1242,9 +1261,23 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
         `,
         'demo.ooc',
       )
-      // 方法以包装对象为 receiver 调用：who 里 this 是 w，w name 走链
-      // 先找 spec（spec 优先）→ 'S'。原对象（defaults/spec）只读不写。
-      expect(result).toBe('S')
+      // this 绑定命中层（home object）：who 定义在 defaults，this 恒为 defaults，
+      // this name 读 defaults.name = 'D'。跨段取值必须走显式消息（w name 转发），
+      // 不再经 this 隐式回读——否则 string / 类实例进链时方法内部状态全对不上。
+      expect(result).toBe('D')
+    })
+
+    test('home-object 语义：宿主实例进链，方法 this 是实例本身', () => {
+      class Counter {
+        n = 7
+        double() {
+          return this.n * 2
+        }
+      }
+      // 若 this 被换成包装对象，double 里的 this.n 读到的是兜底 Proxy 的
+      // 未知消息闭包（函数），运算得 NaN；修复后 this 恒为 Counter 实例。
+      const w = merge.$({ extra: 1 }, new Counter())
+      expect(sendMessage(w, 'double', [])).toBe(14)
     })
 
     test('spec 方法抢占同名消息，不经过转发', async () => {

@@ -125,6 +125,7 @@ export const DIAGNOSTIC_CODES = {
   circularImport: 'circularImport',
   moduleNotFound: 'moduleNotFound',
   constMethodBody: 'constMethodBody',
+  unknownAnnotation: 'unknownAnnotation',
   unionUncovered: 'unionUncovered',
   delegateNotCallable: 'delegateNotCallable',
   spreadOverrideMismatch: 'spreadOverrideMismatch',

@@ -9,7 +9,7 @@ import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
 import { addEffect, createSignal, memo } from 'wy-helper'
 import { createContext } from 'mve-core'
-import { dom, html, text, fc, forEach } from 'ooc-mve-bridge'
+import { dom, html, text, fc, forEach, lateProxy } from 'ooc-mve-bridge'
 import { createBridgeGlobalsTypes } from 'ooc-mve-bridge'
 
 export interface NotebookEntry {
@@ -122,6 +122,8 @@ export function createGlobals() {
     dom,
     html,
     text,
+    // 延迟绑定影子：lateProxy $ → { proxy, set }，可先持有 proxy 再注入真实对象
+    lateProxy,
     // 响应式信号：createSignal $ <初值> → { get(), set() }
     createSignal,
     // memo $ <lambda> → 记忆化 signal（lambda 读取的信号变化后重算）

@@ -124,6 +124,21 @@ test('Route A：桥接类型注入后 dom/text/storage 类型检查干净', asyn
   )
 })
 
+test('lateProxy：影子可先持有，注入后转发消息', async () => {
+  const engine = createEngine(notes)
+  const r = await runNote(
+    engine,
+    'late-proxy',
+    'pair = lateProxy $;\n' +
+      'shadow = pair proxy;\n' +
+      'pair set { a = 1, add(x) { this a + x } };\n' +
+      'shadow add 2\n',
+  )
+  assert.equal(r.error, null, r.error ?? '')
+  assert.deepEqual(r.diagnostics, [])
+  assert.equal(r.output, '3')
+})
+
 test('Route A：未知标签宽泛派发（JS Proxy 暴露方法，无需 methodNotFound）', async () => {
   const engine = createEngine(notes)
   // 非枚举标签运行时可调（Proxy 动态创建），类型上静默退化为 any

@@ -37,6 +37,12 @@ Bound #type<T> {
     $(value: T): T
 };
 
+// 延迟绑定的影子对象：先拿 proxy 传出去，再 set 真实对象
+LateProxy #type<T> {
+    proxy: T,
+    set(value: T): T
+};
+
 dom = {
     div(props): Component => js any,
     span(props): Component => js any,
@@ -90,6 +96,31 @@ canvasDraw = {
     ring(node, ctx, gap, radius, color, width): any => js any,
     fillRound(ctx, x, y, w, h, radius, color): any => js any,
     text(node, ctx, value, x, y, style): any => js any
+};
+
+flex2 = {
+    $(props): any => js any
+};
+grow2 = {
+    $(props): any => js any
+};
+align2 = {
+    $(props): any => js any
+};
+createScroll2 = {
+    $(container, direction, ...rest): any => js any
+};
+forEachNode2 = {
+    $(provider, creater): any => js any
+};
+ifNode2 = {
+    $(condition, then, otherwise): any => js any
+};
+textDefaults2 = {
+    text: any,
+    placeholder: any,
+    setText(value): any => js any,
+    setPlaceholder(value): any => js any
 };
 
 // three 组件（mve-three 薄桥接）：stage 是持有 WebGLRenderer 的 div，其余是 3D 节点
@@ -167,6 +198,10 @@ createSignal = {
     $<T>(initial: T): Signal<T> => js any
 };
 
+lateProxy = {
+    $<T>: LateProxy<T> => js any
+};
+
 multiBind = {
     $<T>(holder: Holder<T>): Bound<T> => js any
 };
@@ -211,6 +246,7 @@ config = {
         fc = fc,
         forEach = forEach,
         createSignal = createSignal,
+        lateProxy = lateProxy,
         multiBind = multiBind,
         bindSignal = bindSignal,
         bindRef = bindRef,
@@ -221,6 +257,13 @@ config = {
         js = js,
         canvas = canvas,
         canvasDraw = canvasDraw,
+        flex2 = flex2,
+        grow2 = grow2,
+        align2 = align2,
+        createScroll2 = createScroll2,
+        forEachNode2 = forEachNode2,
+        ifNode2 = ifNode2,
+        textDefaults2 = textDefaults2,
         three = three,
         flex = flex,
         grow = grow,

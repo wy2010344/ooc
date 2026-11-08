@@ -54,8 +54,8 @@ tradeLabel = [side =>
     #else;
     '卖出'
 ];
-noteText = [t, px, amount, side =>
-    '模拟${tradeLabel $ side} ${qtyText $ t px amount} — 未提交交易所'
+noteText = [op =>
+    '模拟${tradeLabel $ (op side)} ${qtyText $ (op t) (op px) (op amount)} — 未提交交易所'
 ];
 clearPriceClass = 'rounded-sm border border-white/10 px-1 font-mono text-[9px] text-zinc-500 transition-colors hover:border-white/25 hover:text-zinc-200';
 hideUnless = [visible =>
@@ -114,7 +114,7 @@ Ticket = fc $ [ctx, props =>
         note $ '等待行情…'
     ];
     submit = [e =>
-        note $ (noteText $ (p ticker $) (pxOf $) (amount $) (side $))
+        note $ (noteText $ { t = (p ticker $), px = (pxOf $), amount = (amount $), side = (side $) })
     ];
 
     (dom div { className = 'flex h-full flex-col' }

@@ -3,6 +3,7 @@
 export { dom, text, html, fc, forEach, svg } from 'ooc-mve-bridge'
 export {
   createSignal,
+  lateProxy,
   memo,
   addEffect,
   createContext,
@@ -16,13 +17,20 @@ export {
   three,
   readValue,
   flex,
+  flex2,
   grow,
+  grow2,
   align,
+  align2,
   ignoreFlex,
   rgba,
   colorToCSS,
   layoutSize,
   layoutSizeDirection,
+  createScroll2,
+  forEachNode2,
+  ifNode2,
+  textDefaults2,
 } from 'ooc-mve-bridge'
 export { storage, js, merge } from 'object-oriented-c-language'
 export {

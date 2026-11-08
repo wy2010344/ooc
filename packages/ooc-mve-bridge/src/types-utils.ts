@@ -68,8 +68,18 @@ Bound #type<T> {
     $(value: T): T
 };
 
+// 延迟绑定的影子对象：先拿 proxy 传出去，再 set 真实对象
+LateProxy #type<T> {
+    proxy: T,
+    set(value: T): T
+};
+
 createSignal = {
     $<T>(initial: T): Signal<T>
+};
+
+lateProxy = {
+    $<T>: LateProxy<T>
 };
 
 multiBind = {
@@ -138,6 +148,7 @@ config = {
         fc = fc,
         forEach = forEach,
         createSignal = createSignal,
+        lateProxy = lateProxy,
         multiBind = multiBind,
         bindSignal = bindSignal,
         bindRef = bindRef,

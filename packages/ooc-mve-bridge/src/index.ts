@@ -22,6 +22,18 @@ export {
 } from './canvas.js'
 export type { CanvasComponent, CanvasTagFactory } from './canvas.js'
 
+// canvasRender2（retained 节点树）：节点实现是 OOC 源码（src/canvas2/*.ooc），
+// 这里只把布局 / 滚动 / 列表原语按 2 后缀转出（避免与 canvas v1 同名冲突）。
+export {
+  align as align2,
+  createScroll as createScroll2,
+  flex as flex2,
+  forEachNode as forEachNode2,
+  grow as grow2,
+  ifNode as ifNode2,
+  textDefaults as textDefaults2,
+} from 'mve-dom-helper/canvasRender2'
+
 // 桥接共享工具：读值（lambda 展开）
 export { readValue } from './args.js'
 
@@ -30,7 +42,13 @@ export { three, threeStage } from './three.js'
 export type { ThreeComponent, ThreeTagFactory } from './three.js'
 
 // 响应式信号 + language 原生原语：OOC 侧直接 import 使用，不需要 globals 注入
-export { createSignal, memo, addEffect } from 'wy-helper'
+export {
+  createSignal,
+  createLateProxy,
+  createLateProxy as lateProxy,
+  memo,
+  addEffect,
+} from 'wy-helper'
 export { createContext } from 'mve-core'
 export { storage, js, merge } from 'object-oriented-c-language'
 

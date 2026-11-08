@@ -192,6 +192,32 @@ canvasDraw = {
     fillRound(ctx, x, y, w, h, radius, color): any,
     text(node, ctx, value, x, y, style): any
 };
+
+// canvasRender2（retained 节点树）的布局 / 滚动 / 列表原语；节点实现是 OOC 源码
+flex2 = {
+    $(props): any
+};
+grow2 = {
+    $(props): any
+};
+align2 = {
+    $(props): any
+};
+createScroll2 = {
+    $(container, direction, ...rest): any
+};
+forEachNode2 = {
+    $(provider, creater): any
+};
+ifNode2 = {
+    $(condition, then, otherwise): any
+};
+textDefaults2 = {
+    text: any,
+    placeholder: any,
+    setText(value): any,
+    setPlaceholder(value): any
+};
 ` + threeTypesSource + utilsTypesSource
 
 /**

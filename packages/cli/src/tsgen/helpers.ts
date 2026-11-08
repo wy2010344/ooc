@@ -37,9 +37,14 @@ export function typeDefCode(td: any): string {
         )
         .join(', ')
       const ret = typeAnnot(m.typeAnnotation)
-      // 零参无泛型无 rest 成员渲染为属性形态（kind: 'circle'）：TS 可区分联合判别/收窄生效；
-      // 泛型零参保持方法形态（TS 属性不能泛型）
-      const isProp = (m.params || []).length === 0 && !m.restParam && !typeArgs
+      // 零参无泛型无 rest 成员默认渲染为属性形态（kind: 'circle'）：TS 可区分联合判别/收窄生效。
+      // 桥接层可用 `[method]` 强制方法形态，供 TS 直接 `obj.foo()`；
+      // 泛型零参本来就只能是方法形态（TS 属性不能泛型）。
+      const forceMethod = (m.annotations || []).some(
+        (a: any) => a.value === 'method',
+      )
+      const isProp =
+        (m.params || []).length === 0 && !m.restParam && !typeArgs && !forceMethod
       return isProp
         ? `  ${mname}${ret || ': any'}`
         : `  ${mname}${typeArgs ? `<${typeArgs}>` : ''}(${mparams})${ret || ': any'}`

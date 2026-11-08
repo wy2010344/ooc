@@ -76,6 +76,11 @@ export const js = {
  * 组装期先对已包装的委托（自带 __chain 自有键）展平其链段，再包一层兜底
  * Proxy（见 chainWrap）；原对象（overrides/defaults）只读不写，可被多个 merge
  * 安全共享，也可把已组合的委托再拼接进新链（二次 merge 不丢链）。
+ *
+ * this 语义是 home-object：成员在哪一层命中，this 就是那一层对象——
+ * `merge $ a b` 里 a 方法的 this 恒为 a、b 方法的恒为 b。string / 类实例
+ * 等宿主对象进链时，其方法依赖的内部字段与原型方法才不会丢（若把 this
+ * 换成包装对象，方法体内部读写全部对不上号）。
  */
 export const merge = {
   // merge $ overrides defaults … → 链式委托包装对象
@@ -105,8 +110,7 @@ function chainWrap(entries: unknown[]): unknown {
     writable: false,
     configurable: false,
   })
-  // receiver 延迟绑定（Proxy 创建前先占位），让方法以包装对象本身执行
-  const receiverHolder: { v: unknown } = { v: undefined }
+  // home-object 语义：成员在哪层命中，this 就是那层对象（见 merge 头注释）。
   const wrapped = proxyCatchAll(wrapper, (name, ...args) => {
     for (const o of entries) {
       if (o == null) continue
@@ -117,27 +121,26 @@ function chainWrap(entries: unknown[]): unknown {
           ? Object.getOwnPropertyDescriptor(o, name)
           : undefined
       if (desc) {
-        // 属性成员（getter）以包装对象为 receiver 单次读取，结果原样返回
-        //（可为 lambda，绝不二次调用）。
+        // getter 以命中层为 this 单次读取，结果原样返回（可为 lambda，绝不二次调用）。
         if (desc.get || desc.set) {
-          return desc.get ? desc.get.call(receiverHolder.v ?? o) : undefined
+          return desc.get ? desc.get.call(o) : undefined
         }
         const v = desc.value
         if (typeof v === 'function') {
-          return v.apply(receiverHolder.v, args)
+          return v.apply(o, args)
         }
         return v
       }
-      // 非 own 成员（原型链方法等）：用 in 判断存在性，存在即命中
+      // 非 own 成员（原型链方法等）：用 in 判断存在性，存在即命中；
+      // this 同样绑定到命中层对象本身（string/实例的原型方法依赖它）。
       if (!(name in Object(o))) continue
       const v = (o as Record<string, unknown>)[name]
       if (typeof v === 'function') {
-        return v.apply(receiverHolder.v, args)
+        return v.apply(o, args)
       }
       return v
     }
-    throw new OocMethodNotFoundError(receiverHolder.v, name, args)
+    throw new OocMethodNotFoundError(wrapped, name, args)
   })
-  receiverHolder.v = wrapped
   return wrapped
 }

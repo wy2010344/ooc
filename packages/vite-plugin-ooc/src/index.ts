@@ -138,10 +138,14 @@ export function oocPlugin(): Plugin {
       // 交给 load 钩子 transform 成 JS（.ooc 不在 vite 的 JS 扩展名列表里）
       if (source.endsWith('.ooc')) {
         // 注意：win32 的 path.isAbsolute('/x') 为 true（盘符根相对），不能直接当绝对路径；
-        // 只有带盘符（C:/...）才是真绝对，'/src/...' 这类 dev URL 应按 root 拼接
+        // 只有带盘符（C:/...）才是真绝对，'/src/...' 这类 dev URL 应按 root 拼接。
+        // 浏览器侧的外部文件模块会以 vite 的 '/@fs/C:/...' 形式回传，必须先剥掉前缀。
+        const FS_PREFIX = '/@fs/'
         const hasDrive = /^[a-zA-Z]:[\\/]/.test(source)
         let abs: string
-        if (path.isAbsolute(source) && hasDrive) {
+        if (source.startsWith(FS_PREFIX)) {
+          abs = source.slice(FS_PREFIX.length)
+        } else if (path.isAbsolute(source) && hasDrive) {
           abs = source
         } else if (source.startsWith('/') || source.startsWith('\\')) {
           abs = path.join(root, source) // dev URL/root 相对 → root 下

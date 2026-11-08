@@ -12,6 +12,8 @@ import componentsData from './ooc/pages/components-data.ooc'
 import componentsOverlays from './ooc/pages/components-overlays.ooc'
 import componentsVisual from './ooc/pages/components-visual.ooc'
 import financeDashboard from './ooc/pages/finance-dashboard.ooc'
+import canvas2Demo from './ooc/pages/canvas2-demo.ooc'
+import canvas2Todo from './ooc/pages/canvas2-todo-page.ooc'
 
 // .ooc 是一等源码模块：vite-plugin-ooc 在内存里 transform 成纯 ES 模块。
 // hash 路由只负责选页，每个页面仍是普通的 OOC fc 组件。
@@ -27,6 +29,8 @@ const routes: Record<string, PageFactory> = {
   '/components/overlays': componentsOverlays,
   '/components/visual': componentsVisual,
   '/dashboard': financeDashboard,
+  '/canvas2': canvas2Demo,
+  '/canvas2-todo': canvas2Todo,
 }
 
 const container = document.getElementById('app')!

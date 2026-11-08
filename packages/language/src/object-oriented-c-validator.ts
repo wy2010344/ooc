@@ -7,6 +7,7 @@ import type {
   LambdaDef,
   MethodAll,
   Method,
+  TypeDef,
 } from './generated/ast.js'
 import type { ObjectOrientedCServices } from './object-oriented-c-module.js'
 import { getMethodName, extractMethodDefName } from './completion-type-utils.js'
@@ -41,6 +42,7 @@ export function registerValidationChecks(
   const checks: ValidationChecks<ObjectOrientedCAstType> = {
     ObjectDef: validator.checkObjectDef,
     LambdaDef: validator.checkLambdaDef,
+    TypeDef: validator.checkTypeDefAnnotations,
     Model: validator.checkModel,
   }
   registry.register(checks, validator)
@@ -243,6 +245,24 @@ export class ObjectOrientedCValidator {
 
   checkLambdaDef(lambda: LambdaDef, accept: ValidationAcceptor): void {
     checkParamDuplicates(lambda, this.wrap(accept))
+  }
+
+  /** #type 成员注解目前只有 [method]，写错名字要报错而不是静默退化成属性。 */
+  checkTypeDefAnnotations(model: TypeDef, accept: ValidationAcceptor): void {
+    for (const member of model.body.members) {
+      for (const annotation of member.annotations) {
+        if (annotation.value === 'method') continue
+        this.wrap(accept)(
+          'error',
+          `未知的成员注解 '[${annotation.value}]'，目前只支持 [method]`,
+          {
+            node: annotation,
+            property: 'value',
+            data: diagnosticData('unknownAnnotation'),
+          },
+        )
+      }
+    }
   }
 }
 

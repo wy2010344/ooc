@@ -25,6 +25,7 @@ import {
 } from './evaluate.js'
 import { addScope, type Scope } from './scope.js'
 import { OocMethodNotFoundError } from './errors.js'
+import { isCatchAllProxy } from './proxy.js'
 
 /** 空对象单例：`{}` 字面量共享同一个实例 */
 const EMPTY_OBJECT: Record<string, unknown> = {}
@@ -302,6 +303,27 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
   const name = message.name
   const args = interpretMessageArgs(message.args, scope)
   return sendMessage(o, getMethodCallName(name), args)
+}
+
+/**
+ * 该对象是否应答 `name` 消息（判据与 sendMessage 的派发顺序一致）：
+ * own descriptor → 原型链 / 宿主内建的 `in` → 兜底 Proxy 登记表。
+ *
+ * 给宿主桥接用：桥接不能枚举 OOC 对象的成员（可能是 merge 委托或 Proxy，键不存在），
+ * 只能按契约名「问一声」，由这个判据决定走对象还是走宿主默认值。
+ */
+export function respondsTo(o: any, name: string): boolean {
+  if (typeof o == 'function' && name == '$') {
+    return true
+  }
+  if (o == null || (typeof o !== 'object' && typeof o !== 'function')) {
+    return false
+  }
+  // 兜底代理对任何名字都应答（has 陷阱缺省，`in` 查不出来）
+  if (isCatchAllProxy(o)) {
+    return true
+  }
+  return Boolean(Object.getOwnPropertyDescriptor(o, name)) || name in Object(o)
 }
 
 export function sendMessage(o: any, value: string, args: any[]): any {
