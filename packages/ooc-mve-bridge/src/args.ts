@@ -10,7 +10,7 @@
  *   merge 委托或 Proxy，键枚举不出来；getter/method 的 `this` 也必须落在定义它的那一层。
  */
 import { hookTrackAttr } from 'mve-core'
-import { respondsTo, sendMessage } from 'object-oriented-c-language'
+import { respondsTo, sendMessage, UNHANDLED } from 'object-oriented-c-language'
 
 /** 读值：lambda（GetValue）就调用，普通值原样返回——文本/数字读数统一入口 */
 export function readValue(value: unknown): unknown {
@@ -19,8 +19,9 @@ export function readValue(value: unknown): unknown {
 
 /**
  * 读取属性对象：支持 merge 链（自身带 `__chain` 的委托包装）。
- * 这是属性收集快照：链段从前往后扫，第一个非 `undefined` 值生效。
- * （消息派发另见 `bridges.chainWrap`：那边是命中即停，方法返回 `undefined` 也不后查。）
+ * 这是属性收集快照：链段从前往后扫，第一个非 `undefined`、非弃权哨兵的值生效。
+ * （消息派发另见 `sendTo`：那边是命中即停，方法返回 `undefined` 也不后查，
+ * 只有显式返回 UNHANDLED 才继续委托。）
  */
 export function collectProps(arg: unknown): Record<string, unknown> {
   const result: Record<string, unknown> = {}
@@ -44,7 +45,8 @@ export function collectProps(arg: unknown): Record<string, unknown> {
         continue
       }
       const value = desc.get ? desc.get.call(source) : desc.value
-      if (value === undefined) {
+      // 弃权哨兵不是属性值：跳过，让后面链段 / 宿主默认值生效
+      if (value === undefined || value === UNHANDLED) {
         continue
       }
       seen.add(key)
@@ -66,7 +68,10 @@ function chainOf(target: unknown): readonly unknown[] | null {
   return Array.isArray(chain) ? chain : null
 }
 
-/** 目标是否应答 `name` 消息：merge 链上任意一层应答即可 */
+/**
+ * 目标是否应答 `name` 消息：merge 链上任意一层应答即可。
+ * 静态的名字查询，不预知该层运行时是否显式弃权（见 sendTo）。
+ */
 export function hasMessage(target: unknown, name: string): boolean {
   const chain = chainOf(target)
   if (chain) {
@@ -80,19 +85,25 @@ export function hasMessage(target: unknown, name: string): boolean {
  *
  * - merge 链逐层询问，**命中即停**：该层应答就用它，值为 nil 也不再向后查
  *   （与 merge 的 home-object 语义一致，this 落在定义成员的那一层）；
- * - 对象不应答时返回 undefined（调用方据此判断「没写」）。
+ * - 例外：该层显式返回 `UNHANDLED`（OOC 侧 `merge unhandled`）就继续查下一层；
+ * - 对象不应答 / 全链弃权时返回 undefined（调用方据此判断「没写」，让宿主默认值生效）。
+ *
+ * hasMessage 是静态名字查询，不预知运行时弃权；弃权只在真正发消息时判定。
  */
 export function sendTo(target: unknown, name: string, args: unknown[]): unknown {
   const chain = chainOf(target)
   if (chain) {
     for (const layer of chain) {
-      if (layer != null && respondsTo(layer, name)) {
-        return sendMessage(layer, name, args)
-      }
+      if (layer == null || !respondsTo(layer, name)) continue
+      const value = sendMessage(layer, name, args)
+      if (value === UNHANDLED) continue
+      return value
     }
     return undefined
   }
-  return respondsTo(target, name) ? sendMessage(target, name, args) : undefined
+  if (!respondsTo(target, name)) return undefined
+  const value = sendMessage(target, name, args)
+  return value === UNHANDLED ? undefined : value
 }
 
 /** 无参消息读取：属性值 / 计算式 getter 都按消息取一次原始值 */

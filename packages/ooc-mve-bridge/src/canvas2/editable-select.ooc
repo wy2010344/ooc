@@ -33,6 +33,8 @@ makeSelectableOf = [op =>
     nodeRef = op nodeRef;
     scrollXOf = op scrollXOf;
     body = {
+        // 反查所属舞台的选区协调者（多舞台并存时不会串到别人的选区）
+        ownerNode { nodeRef get },
         // 选中区域包围盒（全局坐标）；无选区 / 无节点时 nil
         selectionRect {
             r = selectionRangeOf $ (selfRef get);

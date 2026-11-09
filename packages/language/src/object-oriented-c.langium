@@ -229,6 +229,12 @@ Ref:
 // graft 子解析洞并填充 parts（见 template-graft.ts）——Langium 无 lexer mode，词法层
 // 不切分「文本 vs 代码」，但**到哪里收尾**由自定义 matcher 算准（见 token-builder.ts：
 // 洞内可以再写单引号字符串），洞仍留到 parse 之后再解析。
+//
+// 这两个规则只为声明 AST 类型：真实解析里 STRING token 会整段吞掉模版，规则永远走不到，
+// 洞由 template-graft 手工构造。关键点：洞的起始**不能**写成 `'${'` 字面量——Langium 会
+// 据此生成 `"${"` 关键字 token，字符串外它以「最长匹配」抢走 `$`，`f${…}` 就会被词法成
+// `f` + `"${"` 而报语法错误，只能在 `$` 与 `{` 之间加空格。改用永不匹配的哨兵终结符后，
+// `$`、`{` 各自成 token，`f${…}` 与 `f $ {…}` 都合法。
 Str:
     value=STRING parts+=TemplatePart*;
 TemplatePart:
@@ -236,7 +242,7 @@ TemplatePart:
 TemplateText:
     value=TEMPLATE_TEXT;
 TemplateHole:
-    '${' expression=Expression '}';
+    value=TEMPLATE_HOLE_OPEN expression=Expression '}';
 StID:
     value=STID;
 Bool:
@@ -252,8 +258,10 @@ terminal BOOL: /true|false/;
 // 允许了转义。注意：实际词法不用这条正则，而是 token-builder.ts 里认 ${} 深度的自定义
 // matcher（洞内可写单引号）；这里保留正则供 Langium 工具链分析（如关键字前缀判断）。
 terminal STRING: /'(\\.|[^'\\])*'/;
-// 仅为生成 TemplateText 的 AST 类型而声明；实际永不匹配（文本段由 graft 生成，源码不含 NUL）。
+// 模版文本 / 洞起始的哨兵终结符：真实源码里永不出现（NUL / SOH），
+// 只为让 TemplateText / TemplateHole 有 AST 类型；绝不能换成 `'${'` 字面量（见上）。
 terminal TEMPLATE_TEXT: /\u0000/;
+terminal TEMPLATE_HOLE_OPEN: /\u0001/;
 terminal STID: /"[^\s]*/;
 terminal NUMBER returns number: /[0-9]+(\.[0-9]+)?/;
 terminal ID: /[_a-zA-Z][_a-zA-Z0-9]*/;

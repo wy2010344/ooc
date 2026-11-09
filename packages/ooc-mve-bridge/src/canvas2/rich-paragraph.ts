@@ -41,6 +41,10 @@ export interface RichLineBox {
 export interface RichRun {
   text: string
   left: number
+  /** 每个字符的绝对横坐标：与 RichCharBox.left 同源，绘制逐字符定位 */
+  lefts: number[]
+  /** 整段绘制宽度（按字符盒累加，不用整串 measureText，避免 kerning 让线宽与高亮错位） */
+  width: number
   y: number
   font: string
   fontSize: number
@@ -162,7 +166,8 @@ export function buildRichParagraph(input: BuildRichParagraphInput): RichParagrap
   let width = 0
   for (const line of outLines) width = Math.max(width, line.width)
 
-  // 同款样式相邻字符合成一次 fillText（emoji 等宽字符按代码单元逐一测量）
+  // 同款样式相邻字符合成一个 run；每个字符仍保留自己的 left，
+// 绘制时逐字符定位，保证「看到的 = 点到的」（命中 / 选区 / 光标都用 RichCharBox）。
   const runs: RichRun[] = []
   for (const line of outLines) {
     const y = line.top + line.height / 2
@@ -178,6 +183,8 @@ export function buildRichParagraph(input: BuildRichParagraphInput): RichParagrap
         run = {
           text: c.text,
           left: c.left,
+          lefts: [c.left],
+          width: c.width,
           y,
           font: c.span.font,
           fontSize: c.span.fontSize,
@@ -190,6 +197,8 @@ export function buildRichParagraph(input: BuildRichParagraphInput): RichParagrap
         runs.push(run)
       } else {
         run!.text += c.text
+        run!.lefts.push(c.left)
+        run!.width = c.right - run!.left
       }
     }
   }
@@ -330,20 +339,18 @@ export function drawRichParagraph({
     ctx2.fillStyle = colorToCSS(run.color)
     ctx2.textAlign = 'left'
     ctx2.textBaseline = 'middle'
-    ctx2.fillText(run.text, ox + run.left, oy + run.y)
+    // 逐字符定位：整串 fillText 会引入 kerning / 连字，与逐字符测量出来的
+    // RichCharBox 不再同形，命中偏移和选区高亮就会跟画出来的字错位。
+    for (let i = 0; i < run.text.length; i++) {
+      ctx2.fillText(run.text[i], ox + run.lefts[i], oy + run.y)
+    }
     if (run.underline || run.lineThrough) {
-      const w = measureTextWidth({
-        font: run.font,
-        text: run.text,
-        letterSpacing: run.letterSpacing,
-        wordSpacing: run.wordSpacing,
-      })
       const dy = oy + run.y + (run.lineThrough ? run.fontSize * 0.05 : run.fontSize * 0.32)
       ctx2.strokeStyle = colorToCSS(run.color)
       ctx2.lineWidth = 1
       ctx2.beginPath()
       ctx2.moveTo(ox + run.left, dy)
-      ctx2.lineTo(ox + run.left + w, dy)
+      ctx2.lineTo(ox + run.left + run.width, dy)
       ctx2.stroke()
     }
   }

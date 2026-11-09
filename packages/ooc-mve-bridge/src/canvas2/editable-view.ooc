@@ -3,7 +3,8 @@
 // 段落对象来自宿主 rich-paragraph.ts（buildRichParagraph），坐标为节点内容盒原点。
 
 #import {
-    colorToCSS, applyTextStyle, paraRects, paraCaretRect, drawRichParagraph
+    colorToCSS, applyTextStyle, paraRects, paraCaretRect, drawRichParagraph,
+    coreTextDefaults
 } './host.ts';
 #import { fontOf } './text-style.ooc';
 #import { styleDefaults } './segments.ooc';
@@ -24,7 +25,9 @@ editorDefaults = {
     fontWeight = 400,
     italic = false,
     fontFamily = nil,
-    color = 4278190080,
+    // 与 TS 的 editable/params 一致：默认色取自 textDefaults 的信号，
+    // 主题切换（setText / setPlaceholder）后所有编辑器随重绘换肤
+    color { coreTextDefaults text },
     selectionColor = 1430950114,
     caretColor = nil,
     lineHeightMultiplier = 1.4,
@@ -33,7 +36,7 @@ editorDefaults = {
     singleLine = false,
     readOnly = false,
     placeholder = '',
-    placeholderColor = 2290649224,
+    placeholderColor { coreTextDefaults placeholder },
     // ---- 自定义绘制（在文字之后） ----
     draw(ctx2, node) { nil }
 };
@@ -41,6 +44,9 @@ editorDefaults = {
 lineHeightOf = [p => (p fontSize) * (p lineHeightMultiplier)];
 innerWidthOf = [node =>
     maxZero $ (((node width) - (node paddingInlineStart)) - (node paddingInlineEnd))
+];
+innerHeightOf = [node =>
+    maxZero $ (((node height) - (node paddingBlockStart)) - (node paddingBlockEnd))
 ];
 
 caretLeftOf = [para, index =>
@@ -86,7 +92,8 @@ drawEditorIn = [op =>
     ctx2 = op ctx2;
     ctx2 save;
     ctx2 beginPath;
-    ctx2 rect 0 0 (node width) (node height);
+    // 单行溢出裁到内容盒（对齐 EditableTextNode.draw 的 clip）：文字 / 光标都不该画出边框
+    ctx2 rect (node paddingInlineStart) (node paddingBlockStart) (innerWidthOf $ node) (innerHeightOf $ node);
     ctx2 clip;
     paintEditorBody $ op;
     ctx2 restore

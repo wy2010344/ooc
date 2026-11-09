@@ -71,12 +71,16 @@ normalizeIn = [list =>
     outRef get
 ];
 
-// 取某偏移处的风格（落在段内取段风格，否则 nil）
+// 取某偏移处的风格（落在段内取段风格，否则 nil）。
+// 「先命中先赢」：段表万一有重叠（历史数据 / 外部写入），要与 spansOfIn 的单调守卫同口径，
+// 不能让后面的段覆盖前面的判定。用独立的命中标志，因为基础样式本身就是 nil。
 styleAtIn = [list, index =>
     foundRef = storage ref nil;
+    hitRef = storage ref false;
     list forEach [seg, i =>
-        #guard ((seg start) <= index) && (index < (seg end));
-        foundRef set (seg style)
+        #guard ((hitRef get) == false) && ((seg start) <= index) && (index < (seg end));
+        foundRef set (seg style);
+        hitRef set true
     ];
     foundRef get
 ];
@@ -127,8 +131,30 @@ suffixOf = [a, b, prefix =>
     maxS
 ];
 
+// 插入区继承「插入点左邻字符」的样式（文档首没有左邻，退回基础样式）。
+// TS 原版：styleAtIn(list, oldText, clamp(p - 1, 0, oldText.length - 1))。
+// 取插入点本身是错的：右侧字符可能是另一种样式，打字时会串味。
+inheritStyleOf = [list, oldText, p =>
+    #guard (oldText length) > 0;
+    styleAtIn $ list (maxOf $ 0 (p - 1))
+    #else;
+    nil
+];
+
+// 插入区风格：待输入样式优先，否则继承插入点左邻字符（对齐 TS setStyleRange 之后的打字）
+inheritOr = [op, list, oldText, p =>
+    #guard op insertStyle;
+    op insertStyle
+    #else;
+    inheritStyleOf $ list oldText p
+];
+
 // 文本变化后重排段（对应 alignIn）：公共前后缀不变，变化区间内换成插入点风格。
+// 记 p=cutStart、insEnd=新串插入终点、oldRemoveEnd=cutEnd=旧串删除终点、delta=newLen-oldLen：
+//   insEnd - oldRemoveEnd == delta，所以右侧碎片整体平移 delta 后正好接在插入区之后。
 alignIn = [op =>
+    // insertStyle 是可选参数：用 merge 兜底，旧调用方不传也不会读到未定义成员
+    safeOp = merge $ op { insertStyle = nil };
     list = op list;
     oldText = op oldText;
     newText = op newText;
@@ -138,6 +164,7 @@ alignIn = [op =>
     cutStart = prefixOf $ oldText newText;
     suffix = suffixOf $ oldText newText cutStart;
     cutEnd = oldLen - suffix;
+    insEnd = newLen - suffix;
     delta = newLen - oldLen;
     outRef = storage ref (Array of);
     list forEach [seg, i =>
@@ -152,13 +179,15 @@ alignIn = [op =>
         #guard (e > s) && outside;
         addIf $ { ref = outRef, start = start2, end = end2, style = (seg style) }
         #else;
-        // 跨变化区间：保留左侧与右侧碎片
+        // 跨变化区间：左碎片截到 p；右碎片 [oldRemoveEnd, e) 映射到 [insEnd, ...)，
+        // 两端都要加 delta（只加终点会让起点落在插入区里，两段重叠 → 右侧样式整段丢）。
         addIf $ { ref = outRef, start = s, end = (minOf $ e cutStart), style = (seg style) };
-        addIf $ { ref = outRef, start = (maxOf $ s cutEnd), end = (e - (oldLen - newLen)), style = (seg style) }
+        addIf $ { ref = outRef, start = ((maxOf $ s cutEnd) + delta), end = (e + delta), style = (seg style) }
     ];
-    // 变化区间替换成一段：风格取自插入点
-    addIf $ { ref = outRef, start = cutStart, end = (cutStart + (newLen - cutStart - suffix)), style = (styleAtIn $ list cutStart) };
-    normalizeIn $ (outRef get)
+    addIf $ { ref = outRef, start = cutStart, end = insEnd, style = (inheritOr $ safeOp list oldText cutStart) };
+    // 插入区是最后追加的，起点却最靠左：不排序会让 spansOfIn 的单调守卫把它整段跳过，
+    // 归一化的「相邻同款」合并也要求按起点有序。与 setRangeIn 同一口径。
+    normalizeIn $ ((outRef get) toSorted [x, y => (x start) - (y start)])
 ];
 
 {

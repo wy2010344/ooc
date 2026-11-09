@@ -25,8 +25,11 @@ Canvas2Demo = fc $ [ctx =>
         { start = 0, end = 3, style = { bold = true } }
         { start = 31, end = 34, style = { italic = true, color = (rgba $ 220 38 38 255) } }
     );
+    // 光标塌缩时工具栏改的是「待输入样式」，这里回显出来，否则点了看不出状态
+    pendingLabel = bindSignal $ '基础';
 
-    // 工具栏按钮：mousedown 阻止默认行为，避免隐藏 textarea 失焦
+    // 工具栏按钮：回调写方法带参数，组件内直接按消息调用（不包 lambda）
+    // mousedown 阻止默认行为，避免隐藏 textarea 失焦
     toolButton = [op =>
         (dom button {
             type = 'button',
@@ -35,7 +38,8 @@ Canvas2Demo = fc $ [ctx =>
             onClick(e) {
                 h = editorHandleRef get;
                 #guard h;
-                (op act) $ h
+                op act h;
+                pendingLabel $ (h styleLabel)
             }
         } (text $ (op label)))
     ];
@@ -203,14 +207,14 @@ Canvas2Demo = fc $ [ctx =>
         )
         // ---- 富文本编辑器（B / I / U / 删除线 / 颜色 / 撤销重做） ----
         (dom div { className = 'flex flex-wrap items-center gap-2' }
-            (toolButton $ { label = 'B', act = [h => h toggleBold] })
-            (toolButton $ { label = 'I', act = [h => h toggleItalic] })
-            (toolButton $ { label = 'U', act = [h => h toggleUnderline] })
-            (toolButton $ { label = 'S', act = [h => h toggleLineThrough] })
-            (toolButton $ { label = '红', act = [h => h setColor (rgba $ 220 38 38 255)] })
-            (toolButton $ { label = '黑', act = [h => h setColor canvas2Ink] })
-            (toolButton $ { label = '撤销', act = [h => h undo] })
-            (toolButton $ { label = '重做', act = [h => h redo] })
+            (toolButton $ { label = 'B', act(h) { h toggleBold } })
+            (toolButton $ { label = 'I', act(h) { h toggleItalic } })
+            (toolButton $ { label = 'U', act(h) { h toggleUnderline } })
+            (toolButton $ { label = 'S', act(h) { h toggleLineThrough } })
+            (toolButton $ { label = '红', act(h) { h setColor (rgba $ 220 38 38 255) } })
+            (toolButton $ { label = '黑', act(h) { h setColor canvas2Ink } })
+            (toolButton $ { label = '撤销', act(h) { h undo } })
+            (toolButton $ { label = '重做', act(h) { h redo } })
         )
         (stage $ {
             id = 'canvas2-editor-stage',
@@ -255,7 +259,7 @@ Canvas2Demo = fc $ [ctx =>
             )
         )
         (dom p { className = 'text-xs tabular-nums text-muted-foreground' }
-            (text $ [ '文本 ${(editorText $) length} 字 · 样式段 ${(editorSegs $) length} 段' ])
+            (text $ [ '文本 ${(editorText $) length} 字 · 样式段 ${(editorSegs $) length} 段 · 待输入样式：${pendingLabel $}' ])
         )
     ) $ ctx
 ];

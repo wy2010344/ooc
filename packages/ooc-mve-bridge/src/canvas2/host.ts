@@ -25,6 +25,7 @@ export {
   absoluteX,
   absoluteY,
   repeatEvery,
+  textDefaults as coreTextDefaults,
 } from 'mve-dom-helper/canvasRender2'
 export {
   applyTextStyle,
@@ -47,6 +48,8 @@ export {
 } from './rich-paragraph.js'
 export {
   setHostCanvas,
+  setActiveCanvas,
+  removeHostCanvas,
   addGlobalMove,
   addGlobalUp,
   dragPointer,
@@ -55,7 +58,12 @@ export {
   canvasOrigin,
 } from './host-pointer.js'
 export { wordRangeOf, paragraphRangeOf } from './selection.js'
-export { setActiveEditor, syncInputPosition, disposeTextInput } from './text-input.js'
+export {
+  setActiveEditor,
+  syncInputPosition,
+  registerTextInput,
+  disposeTextInput,
+} from './text-input.js'
 
 // 同一文件内使用需要本地绑定（re-export 不引入作用域名）
 import { colorToCSS, roundRectPath } from 'mve-dom-helper/canvasRender'

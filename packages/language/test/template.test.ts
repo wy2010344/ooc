@@ -63,6 +63,18 @@ describe('模版切段', () => {
   })
 })
 
+describe('字符串外的 $ 与 {', () => {
+  // 旧语法里 `TemplateHole: '${' …` 会让 Langium 生成 `"${"` 关键字 token，
+  // 字符串外它以最长匹配抢走 `$`，`f${…}` 直接报语法错误，只能写 `f $ {…}`。
+  test('f${…} 不要求在 $ 与 { 之间留空格', async () => {
+    expect(await interpreter.interpret("f = [x => x a]; f${ a = 1 }")).toBe(1)
+  })
+
+  test('留空格的 $ {…} 写法仍然有效', async () => {
+    expect(await interpreter.interpret("f = [x => x a]; f $ { a = 1 }")).toBe(1)
+  })
+})
+
 describe('模版求值', () => {
   test('洞内可以直接写单引号分支', async () => {
     const expr = (v: boolean) =>

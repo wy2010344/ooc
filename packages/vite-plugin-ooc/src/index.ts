@@ -18,7 +18,6 @@ import {
   modelToTs,
   OOC_RUNTIME_MODULE,
   resolveImportSource,
-  collectImports,
   typeExportNames,
   tsTypeExportNames,
 } from 'object-oriented-c-cli'
@@ -29,6 +28,11 @@ import {
   makeHoleParser,
 } from 'object-oriented-c-language'
 import { NodeFileSystem } from 'langium/node'
+import {
+  createImportRefChecker,
+  checkLocalUndefinedRefs,
+  configGlobalNames,
+} from './import-refs.js'
 
 /** 共享运行时虚拟模块 id：各 .ooc 产物从它 import __send/__mutable，bundle 只保留一份。 */
 export const OOC_RUNTIME_VIRTUAL_ID = 'virtual:ooc-runtime'
@@ -41,8 +45,13 @@ const RUNTIME_JS = ts
   })
   .outputText
 
+export interface OocPluginOptions {
+  /** 宿主注入、源码里不写 #import 也能用的全局名（如 playground 预载库） */
+  globals?: string[]
+}
+
 /** 创建 OOC 一等模块 vite 插件。 */
-export function oocPlugin(): Plugin {
+export function oocPlugin(options: OocPluginOptions = {}): Plugin {
   // 共享 langium 服务（只用于 parse 单个 .ooc，不做 linking/validation）
   const services = createObjectOrientedCServices(NodeFileSystem)
   // 模版字符串：fromString 不经 DocumentBuilder，需在此手动 graft 洞内表达式。
@@ -65,6 +74,9 @@ export function oocPlugin(): Plugin {
     return model
   }
 
+  /** 构建期未定义引用检查（导出名解析与缓存见 import-refs.ts） */
+  const refChecker = createImportRefChecker(parseModel)
+
   /** #import 原值 → 相对当前 .ooc 模块的 ES import 说明符（带扩展名，vite 可直接解析）。 */
   function specifierFor(id: string, raw: string): string {
     const target = resolveImportSource(raw, id)
@@ -74,8 +86,13 @@ export function oocPlugin(): Plugin {
   }
 
   // 依赖模块解析缓存：命名导入需区分类型/值导出（.ooc 解析 AST、.ts 扫声明）
+  // 一律以真实绝对路径为 key，文件改动时由 handleHotUpdate 精确清掉（见下）
   const depModelCache = new Map<string, Model>()
   const depTypeNameCache = new Map<string, string[]>()
+  /** 模块 → 它 #import 的真实路径；重编译时要先撤销旧的反向登记 */
+  const importsBy = new Map<string, Set<string>>()
+  /** 依赖目标 → 引用它的模块；目标改动时让这些模块一起失效 */
+  const importers = new Map<string, Set<string>>()
   function depTypeNames(fromId: string, raw: string): string[] {
     const target = resolveImportSource(raw, fromId)
     if (target.endsWith('.ts') || target.endsWith('.js') || target.endsWith('.mjs')) {
@@ -95,17 +112,55 @@ export function oocPlugin(): Plugin {
     return names
   }
 
+  /** 重编译时刷新「目标 → 引用方」反向表，避免旧依赖残留导致多余/漏失效 */
+  function recordDeps(id: string, deps: readonly string[]): void {
+    const old = importsBy.get(id)
+    if (old) {
+      for (const dep of old) importers.get(dep)?.delete(id)
+    }
+    const next = new Set(deps)
+    importsBy.set(id, next)
+    for (const dep of next) {
+      let owners = importers.get(dep)
+      if (!owners) {
+        owners = new Set()
+        importers.set(dep, owners)
+      }
+      owners.add(id)
+    }
+  }
+
   /** .ooc 源码 → JS 模块（modelToTs 纯 ES 形态 + transpileModule 剥类型，保留真 ES import）。 */
-  function compile(oocSource: string, realAbs: string): { code: string } {
+  function compile(
+    oocSource: string,
+    realAbs: string,
+  ): { code: string; deps: string[] } {
     const model = parseModel(oocSource, realAbs)
-    const deps = collectImports(model).map((raw) => ({
-      path: raw,
-      specifier: specifierFor(realAbs, raw),
-      typeNames: depTypeNames(realAbs, raw),
-    }))
+    // config.ooc 自身不是运行时模块，且 globals 的 RHS 故意引用注入的宿主名，跳过
+    if (path.basename(realAbs) !== 'config.ooc') {
+      const globals = [...configGlobalNames(realAbs), ...(options.globals ?? [])]
+      checkLocalUndefinedRefs(model, realAbs, globals)
+    }
+    const imports = (model.expressions as any[]).filter(
+      (st) => st.$type === 'ImportStatement',
+    )
+    const deps: string[] = []
+    const esmDeps = imports.map((st) => {
+      refChecker.check(realAbs, st)
+      try {
+        deps.push(resolveImportSource(st.path, realAbs))
+      } catch {
+        // 解析失败的路径交给 vite 的模块解析报错，不在这里抢跑
+      }
+      return {
+        path: st.path as string,
+        specifier: specifierFor(realAbs, st.path),
+        typeNames: depTypeNames(realAbs, st.path),
+      }
+    })
     const tsCode = modelToTs(model, {
       runtimeImport: OOC_RUNTIME_VIRTUAL_ID,
-      deps,
+      deps: esmDeps,
     })
     const js = ts
       .transpileModule(tsCode, {
@@ -119,7 +174,7 @@ export function oocPlugin(): Plugin {
         },
       })
       .outputText
-    return { code: js }
+    return { code: js, deps }
   }
 
   return {
@@ -162,11 +217,34 @@ export function oocPlugin(): Plugin {
       if (id === RESOLVED_RUNTIME_ID) {
         return { code: RUNTIME_JS }
       }
-      if (id.endsWith('.ooc')) {
-        // 每次 load 都从磁盘重读；vite 文件监听该真实路径，改动自动失效并重新加载（热更新）
-        return compile(fs.readFileSync(id, 'utf8'), id)
+      if (!id.endsWith('.ooc')) return undefined
+      // 每次 load 都从磁盘重读（不缓存 source → model）
+      const { code, deps } = compile(fs.readFileSync(id, 'utf8'), id)
+      // root 之外的 .ooc（浏览器以 /@fs/... 引用）不在 vite 默认 watch 范围内，
+      // 必须显式登记自己和 #import 目标，否则改了文件不失效、要重启 dev server。
+      const ctx = this as any
+      ctx?.addWatchFile?.(id)
+      for (const dep of deps) ctx?.addWatchFile?.(dep)
+      recordDeps(id, deps)
+      return { code }
+    },
+
+    handleHotUpdate(ctx) {
+      const file = path.normalize(ctx.file)
+      // 依赖的导出名 / 类型名可能变了，解析缓存按文件精确失效
+      depModelCache.delete(file)
+      depTypeNameCache.delete(file)
+      refChecker.invalidate(file)
+      const owners = importers.get(file)
+      if (!owners || owners.size === 0) return undefined
+      const graph = (ctx.server as any)?.moduleGraph
+      const extra: any[] = []
+      for (const id of owners) {
+        const mod = graph?.getModuleById?.(id)
+        if (mod && !(ctx.modules as any[]).includes(mod)) extra.push(mod)
       }
-      return undefined
+      // 连坐：引用方也 invalidate，重新 load 时才会重算 import 形态与导出检查
+      return extra.length > 0 ? [...ctx.modules, ...extra] : undefined
     },
   }
 }

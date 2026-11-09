@@ -2,6 +2,6 @@
 export { type Value, sendMessage, respondsTo } from './runtime.js'
 export { createInterpretAction, createTypeCheckAction } from './host.js'
 export type { Globals } from './scope.js'
-export { merge, js, storage } from './bridges.js'
+export { merge, js, storage, UNHANDLED } from './bridges.js'
 export { proxyCatchAll } from './proxy.js'
 export { OocCircularImportError, OocMethodNotFoundError } from './errors.js'

@@ -108,6 +108,7 @@ function hashStr(s: string): string {
 export const DIAGNOSTIC_CODES = {
   duplicateDeclaration: 'duplicateDeclaration',
   temporalDeadZone: 'temporalDeadZone',
+  undefinedReference: 'undefinedReference',
   typeMismatch: 'typeMismatch',
   guardNotBoolean: 'guardNotBoolean',
   notGeneric: 'notGeneric',

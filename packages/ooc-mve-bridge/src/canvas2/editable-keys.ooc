@@ -173,7 +173,7 @@ keyEndIn = [env, mod, shift =>
     par = env paraOf $;
     sel = selectionIn $ env;
     edge = paraLineEdge $ par (paraLineIndexOf $ par (caretMidYOf $ par (sel f)));
-    pos = when $ mod ((env p) text length) (edge end);
+    pos = when $ mod (((env p) text) length) (edge end);
     selectIn $ { env = env, a = (sel a), f = pos, shift = shift }
 ];
 

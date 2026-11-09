@@ -26,6 +26,7 @@ import { extnameOf, resolveModuleName } from './module-path.js'
 import { checkConstMethodBodies } from './member-lint.js'
 import { checkScopeDuplicates } from './scope-duplicates.js'
 import { checkTemporalDeadZone } from './temporal-dead-zone.js'
+import { checkUndefinedReferences } from './undefined-reference.js'
 
 /**
  * Register custom validation checks.
@@ -115,6 +116,8 @@ export class ObjectOrientedCValidator {
     checkScopeDuplicates(model, this.wrap(accept))
     // 同作用域内先使用后声明：按 JS 的暂时性死区直接报错
     checkTemporalDeadZone(model, this.wrap(accept))
+    // 模块内拼错 / 漏写的裸名字：运行时必抛 not found define，语法与类型推导都抓不到
+    checkUndefinedReferences(model, this.wrap(accept), this.globalsTypes?.keys())
     // 每次新建，避免不同文档之间的类型定义互相污染。
     // 有 services 时注入 #import 解析器：跨模块 typedef/模块结果类型可见（需要完整工作区）。
     const importResolver = this.services

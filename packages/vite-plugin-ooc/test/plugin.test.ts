@@ -250,3 +250,124 @@ test('成员形态契约：字面量/方法/惰性 getter 直接生成冻结对�
     throw new Error('lazy 应是 getter')
   }
 })
+
+// ---- 构建期未定义引用检查 ----
+test('#import 具名引用不存在时构建期报错，合法引用放行', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-ref-'))
+  test.after(() => fs.rmSync(d, { recursive: true, force: true }))
+  const dep = path.join(d, 'dep.ooc')
+  const main = path.join(d, 'main.ooc')
+  fs.writeFileSync(dep, "real = 1;\n{ real }\n")
+  fs.writeFileSync(main, "#import { missing } './dep.ooc';\n{ ok = 1 }\n")
+  let message = ''
+  try {
+    load.call(ctx, path.normalize(main))
+  } catch (e: any) {
+    message = e?.message ?? String(e)
+  }
+  if (!/未定义引用/.test(message) || !/missing/.test(message)) {
+    throw new Error(`应在构建期拦住不存在的具名引用，实际: ${message || '没有报错'}`)
+  }
+  // .ts 依赖的值导出 / 类型导出都能被静态识别
+  const tsDep = path.join(d, 'dep.ts')
+  fs.writeFileSync(tsDep, 'export const value = 1;\nexport interface Shape { x: number }\n')
+  fs.writeFileSync(main, "#import { value, Shape } './dep.ts';\n{ ok = value }\n")
+  const result: any = load.call(ctx, path.normalize(main))
+  if (!/import \{ value \}/.test(result.code)) {
+    throw new Error(`合法具名导入不应被拦，实际:\n${result.code}`)
+  }
+})
+
+// ---- .ooc 依赖失效：watcher 登记 + 引用方连坐 + 解析缓存失效 ----
+test('.ooc 依赖变化：load 登记 watch、handleHotUpdate 让引用方一起失效', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-hot-'))
+  test.after(() => fs.rmSync(d, { recursive: true, force: true }))
+  const dep = path.join(d, 'dep.ooc')
+  const main = path.join(d, 'main.ooc')
+  fs.writeFileSync(dep, "v = 1;\n{ v }\n")
+  fs.writeFileSync(main, "#import { v } './dep.ooc';\n{ w = v }\n")
+  const watched: string[] = []
+  load.call({ addWatchFile: (f: string) => watched.push(f) } as any, path.normalize(main))
+  if (!watched.some((f) => path.normalize(f) === path.normalize(main))) {
+    throw new Error('root 外的 .ooc 自己必须登记进 watcher')
+  }
+  if (!watched.some((f) => path.normalize(f) === path.normalize(dep))) {
+    throw new Error('#import 目标必须登记进 watcher')
+  }
+  const hot = hookOf(plugin.handleHotUpdate)!
+  const importerMod = { id: path.normalize(main) }
+  const ret: any = hot.call({} as any, {
+    file: path.normalize(dep),
+    modules: [],
+    server: {
+      moduleGraph: {
+        getModuleById: (id: string) => (id === importerMod.id ? importerMod : undefined),
+      },
+    },
+  } as any)
+  if (!ret || !ret.includes(importerMod)) {
+    throw new Error('依赖变化时应把引用方模块一并返回，让 vite 重新 load')
+  }
+  // 依赖新增顶层声明后，导出名缓存必须失效，否则下面的合法导入被当成未定义引用
+  fs.writeFileSync(dep, "v = 1;\nextra = 2;\n{ v }\n")
+  hot.call({} as any, { file: path.normalize(dep), modules: [], server: { moduleGraph: {} } } as any)
+  fs.writeFileSync(main, "#import { extra } './dep.ooc';\n{ w = extra }\n")
+  const result: any = load.call(ctx, path.normalize(main))
+  if (!/import \{ extra \}/.test(result.code)) {
+    throw new Error(`依赖导出缓存应已失效，实际:\n${result.code}`)
+  }
+})
+// ---- 模块内未定义引用（构建期） ----
+test('模块内拼错的裸名字构建期被拦，方法参数 / 消息名 / 内建名不误报', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-local-'))
+  test.after(() => fs.rmSync(d, { recursive: true, force: true }))
+  const f = path.join(d, 'local.ooc')
+  fs.writeFileSync(f, 'f = [x =>\n  base = x + 1;\n  base + missingName\n];\n{ f }\n')
+  let message = ''
+  try {
+    load.call(ctx, path.normalize(f))
+  } catch (e: any) {
+    message = e?.message ?? String(e)
+  }
+  if (!/未定义引用/.test(message) || !/missingName/.test(message)) {
+    throw new Error(`应在构建期拦住模块内裸名字，实际: ${message || '没有报错'}`)
+  }
+  // 回调写成带参方法（不是 lambda）、消息名、this、命名管道绑定都不能误报
+  fs.writeFileSync(
+    f,
+    "obj = { act(h) { h toggleBold }, val { this x } };\np = 'abc' slice 1 2 | s -> s + '!';\n{ obj }\n",
+  )
+  const result: any = load.call(ctx, path.normalize(f))
+  if (!/__send/.test(result.code)) {
+    throw new Error(`合法写法不应被拦，实际:\n${result.code}`)
+  }
+})
+
+test('宿主注入的 globals 可由插件选项登记，避免误报', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-globals-'))
+  test.after(() => fs.rmSync(d, { recursive: true, force: true }))
+  const f = path.join(d, 'globals.ooc')
+  fs.writeFileSync(f, 'x = hostGlobal make 1;\n{ x }\n')
+  const localLoad = hookOf(oocPlugin({ globals: ['hostGlobal'] }).load)!
+  const result: any = localLoad.call(ctx, path.normalize(f))
+  if (!/__send\(hostGlobal/.test(result.code)) {
+    throw new Error(`登记后的全局名不应被拦，实际:\n${result.code}`)
+  }
+})
+
+test('项目 config.ooc 声明的 globals 自动放行，不必在每个 .ooc 里 #import', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'ooc-plugin-config-'))
+  test.after(() => fs.rmSync(d, { recursive: true, force: true }))
+  fs.writeFileSync(
+    path.join(d, 'config.ooc'),
+    'config = {\n  diagnostics = { unknownType = \'off\' },\n  globals = { hostDom = hostDom, hostText = hostText }\n};\nconfig\n',
+  )
+  const f = path.join(d, 'src', 'page.ooc')
+  fs.mkdirSync(path.dirname(f), { recursive: true })
+  fs.writeFileSync(f, 'v = hostDom div { className = \'x\' };\n{ v }\n')
+  const localLoad = hookOf(oocPlugin().load)!
+  const result: any = localLoad.call(ctx, path.normalize(f))
+  if (!/__send\(hostDom/.test(result.code)) {
+    throw new Error(`config.ooc 的 globals 应放行，实际:\n${result.code}`)
+  }
+})

@@ -16,7 +16,7 @@
 #import { toggleIn } './editable-style.ooc';
 #import { makeHandleIn } './editable-handle.ooc';
 #import { makeSelectableOf } './editable-select.ooc';
-#import { selectionRangeOf, selectionClearPointer, selectionSetActive } './selection.ooc';
+#import { selectionRangeOf, managerOfNode } './selection.ooc';
 #import { when } './when.ooc';
 
 minOf = [a, b => #guard (a < b); a #else; b];
@@ -27,16 +27,13 @@ rangeLoOf = [r, fallback => #guard r; r at 0 #else; fallback];
 rangeHiOf = [r, fallback => #guard r; r at 1 #else; fallback];
 insideSizeOf = [v => { value = v, fromInside = true }];
 orEmpty = [v => #guard v; v #else; (Array of)];
-
 // 回收站式快照：文本 + 选区 + 段（样式）
 pushSnapIn = [ref, snap =>
     list = ref get;
     next = list toSpliced (list length) 0 snap;
     ref set (when $ ((next length) > 80) (next slice 1 (next length)) next)
 ];
-
 callIf = [fn => #guard fn; fn $];
-
 editable = fc $ [ctx, props, ...children =>
     p = merge $ props editorDefaults;
     nodeRef = storage ref nil;
@@ -50,6 +47,7 @@ editable = fc $ [ctx, props, ...children =>
     undoRef = storage ref (Array of);
     redoRef = storage ref (Array of);
     composingBaseRef = storage ref nil;
+    pendingRef = storage ref nil; // 待输入样式：塌缩光标时工具栏改它，下次输入落进插入区
     // 选区 / 光标闪烁不是信号，画布不会自己重画：用这个计数信号把它们接进收集器
     dirtySig = createSignal $ 0;
     bump = [dirtySig set ((dirtySig get) + 1)];
@@ -104,13 +102,17 @@ editable = fc $ [ctx, props, ...children =>
         nodeRef = nodeRef,
         scrollXOf = scrollXOf
     };
+    // 选区协调者按节点反查：同一页面多个舞台各有自己的真相
+    selMgr = [x => managerOfNode $ (nodeRef get)];
     // 聚焦时把本地光标发布给选择器：非塌缩区间会压过已定格的指针选区
     publishNow = [x =>
         #guard focusRef get;
-        selectionSetActive $ {
+        mgr = selMgr $;
+        pair = {
             anchor = { node = selectableObj, offset = ((selRef get) at 0) },
             focus = { node = selectableObj, offset = ((selRef get) at 1) }
-        }
+        };
+        mgr setActive pair
     ];
 
     // ---- 选区 / 文本 / 历史 ----
@@ -146,7 +148,7 @@ editable = fc $ [ctx, props, ...children =>
         old = p text;
         p onTextChange next;
         #guard old != next;
-        nextSeg = alignIn $ { list = (segRef get), oldText = old, newText = next };
+        nextSeg = alignIn $ { list = (segRef get), oldText = old, newText = next, insertStyle = (pendingRef get) };
         segRef set nextSeg;
         touchSegs $;
         p onSegmentsChange nextSeg
@@ -157,7 +159,8 @@ editable = fc $ [ctx, props, ...children =>
         r = selectionRangeOf $ selectableObj;
         #guard r;
         selRef set r;
-        selectionClearPointer $ nil;
+        mgr = selMgr $;
+        mgr clearPointer;
         bump $ nil
     ];
 
@@ -188,6 +191,7 @@ editable = fc $ [ctx, props, ...children =>
         p = p,
         segRef = segRef,
         composingBaseRef = composingBaseRef,
+        pendingRef = pendingRef,
         selRef = selRef,
         preferredXRef = preferredXRef,
         paraOf = paraOf,
@@ -212,12 +216,14 @@ editable = fc $ [ctx, props, ...children =>
         editEnv = env,
         p = p,
         selectable = selectableObj,
+        selMgr = selMgr,
         nodeRef = nodeRef,
         selRef = selRef,
         focusRef = focusRef,
         undoRef = undoRef,
         redoRef = redoRef,
         composingBaseRef = composingBaseRef,
+        pendingRef = pendingRef,
         bump = bump,
         paraOf = paraOf,
         overlayCore = overlayCore,

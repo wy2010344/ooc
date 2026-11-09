@@ -5,15 +5,16 @@
 // 组件是 lambda 工厂：`#import { textNode }` 后 `(textNode $ {…}) ctx`。
 
 #import {
-    fc, merge, memo, storage, defaultSize, colorToCSS,
+    fc, merge, memo, storage, defaultSize, colorToCSS, coreTextDefaults,
     measureTextWidth, measureTextInk, applyTextStyle, wrapText
 } './host.ts';
 #import { nodeDefaults } './messages.ooc';
 #import { buildNode, rendererOf } './node.ooc';
 
 INT_MAX = 2147483647;
-// autoWidth / noWrap 用的「无限宽」（宿主按 >= 1e9 视为不软换行）
-MAX_WIDTH = 999999999;
+// autoWidth / noWrap 用的「无限宽」：wrapText 以 < 1e9 判定软换行，
+// 取 1e9 本身才会真正走「只按 '\n' 硬换行」的分支（999999999 仍被当有限宽）。
+MAX_WIDTH = 1000000000;
 defaultFamily = 'ui-sans-serif, system-ui, -apple-system, sans-serif';
 
 maxZero = [v => #guard (v > 0); v #else; 0];
@@ -22,8 +23,9 @@ italicOf = [v => #guard v; 'italic' #else; ''];
 familyOf = [f => #guard f; f #else; defaultFamily];
 fontOf = [p => '${italicOf $ (p italic)} ${(p fontWeight)} ${(p fontSize)}px ${familyOf $ (p fontFamily)}'];
 
-// 内容盒宽：与 TS 的 innerSize(node,'x') 同义
+// 内容盒宽 / 高：与 TS 的 innerSize(node,'x'|'y') 同义
 innerXOf = [node => maxZero $ (((node width) - (node paddingInlineStart)) - (node paddingInlineEnd))];
+innerYOf = [node => maxZero $ (((node height) - (node paddingBlockStart)) - (node paddingBlockEnd))];
 
 // 内容自测量：fromInside 让 outerSize 再把两端 padding 补上
 insideSizeOf = [v => { value = v, fromInside = true }];
@@ -86,7 +88,10 @@ inkShiftOf = [p, lines =>
     0
 ];
 
-// ---- 对齐（无限宽排版强制 START，与 TS 的 noWrapAlignShift 同结果） ----
+// ---- 对齐 ----
+// TS 在无限宽排版下强制 START，再用 noWrapAlignShift 平移绘制原点。
+// 这里 wrapText 不带对齐信息（永远按 START 排），平移交给 Canvas2D 的
+// textAlign + lineXOf 完成，单行结果与 TS 一致；autoWidth 仍强制 START。
 effectiveAlignOf = [p => #guard (p autoWidth); 'start' #else; (p textAlign)];
 
 lineAlignOf = [align =>
@@ -190,7 +195,8 @@ drawParagraphOf = [op =>
     #guard clip;
     ctx2 save;
     ctx2 beginPath;
-    ctx2 rect 0 0 (node width) (node height);
+    // 裁内容盒而不是整个节点盒：padding 区不该出现溢出的字形（对齐 RichTextNode.draw 的 clip）
+    ctx2 rect (node paddingInlineStart) (node paddingBlockStart) (innerXOf $ node) (innerYOf $ node);
     ctx2 clip;
     paintParagraph $ op;
     ctx2 restore
@@ -251,7 +257,9 @@ textDefaults = {
     fontSize = 16,
     fontWeight = 400,
     italic = false,
-    color = 4278190080,
+    // TS 的 WrappedTextNode / editable params 都取 textDefaults.text()：
+    // 写成方法而非字面量，主题回写默认色后所有文本节点随信号重画
+    color { coreTextDefaults text },
     lineHeightMultiplier = 1.4,
     letterSpacing = 0,
     wordSpacing = 0,

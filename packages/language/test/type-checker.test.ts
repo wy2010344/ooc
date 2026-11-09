@@ -102,6 +102,7 @@ describe('严格交集类型检查', () => {
     const diags = await diagnostics(`
         A #type { foo: number };
         B #type { foo: number };
+        obj = { foo = 1 };
         x: A & B = obj;
         y: number = x foo
     `)
@@ -112,6 +113,7 @@ describe('严格交集类型检查', () => {
     const diags = await diagnostics(`
         A #type { foo: number };
         B #type { foo: string };
+        obj = { foo = 1 };
         x: A & B = obj;
         y = x foo
     `)
@@ -122,6 +124,7 @@ describe('严格交集类型检查', () => {
     const diags = await diagnostics(`
         A #type { foo: number };
         B #type { bar: string };
+        obj = { foo = 1 };
         x: A & B = obj;
         y = x foo
     `)

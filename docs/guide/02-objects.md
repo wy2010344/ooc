@@ -200,7 +200,7 @@ calc = {
 
 ## 委托组合 merge
 
-OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。**命中即停**——某一层定义了该成员就由该层负责，即使方法返回 `nil` / `undefined` 也不再向后查；只有这一层没有这个成员才继续委托。
+OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。**命中即停**——某一层定义了该成员就由该层负责，即使方法返回 `nil` / `undefined` 也不再向后查；只有这一层没有这个成员、或该层显式返回 `merge unhandled` 弃权，才继续委托。
 
 同名成员的覆盖同样受里氏替换约束：覆盖层必须能当作兜底层使用（参数不能收窄、返回不能放宽），不兼容时给 `mergeOverrideMismatch` warning。引擎只按兜底层的契约发消息，覆盖层签名对不上时运行时可能失效。
 
@@ -216,6 +216,7 @@ w speak    // 'voice'（转给 defaults）
 spec 与 defaults 同名时 spec 优先：
 
 ```ooc
+defaults = { speak = 'voice' };
 spec2 = { speak = 'wang' };
 w2 = merge $ spec2 defaults;
 w2 speak   // 'wang'
@@ -223,6 +224,21 @@ w2 speak   // 'wang'
 
 `merge $` 的产物也是包装对象，可以再次拼进新链（`e = merge $ c d`），
 已组合的链在组装期展平，原对象（spec/defaults）只读不写，可被多个包装安全共享。
+
+### 显式弃权
+
+链上任意一层（普通方法、数据成员、`js proxy` 的 handler）都能显式说「这条我不接」：返回 `merge unhandled`，委托链就继续查下一层。哨兵是唯一单例，只认严格相等——`nil` / `undefined` / `false` 都是正常应答，照旧命中即停。
+
+```ooc
+defaults = { speak = 'voice' };
+spec = { speak = merge unhandled };
+w = merge $ spec defaults;
+w speak    // 'voice'（spec 显式弃权，透传给 defaults）
+```
+
+弃权是**返回值**而不是异常：方法抛出的真错误会原样冒出，不会被链吞成兜底。也因此普通方法在弃权之前已经产生的副作用不会回滚，弃权判断要写在方法体最前面（`#guard` 判别天然在语句之前）。`async` 方法返回的 Promise 在同步派发里看不到，弃权只在同步路径生效，不会为此把整条链改成异步。
+
+`respondsTo` / 补全 / 桥接的 `hasMessage` 仍是按名字的**静态**能力查询，不预知运行时弃权；全链都弃权时解释器抛「没有定义该方法」，宿主桥接返回 `undefined` 让宿主默认值生效。
 
 ## 嵌套对象
 

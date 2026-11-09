@@ -311,6 +311,9 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
  *
  * 给宿主桥接用：桥接不能枚举 OOC 对象的成员（可能是 merge 委托或 Proxy，键不存在），
  * 只能按契约名「问一声」，由这个判据决定走对象还是走宿主默认值。
+ *
+ * 这是**静态**能力查询：不预知 merge 链里某层在运行时是否显式弃权
+ * （返回 UNHANDLED），弃权由链的派发循环在真正调用之后判定。
  */
 export function respondsTo(o: any, name: string): boolean {
   if (typeof o == 'function' && name == '$') {

@@ -34,7 +34,8 @@ js = {
 };
 
 merge = {
-    $(...all): any
+    $(...all): any,
+    unhandled: any
 };
 
 console = {

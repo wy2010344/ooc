@@ -1,7 +1,10 @@
 // canvas2 入口：每个组件都是一个 lambda 工厂，按需具名导入。
 // 用法：`#import { rect, textNode, scrollBox, stage } './canvas2/index.ooc'`
 //       `(rect $ {…} children…) ctx`
-// 没有门面对象：组件不被包成 canvas2 的方法，扩展 / 替换都只改自己的文件。
+//
+// `#import {…}` 绑定的是本文件的顶层声明（含下面的 #import 转发），
+// 所以具名导入必须用组件本名；末尾对象只是默认导出的镜像，键名保持一致，
+// 避免 `textNode` / `text`、`scrollBox` / `scroll` 两套名字并存。
 
 #import { node2 } './node.ooc';
 #import { rect } './rect.ooc';
@@ -11,10 +14,10 @@
 #import { editable } './editable.ooc';
 
 {
-    node = node2,
+    node2 = node2,
     rect = rect,
-    scroll = scrollBox,
+    scrollBox = scrollBox,
     stage = stage,
-    text = textNode,
+    textNode = textNode,
     editable = editable
 }

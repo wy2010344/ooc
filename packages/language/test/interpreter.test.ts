@@ -20,6 +20,7 @@ import {
   proxyCatchAll,
   js,
   storage,
+  UNHANDLED,
 } from 'object-oriented-c-language'
 
 let interpreter: ReturnType<typeof createInterpretAction>
@@ -1417,6 +1418,118 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
       )
       // tag 都落在各自包装上，shared 只读不写
       expect(result).toBe('shared-shared-3')
+    })
+
+    test('OOC 侧 `merge unhandled` 读到弃权哨兵', async () => {
+      const result = await delegateInterpreter().interpret(`merge unhandled`)
+      expect(result).toBe(UNHANDLED)
+    })
+
+    test('显式弃权：普通方法返回 merge unhandled 继续查 defaults', async () => {
+      const result = await delegateInterpreter().interpret(
+        `
+          defaults = { greet => 'hi' };
+          spec = { greet => merge unhandled };
+          w = merge $ spec defaults;
+          w greet
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe('hi')
+    })
+
+    test('显式弃权：OOC 计算绑定（getter）是哨兵时也透传', async () => {
+      // 与 docs/guide/02-objects.md 的示例同形：`= merge unhandled` 是 getter
+      const result = await delegateInterpreter().interpret(
+        `
+          defaults = { speak = 'voice' };
+          spec = { speak = merge unhandled };
+          w = merge $ spec defaults;
+          w speak
+        `,
+        'demo.ooc',
+      )
+      expect(result).toBe('voice')
+    })
+
+    test('显式弃权：数据成员是哨兵时也透传', () => {
+      const w = merge.$({ tag: UNHANDLED }, { tag: 'defaults:tag' })
+      expect(sendMessage(w, 'tag', [])).toBe('defaults:tag')
+    })
+
+    test('显式弃权：catch-all Proxy 的 handler 会被调用，弃权后透传', () => {
+      const proxyLayer = proxyCatchAll(
+        { own() { return 'proxy:own' } },
+        (name) => (name === 'ping' ? 'proxy:ping' : UNHANDLED),
+      )
+      const w = merge.$(proxyLayer, {
+        own() { return 'defaults:own' },
+        ping() { return 'defaults:ping' },
+        greet() { return 'defaults:greet' },
+      })
+      expect(sendMessage(w, 'own', [])).toBe('proxy:own')
+      expect(sendMessage(w, 'ping', [])).toBe('proxy:ping')
+      expect(sendMessage(w, 'greet', [])).toBe('defaults:greet')
+    })
+
+    test('只认哨兵严格相等：nil / undefined / false 仍命中即停', () => {
+      const calls: string[] = []
+      const defaults = {
+        a() { calls.push('a'); return 'D:a' },
+        b() { calls.push('b'); return 'D:b' },
+        c() { calls.push('c'); return 'D:c' },
+      }
+      const w = merge.$(
+        { a() { return null }, b() { return undefined }, c() { return false } },
+        defaults,
+      )
+      expect(sendMessage(w, 'a', [])).toBe(null)
+      expect(sendMessage(w, 'b', [])).toBeUndefined()
+      expect(sendMessage(w, 'c', [])).toBe(false)
+      expect(calls).toEqual([])
+    })
+
+    test('显式弃权不吞异常：方法抛的真错误原样冒出', () => {
+      const w = merge.$(
+        { boom() { throw new Error('真错误') } },
+        { boom() { return 'defaults' } },
+      )
+      expect(() => sendMessage(w, 'boom', [])).toThrow(/真错误/)
+    })
+
+    test('全链弃权：最终抛「没有定义该方法」', () => {
+      const w = merge.$(
+        { m() { return UNHANDLED } },
+        { m() { return UNHANDLED } },
+      )
+      expect(() => sendMessage(w, 'm', [])).toThrow('没有定义该方法')
+    })
+
+    test('二次 merge 展平后：内层弃权仍能跨层透传', () => {
+      const inner = merge.$({ m() { return UNHANDLED } }, {})
+      const w = merge.$(inner, { m() { return 'last' } })
+      expect(sendMessage(w, 'm', [])).toBe('last')
+    })
+
+    test('桥接式判据（respondsTo 逐层询问）与链派发结果一致', () => {
+      // 对齐 ooc-mve-bridge/src/args.ts 的 sendTo：catch-all 层恒应答，
+      // 但它弃权后必须继续，不能把兜底吃掉。
+      const w = merge.$(
+        proxyCatchAll({}, () => UNHANDLED),
+        { greet() { return 'defaults:greet' } },
+      )
+      const chain = (w as Record<string, unknown>)['__chain'] as unknown[]
+      const sendToLike = (name: string) => {
+        for (const layer of chain) {
+          if (layer == null || !respondsTo(layer, name)) continue
+          const value = sendMessage(layer, name, [])
+          if (value === UNHANDLED) continue
+          return value
+        }
+        return undefined
+      }
+      expect(sendToLike('greet')).toBe('defaults:greet')
+      expect(sendToLike('missing')).toBeUndefined()
     })
   })
 
