@@ -1,6 +1,7 @@
 import { createContext } from 'mve-core'
 import { hookTrackSignal } from 'mve-helper'
-import { createLateProxy, createSignal, memo, addEffect } from 'wy-helper'
+import { createSignal, memo, addEffect } from 'wy-helper'
+import { createLateProxy } from './late-proxy.js'
 import { merge, js, storage } from 'object-oriented-c-language'
 import { dom, text, html } from './dom.js'
 import { fc, forEach } from './fc.js'

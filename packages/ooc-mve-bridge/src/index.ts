@@ -42,13 +42,9 @@ export { three, threeStage } from './three.js'
 export type { ThreeComponent, ThreeTagFactory } from './three.js'
 
 // 响应式信号 + language 原生原语：OOC 侧直接 import 使用，不需要 globals 注入
-export {
-  createSignal,
-  createLateProxy,
-  createLateProxy as lateProxy,
-  memo,
-  addEffect,
-} from 'wy-helper'
+export { createSignal, memo, addEffect } from 'wy-helper'
+// 上游 wy-helper 尚未发布 createLateProxy，桥接包自带等价实现（见 late-proxy.ts）
+export { createLateProxy, createLateProxy as lateProxy } from './late-proxy.js'
 export { createContext } from 'mve-core'
 export { storage, js, merge } from 'object-oriented-c-language'
 

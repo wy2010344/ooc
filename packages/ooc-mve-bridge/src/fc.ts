@@ -1,5 +1,17 @@
-import type { EachTime, StateHolder, StateHolderWithNode } from 'mve-core'
+import type { StateHolder, StateHolderWithNode } from 'mve-core'
 import type { GetValue } from 'wy-helper'
+
+/**
+ * 行对象的结构约定。mve-core 的 EachTime 在本地旧构建里是 `EachTime<T>`、
+ * 在最新源码里是 `EachTime<T, K>`，TS 按泛型参数个数直接报错。这里按结构
+ * 声明（TS 是结构类型系统），本包就不必绑死在某一份 .d.ts 上：本地旧 dist
+ * 与 CI 用最新源码重新 build 出的 dist 都能编译。
+ */
+export interface EachTimeLike<T> {
+  getIndex(): number
+  getValue(): T
+  key: unknown
+}
 
 /**
  * 组件包装：f 的第一个形参是 ctx（StateHolder，构建期可用 addNode/addDestroy），
@@ -22,7 +34,7 @@ export interface ForEachConfig<T> {
   creater(
     this: StateHolder<Node, readonly Node[]>,
     key: unknown,
-    eachTime: EachTime<T>,
+    eachTime: EachTimeLike<T>,
   ): unknown
 }
 
@@ -37,7 +49,7 @@ export interface ForEachConfig<T> {
 export const forEach = fc(function (
   ctx: StateHolderWithNode<Node, readonly Node[]>,
   configOrEach: ForEachConfig<unknown> | ((callback: (key: unknown, value: unknown) => unknown) => unknown),
-  callbackCreater?: (key: unknown, eachValue: EachTime<unknown>) => unknown,
+  callbackCreater?: (key: unknown, eachValue: EachTimeLike<unknown>) => unknown,
 ) {
   const each =
     typeof configOrEach === 'function'
