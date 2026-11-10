@@ -30,6 +30,16 @@ import { isCatchAllProxy } from './proxy.js'
 /** 空对象单例：`{}` 字面量共享同一个实例 */
 const EMPTY_OBJECT: Record<string, unknown> = {}
 
+/**
+ * 内建协议的消息名（numDef / objectDefine）。它们对一切接收者都应答——包括
+ * 原始值与 null，且是 merge 委托链的最后一个显式后继。静态能力查询必须把
+ * 它们算进去，否则 `respondsTo(o,'+')` 与 `sendMessage(o,'+',…)` 会说反话。
+ */
+const BUILTIN_MESSAGE_NAMES = new Set<string>([
+  ...Object.keys(numDef),
+  ...Object.keys(objectDefine),
+])
+
 /** bind / mutable 的惰性绑定：首次访问时求值 body 并缓存（bind 恒返构造值、
  *  mutable 为委托对象）。纯字面量 bind 不走这里——构造期直接写成数据属性。 */
 type LazyBind = {
@@ -313,20 +323,52 @@ export function sendMessageWith(o: any, message: Message, scope: Scope) {
  * 只能按契约名「问一声」，由这个判据决定走对象还是走宿主默认值。
  *
  * 这是**静态**能力查询：不预知 merge 链里某层在运行时是否显式弃权
- * （返回 UNHANDLED），弃权由链的派发循环在真正调用之后判定。
+ * （返回 UNHANDLED），弃权由链的派发循环在真正调用之后判定。它回答的是
+ * 「有没有人可能接这条消息」，不是「这次最终会不会有人接」。
+ *
+ * 内建协议（`+` / `||` / `if` …）对一切接收者应答，也计入这里；动态消息名
+ * `Object send` 与消息元组消解 `Object dispatch` 是 Object 类对象的专属消息，
+ * 同样计入。
  */
 export function respondsTo(o: any, name: string): boolean {
   if (typeof o == 'function' && name == '$') {
     return true
   }
-  if (o == null || (typeof o !== 'object' && typeof o !== 'function')) {
-    return false
-  }
   // 兜底代理对任何名字都应答（has 陷阱缺省，`in` 查不出来）
   if (isCatchAllProxy(o)) {
     return true
   }
+  if (BUILTIN_MESSAGE_NAMES.has(name)) {
+    return true
+  }
+  if (o === Object && (name === 'send' || name === 'dispatch')) {
+    return true
+  }
+  if (o == null || (typeof o !== 'object' && typeof o !== 'function')) {
+    return false
+  }
   return Boolean(Object.getOwnPropertyDescriptor(o, name)) || name in Object(o)
+}
+
+/**
+ * 消息元组 `[name, ...args]` 的校验与消解：`Object dispatch` 的公共实现。
+ *
+ * 元组是 union 对象把消息具象化后的一等值（见 bridges.ts）。它与
+ * `Object send 目标 '名字' 实参…` 的差别在参数约定：send 把「唯一数组实参」
+ * 当作完整实参列表展开，dispatch 则把元组元素**逐字**当实参——这样才能
+ * 无损回放 `union add (Array of 1 2)` 这类带数组实参的消息。
+ */
+export function dispatchMessage(target: unknown, tuple: unknown): any {
+  if (
+    !Array.isArray(tuple) ||
+    tuple.length === 0 ||
+    typeof tuple[0] !== 'string'
+  ) {
+    throw new TypeError(
+      'Object dispatch 需要 [消息名, ...实参] 形式的消息元组',
+    )
+  }
+  return sendMessage(target, tuple[0], tuple.slice(1))
 }
 
 export function sendMessage(o: any, value: string, args: any[]): any {
@@ -373,14 +415,19 @@ export function sendMessage(o: any, value: string, args: any[]): any {
     }
     return o[value]
   }
-  // 动态消息名（Smalltalk perform: 的等价物）是 Object 这个类对象的专属消息：
-  //   Object send 目标 '名字' 实参…   ≡ 给「目标」发一条名叫「名字」的消息
-  // 只有 Object 响应它——普通对象不响应 send，消息链里不会出现隐式的第二套派发。
-  // 唯一数组实参视为完整实参列表，便于把 rest 原样转发。
+  // 关于消息的操作只由 Object 这个类对象响应，普通对象不会凭空多出一格语义：
+  //   Object send 目标 '名字' 实参…   ≡ 给目标发一条名叫「名字」的消息
+  //   Object dispatch 目标 元组      ≡ 把 union 具象化的 [名字, ...实参] 交回目标
+  // 名字用 send 是历史契约，保持原样；dispatch 专收消息元组，不复用 send 的
+  // 「唯一数组实参视为完整列表」约定，避免两种语义挤在一个消息名下。
   if (value === 'send' && o === Object) {
     const [target, name, ...rest] = args
     const params = rest.length === 1 && Array.isArray(rest[0]) ? rest[0] : rest
     return sendMessage(target, String(name), params)
+  }
+  if (value === 'dispatch' && o === Object) {
+    const [target, tuple] = args
+    return dispatchMessage(target, tuple)
   }
   const num = numDef[value as '<']
   if (num) {

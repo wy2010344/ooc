@@ -236,6 +236,9 @@ js = {
     throw(message): any => js any
 };
 
+// 消息具象化：任何消息都折成 [名字, ...实参] 元组，名字集合开放故不声明方法
+union = { };
+
 config = {
     diagnostics = {
     },
@@ -255,6 +258,7 @@ config = {
         createContext = createContext,
         storage = storage,
         js = js,
+        union = union,
         canvas = canvas,
         canvasDraw = canvasDraw,
         flex2 = flex2,

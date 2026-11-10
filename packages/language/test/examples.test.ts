@@ -7,6 +7,7 @@ import {
   js,
   sendMessage,
   storage,
+  union,
 } from 'object-oriented-c-language'
 import { describe, expect, test } from './compat.js'
 
@@ -91,6 +92,7 @@ function runCase(file: string) {
       storage,
       js,
       merge,
+      union,
     },
   )
   return interpreter.interpret(src, join(fixtures, file))

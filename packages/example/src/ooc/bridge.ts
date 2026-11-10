@@ -32,7 +32,7 @@ export {
   ifNode2,
   textDefaults2,
 } from 'ooc-mve-bridge'
-export { storage, js, merge } from 'object-oriented-c-language'
+export { storage, js, merge, union } from 'object-oriented-c-language'
 export {
   renderPop,
   createPop,

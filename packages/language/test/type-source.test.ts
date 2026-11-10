@@ -58,6 +58,10 @@ describe('loadGlobalsTypesFromSource', () => {
     expect(storage.methods.get('ref')?.[0].returns?.name).toBe('Ref')
     expect(globals!.has('js')).toBe(true)
     expect(globals!.has('merge')).toBe(true)
+    expect(globals!.has('union')).toBe(true)
+    // currentScope 只存在于解释器路径，静态侧声明为开放对象（不进 AMBIENT_NAMES）
+    expect(globals!.has('currentScope')).toBe(true)
+    expect((globals!.get('currentScope') as MethodsOwner).methods.size).toBe(0)
     expect(globals!.has('console')).toBe(true)
   })
 

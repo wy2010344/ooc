@@ -4,6 +4,7 @@ import {
   merge,
   js,
   storage,
+  union,
 } from 'object-oriented-c-language'
 import type { Value } from 'object-oriented-c-language'
 import type { FileSystemProvider, URI } from 'langium'
@@ -117,6 +118,8 @@ export function createGlobals() {
     js,
     // 合并/兜底桥：merge $ overrides defaults...（overrides 优先，未知按链查找）
     merge,
+    // 消息具象化：union 名字 实参… → [名字, ...实参]，消解走 Object dispatch
+    union,
     fc,
     createContext,
     dom,

@@ -2,7 +2,7 @@ import { createContext } from 'mve-core'
 import { hookTrackSignal } from 'mve-helper'
 import { createSignal, memo, addEffect } from 'wy-helper'
 import { createLateProxy } from './late-proxy.js'
-import { merge, js, storage } from 'object-oriented-c-language'
+import { merge, js, storage, union } from 'object-oriented-c-language'
 import { dom, text, html } from './dom.js'
 import { fc, forEach } from './fc.js'
 import {
@@ -44,7 +44,7 @@ const flex2 = flexCanvas2
 const grow2 = growCanvas2
 const align2 = alignCanvas2
 
-/** 运行时的完整桥接 globals 集合（含 storage/js/merge、视图组件与响应式信号）。
+/** 运行时的完整桥接 globals 集合（含 storage/js/merge/union、视图组件与响应式信号）。
  *  example/sandbox 等宿主一行注入：`createInterpretAction(..., createBridgeGlobals())`，
  *  不再逐个显式 import 桥接对象。类型侧用 createBridgeGlobalsTypes()（Route A）。
  */
@@ -53,6 +53,7 @@ export function createBridgeGlobals() {
     storage,
     js,
     merge,
+    union,
     fc,
     createContext,
     dom,

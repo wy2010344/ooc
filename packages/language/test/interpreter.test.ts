@@ -20,6 +20,8 @@ import {
   proxyCatchAll,
   js,
   storage,
+  union,
+  dispatchMessage,
   UNHANDLED,
 } from 'object-oriented-c-language'
 
@@ -1235,7 +1237,7 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
       // merge 是宿主注入的全局桥（bridges.ts），语言包导出与浏览器 demo 同一份
       return createInterpretAction(
         { fileSystemProvider: () => memoryFs({}).provider },
-        { js, merge },
+        { js, merge, union },
       )
     }
 
@@ -1531,6 +1533,86 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
       expect(sendToLike('greet')).toBe('defaults:greet')
       expect(sendToLike('missing')).toBeUndefined()
     })
+
+    test('应答代数统一：没有该成员与显式弃权是同一个 unhandled', () => {
+      const w = merge.$(
+        { a() { return UNHANDLED } },
+        {}, // 完全没有 b
+        { a() { return 'D:a' }, b() { return 'D:b' } },
+      )
+      expect(sendMessage(w, 'a', [])).toBe('D:a')
+      expect(sendMessage(w, 'b', [])).toBe('D:b')
+    })
+
+    test('内建协议是链尾显式后继：merge 包装与单对象结果一致', () => {
+      const plain = {}
+      const w = merge.$({ tag: 1 }, { tag2: 2 })
+      const cases: Array<[string, unknown[]]> = [
+        ['+', [2]],
+        ['||', ['x']],
+        ['==', [null]],
+        ['!!', []],
+        ['not', []],
+        ['include', [['a']]],
+      ]
+      for (const [name, args] of cases) {
+        expect(String(sendMessage(w, name, args))).toBe(
+          String(sendMessage(plain, name, args)),
+        )
+      }
+    })
+
+    test('用户层可覆盖内建协议（链顺序仍是用户层优先）', () => {
+      const w = merge.$({ '+'(n: number) { return 'custom:' + n } }, {})
+      expect(sendMessage(w, '+', [3])).toBe('custom:3')
+    })
+
+    test('respondsTo 把内建协议计入，与实际派发一致', () => {
+      expect(respondsTo({}, '+')).toBe(true)
+      expect(respondsTo(5, '+')).toBe(true)
+      expect(respondsTo({}, 'if')).toBe(true)
+      expect(respondsTo({}, 'nope')).toBe(false)
+      expect(respondsTo(Object, 'send')).toBe(true)
+    })
+
+    test('兜底 Proxy 未写弃权时缺省透传（undefined 不再吃掉后继）', () => {
+      const w = merge.$(
+        js.proxy({}, () => undefined),
+        { greet() { return 'defaults:greet' } },
+      )
+      expect(sendMessage(w, 'greet', [])).toBe('defaults:greet')
+    })
+
+    test('nil 仍是正常应答：catch-all handler 返回 null 不弃权', () => {
+      const w = merge.$(proxyCatchAll({}, () => null), {
+        greet() { return 'defaults:greet' },
+      })
+      expect(sendMessage(w, 'greet', [])).toBe(null)
+    })
+
+    test('JS 协议探针不进消息链：then / toJSON / includes 直通', async () => {
+      const w = merge.$({ tag: 1 }, {})
+      expect(await Promise.resolve(w)).toBe(w)
+      // 包装对象上不应凭空造出 toJSON，JSON.stringify 不该绕回消息链
+      expect(typeof JSON.stringify(w)).toBe('string')
+      expect(sendMessage(w, 'include', [1])).toBe(false)
+    })
+
+    test('全链弃权抛结构化错误（receiver / methodName / argumentsList）', () => {
+      const w = merge.$({ m() { return UNHANDLED } }, {})
+      let err: unknown
+      try {
+        sendMessage(w, 'm', [1, 2])
+      } catch (e) {
+        err = e
+      }
+      if (!(err instanceof OocMethodNotFoundError)) {
+        throw new Error('全链弃权应抛 OocMethodNotFoundError')
+      }
+      expect(err.methodName).toBe('m')
+      expect(err.receiver).toBe(w)
+      expect(err.argumentsList).toEqual([1, 2])
+    })
   })
 
   describe('base 包 loop：OOC 语言实现的循环（无需宿主 loop）', () => {
@@ -1677,6 +1759,92 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
         `),
       ).rejects.toThrow()
     })
+
+    test('带实参的消息把实参作为 $ 发给绑定值（lambda）', async () => {
+      const result = await interpreter.interpret(`
+          f = [a, b => a + b];
+          currentScope f 1 2
+      `)
+      expect(result).toBe(3)
+    })
+
+    test('带实参的消息走绑定对象的 $ 方法（完整派发链）', async () => {
+      const result = await interpreter.interpret(`
+          o = { $(x, y) { x * y } };
+          currentScope o 3 4
+      `)
+      expect(result).toBe(12)
+    })
+
+    test('零实参仍是读绑定：拿到函数本体，不二次调用', async () => {
+      const result = await interpreter.interpret(`
+          f = [a, b => a + b];
+          g = currentScope f;
+          g $ 10 20
+      `)
+      expect(result).toBe(30)
+    })
+
+    test('方法体内的局部绑定也能被带参消息命中', async () => {
+      const result = await interpreter.interpret(`
+          obj = {
+              run {
+                  f = [n => n + 100];
+                  currentScope f 5
+              }
+          };
+          obj run
+      `)
+      expect(result).toBe(105)
+    })
+
+    test('Object dispatch 的动态消息名同样能投递到作用域', async () => {
+      const result = await interpreter.interpret(`
+          f = [a, b => a + b];
+          p = currentScope;
+          Object dispatch p (Array of 'f' 1 2)
+      `)
+      expect(result).toBe(3)
+    })
+
+    test('未绑定名单发时由链出口抛结构化错误', async () => {
+      let caught: unknown
+      try {
+        await interpreter.interpret(`p = currentScope; p missingVar 1 2`)
+      } catch (e) {
+        caught = e
+      }
+      expect(caught instanceof OocMethodNotFoundError).toBe(true)
+      expect((caught as OocMethodNotFoundError).methodName).toBe('missingVar')
+      expect((caught as OocMethodNotFoundError).argumentsList).toEqual([1, 2])
+    })
+
+    test('绑定值没有 $ 时带参消息抛结构化错误', async () => {
+      let caught: unknown
+      try {
+        await interpreter.interpret(`x = 10; currentScope x 1`)
+      } catch (e) {
+        caught = e
+      }
+      expect(caught instanceof OocMethodNotFoundError).toBe(true)
+      expect((caught as OocMethodNotFoundError).methodName).toBe('$')
+    })
+
+    test('currentScope 是兜底代理，respondsTo 按名字回答可能有人接', async () => {
+      const p = await interpreter.interpret(`x = 1; currentScope`)
+      expect(respondsTo(p, 'x')).toBe(true)
+      expect(respondsTo(p, 'anything')).toBe(true)
+      expect(sendMessage(p, 'x', [])).toBe(1)
+    })
+
+    test('在 merge 链里未绑定名弃权、已绑定名命中即停', async () => {
+      const p = await interpreter.interpret(
+        `f = [a, b => a + b]; currentScope`,
+      )
+      const w = merge.$(p, { fallback(n: number) { return n * 10 } })
+      expect(sendMessage(w, 'f', [1, 2])).toBe(3)
+      expect(sendMessage(w, 'fallback', [7])).toBe(70)
+    })
   })
 
   describe('include：统一容器成员判定', () => {
@@ -1728,5 +1896,92 @@ describe('对象成员运行时形态（标记 + descriptor，无反射）', () 
 `)
       expect(result).toBe(true)
     })
+  })
+})
+
+// 消息联合：union 把消息具象化成 [名字, ...实参]，Object dispatch 把它交回对象
+describe('消息联合：union 具象化与 Object dispatch 消解', () => {
+  const calc = {
+    add(a: number, b: number) { return a + b },
+    tag: 42,
+    echo(...xs: unknown[]) { return xs },
+  }
+
+  test('union 把任意消息折成 [名字, ...实参] 元组', () => {
+    expect(sendMessage(union, 'add', [1, 2])).toEqual(['add', 1, 2])
+    expect(sendMessage(union, 'tag', [])).toEqual(['tag'])
+    expect(sendMessage(union, '+', [3])).toEqual(['+', 3])
+    expect(sendMessage(union, '$', [9])).toEqual(['$', 9])
+    expect(Array.isArray(sendMessage(union, 'add', [1]))).toBe(true)
+  })
+
+  test('union 是兜底代理但 JS 协议探针仍直通', () => {
+    expect(respondsTo(union, 'anything')).toBe(true)
+    expect((union as Record<string, unknown>)['then']).toBeUndefined()
+    expect((union as Record<string, unknown>)['toJSON']).toBeUndefined()
+  })
+
+  test('Object dispatch 与直接发送 / Object send 等价', () => {
+    const m = sendMessage(union, 'add', [1, 2])
+    expect(sendMessage(Object, 'dispatch', [calc, m])).toBe(3)
+    expect(sendMessage(Object, 'send', [calc, 'add', 1, 2])).toBe(3)
+    expect(dispatchMessage(calc, sendMessage(union, 'tag', []))).toBe(42)
+    expect(respondsTo(Object, 'dispatch')).toBe(true)
+    expect(respondsTo({}, 'dispatch')).toBe(false)
+  })
+
+  test('元组就是普通数组，Array of 造的消息一样可消解', () => {
+    expect(sendMessage(Object, 'dispatch', [calc, ['add', 1, 2]])).toBe(3)
+  })
+
+  test('dispatch 逐字回放实参，不套用 send 的「唯一数组即参数列表」约定', () => {
+    const m = sendMessage(union, 'echo', [[1, 2]])
+    expect(sendMessage(Object, 'dispatch', [calc, m])).toEqual([[1, 2]])
+    expect(sendMessage(Object, 'send', [calc, 'echo', [1, 2]])).toEqual([1, 2])
+  })
+
+  test('非法元组抛明确 TypeError', () => {
+    for (const bad of [null, [], [1, 2], 'add']) {
+      let message = ''
+      try {
+        dispatchMessage(calc, bad)
+      } catch (e) {
+        message = (e as Error).message
+      }
+      expect(message).toContain('Object dispatch 需要')
+    }
+  })
+
+  test('dispatch 到 merge 链：正常路由与全链弃权的出口', () => {
+    const w = merge.$({}, { add(a: number, b: number) { return a + b } })
+    expect(dispatchMessage(w, ['add', 2, 3])).toBe(5)
+    const dead = merge.$({ m() { return UNHANDLED } }, { m() { return UNHANDLED } })
+    let caught: unknown
+    try {
+      dispatchMessage(dead, ['m', 1])
+    } catch (e) {
+      caught = e
+    }
+    expect(caught instanceof OocMethodNotFoundError).toBe(true)
+    expect((caught as OocMethodNotFoundError).methodName).toBe('m')
+  })
+
+  test('union 放进 merge 链末层就是消息记录器', () => {
+    const logger = merge.$({ known() { return 'handled' } }, union)
+    expect(sendMessage(logger, 'known', [])).toBe('handled')
+    expect(sendMessage(logger, 'unknown', [7, 8])).toEqual(['unknown', 7, 8])
+  })
+
+  test('OOC 端到端：union 具象化 → Object dispatch 消解，Object send 不变', async () => {
+    const withUnion = createInterpretAction(EmptyFileSystem, { union })
+    const result = await withUnion.interpret(`
+      calc = { add(a, b) { a + b } };
+      m = union add 1 2;
+      a = Object dispatch calc m;
+      b = Object send calc 'add' 1 2;
+      c = (m at 0);
+      Array of a b c
+    `)
+    expect(result).toEqual([3, 3, 'add'])
   })
 })

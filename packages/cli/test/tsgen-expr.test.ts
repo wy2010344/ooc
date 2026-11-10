@@ -214,3 +214,56 @@ Array of plain computed proto
   if (proto.__proto__ !== 7) throw new Error('__proto__ 应作为自有成员')
 })
 
+
+test('编译产物与解释器抛同一类方法未定义错误', async (t) => {
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const { dir } = await compileSource('method-not-found', `x = 1;\nx\n`)
+  const rt = await loadRuntime(dir)
+  let caught: any
+  try {
+    rt.__send({ ok: 1 }, 'nope', [3, 4])
+  } catch (e) {
+    caught = e
+  }
+  if (!caught) throw new Error('未知消息应抛错')
+  if (caught.name !== 'OocMethodNotFoundError') {
+    throw new Error(`错误名应为 OocMethodNotFoundError，实际 ${caught.name}`)
+  }
+  if (!(caught instanceof rt.OocMethodNotFoundError) || !(caught instanceof TypeError)) {
+    throw new Error('应与解释器一样是 TypeError 子类，且由共享运行时导出')
+  }
+  if (caught.message !== '没有定义该方法 nope') {
+    throw new Error(`错误消息应与解释器一致，实际 ${caught.message}`)
+  }
+  const info = caught as { methodName?: string; argumentsList?: unknown[] }
+  if (info.methodName !== 'nope' || info.argumentsList?.length !== 2) {
+    throw new Error('结构化字段 methodName / argumentsList 应可用')
+  }
+})
+
+test('编译产物支持 Object dispatch 消息元组消解，Object send 保持原语义', async (t) => {
+  if (!CAN_RUN) return t.skip('Node <23 无原生类型剥离')
+  const { dir } = await compileSource('message-dispatch', `x = 1;\nx\n`)
+  const rt = await loadRuntime(dir)
+  const calc = {
+    add(a: number, b: number) { return a + b },
+    echo(...xs: unknown[]) { return xs },
+  }
+  const viaTuple = rt.__send(Object, 'dispatch', [calc, ['add', 1, 2]])
+  if (viaTuple !== 3) throw new Error(`元组消解应得 3，实际 ${String(viaTuple)}`)
+  const viaSend = rt.__send(Object, 'send', [calc, 'add', 1, 2])
+  if (viaSend !== 3) throw new Error(`Object send 应仍得 3，实际 ${String(viaSend)}`)
+  const echo = rt.__send(Object, 'dispatch', [calc, ['echo', [1, 2]]])
+  if (JSON.stringify(echo) !== JSON.stringify([[1, 2]])) {
+    throw new Error(`dispatch 应逐字回放数组实参，实际 ${JSON.stringify(echo)}`)
+  }
+  let caught: any
+  try {
+    rt.__send(Object, 'dispatch', [calc, []])
+  } catch (e) {
+    caught = e
+  }
+  if (!(caught instanceof TypeError) || !String(caught.message).includes('Object dispatch 需要')) {
+    throw new Error(`非法元组应抛明确 TypeError，实际 ${String(caught)}`)
+  }
+})

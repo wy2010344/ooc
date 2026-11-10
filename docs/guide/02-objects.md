@@ -140,6 +140,50 @@ Object send obj 'k'            // 42（属性也按名字分发）
 
 代价要说清：消息名一旦是运行时值，补全、悬停、跳转都退化为 unknown，类型检查也不参与——这条路是给「静态分析帮不上」的场景留的。
 
+## 消息具象化（union / Object dispatch）
+
+把对象能消化的消息看成一组联合 `(add, a, b) | (tag) | …`，方法名就是判别标识。有时你想**先把一条消息存下来**，稍后再交给某个对象处理——这就是 `union` 与 `Object dispatch`：
+
+```ooc
+calc = { add(a, b) { a + b } };
+msg = union add 1 2;          // ['add', 1, 2]
+Object dispatch calc msg;     // 3
+Object send calc 'add' 1 2    // 3（原有写法不变）
+```
+
+`union` 是内建的通用构造器：向它发**任何**消息都返回一个普通数组元组 `[消息名, ...实参]`，自己不执行业务。元组不带接收者，可以存进信号、转发给别处、或稍后回放；`Object dispatch 对象 元组` 把它交回对象，走的仍是完整派发链（包括 `merge` 委托与「没有定义该方法」的出口）。元组首项必须是字符串，否则抛 `TypeError`。
+
+消解不复用 `send` 这个名字是有原因的：`Object send` 把「唯一的数组实参」当成完整实参列表，方便转发 `rest`；而 `dispatch` 必须**逐字**回放元组，否则 `union echo (Array of 1 2)` 里那个数组实参会被摊成两个。两种语义不挤在一个消息名下，`Object send` 原样保留。
+
+元组就是普通数组，所以手写的 `Array of 'add' 1 2` 一样能 `dispatch`。`union` 的名字集合是开放的，静态侧不枚举它（未知消息按 `any` 推定）；把它放进 `merge` 链会吞掉后继层，只适合放在链尾当消息记录器。
+
+`union` 和 `storage` / `js` / `merge` 一样是宿主注入的内建全局：CLI 与 playground 的解释器路径直接可用；编译成 ES 模块（Vite / `ooc build`）时是自由标识符，需要在 `.ooc` 里显式 `#import { union } '.../bridge.ts'`（本仓库的 `example/src/ooc/bridge.ts` 已 re-export）。`Object dispatch` 属于运行时消息，不需要任何 import。
+
+## 作用域作为消息中心（currentScope）
+
+解释器把「当前作用域链」也包成了一个普通对象 `currentScope`：它能应答的消息就是链上可见的绑定名，消息名同样是判别标识。带实参的消息不会被引擎丢掉，而是**把实参原样作为 `$` 消息发给绑定值**：
+
+```ooc
+f = [a, b => a + b];
+o = { $(x, y) { x + y } };
+currentScope f 1 2;          // 3，等同于 f $ 1 2
+currentScope o 3 4;          // 7，等同于 o $ 3 4
+currentScope f               // 零实参＝读绑定，返回 lambda 本体，不调用
+```
+
+不带实参是「读绑定」：返回原始值，即使它是函数也不二次调用（想调用就接着写 `$`，如上例的 `f $ 1 2`）。名字没绑定则是一次 `unhandled` 应答：单独发送时抛「没有定义该方法」，放进 `merge` 链就会转交后继层：
+
+```ooc
+p = currentScope;
+fb = { fallback(n) { n * 10 } };
+m = merge $ p fb;
+m fallback 7                 // 70：p 弃权，交给 fb
+```
+
+`currentScope` 与 `merge` 共用同一条消息路由链，所以弃权、命中即停、内建协议和结构化错误都一致；它也不是「隐式兜底」，只是第一层的名字恰好来自作用域。
+
+> 只在解释器路径可用：那里的作用域是可查询的链，编译成 ES 模块后绑定就是真实 JS 词法变量，没有可反射的作用域对象。所以它没有列入项目 `config.ooc` 的 `globals`，Vite / `ooc build` 工程里引用会被构建期未定义引用检查拦下。`currentScope then` / `toJSON` / `constructor` 这类 JS 协议探针与原型名直通 Proxy，不按绑定名查找。
+
 ## 守卫 #guard
 
 方法体用 `#guard` 分支链组织，就是 if / else-if / else：逐条 `#guard 条件; 语句`，条件为真就执行该段并返回；全不命中落入 `#else; 语句`（无 `#else` 返回 nil）。`#guard` 不参与消息派发——一个名字只有一个成员，没有同名重载。`#guard` 之前的语句**先执行**（赋值进作用域、表达式求值），之后才进入分支判别——条件与分支都能引用它们。
@@ -200,7 +244,7 @@ calc = {
 
 ## 委托组合 merge
 
-OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。**命中即停**——某一层定义了该成员就由该层负责，即使方法返回 `nil` / `undefined` 也不再向后查；只有这一层没有这个成员、或该层显式返回 `merge unhandled` 弃权，才继续委托。
+OOC **没有继承**。复用与兜底交给 `merge` 委托（宿主端 `merge` 全局，调用形式 `merge $ overrides defaults`）：overrides 的方法优先，未知消息按 defaults 顺序查找。**命中即停**——某一层定义了该成员就由该层负责，即使方法返回 `nil` / `undefined` 也不再向后查；只有这一层没有这个成员、或该层显式返回 `merge unhandled` 弃权，才继续委托。对象被当作消息处理中心：方法名是消息联合类型的判别标识，「没有这个分支」与「显式弃权」在应答代数里都是同一个 `unhandled`，链的循环只有一个判据。
 
 同名成员的覆盖同样受里氏替换约束：覆盖层必须能当作兜底层使用（参数不能收窄、返回不能放宽），不兼容时给 `mergeOverrideMismatch` warning。引擎只按兜底层的契约发消息，覆盖层签名对不上时运行时可能失效。
 
@@ -236,9 +280,13 @@ w = merge $ spec defaults;
 w speak    // 'voice'（spec 显式弃权，透传给 defaults）
 ```
 
-弃权是**返回值**而不是异常：方法抛出的真错误会原样冒出，不会被链吞成兜底。也因此普通方法在弃权之前已经产生的副作用不会回滚，弃权判断要写在方法体最前面（`#guard` 判别天然在语句之前）。`async` 方法返回的 Promise 在同步派发里看不到，弃权只在同步路径生效，不会为此把整条链改成异步。
+弃权是**返回值**而不是异常：方法抛出的真错误会原样冒出，不会被链吞成兜底。也因此普通方法在弃权之前已经产生的副作用不会回滚，弃权判断要写在方法体最前面（`#guard` 判别天然在语句之前）。`async` 方法返回的 Promise 在同步派发里看不到，弃权只在同步路径生效，不会为此把整条链改成异步。`js proxy` 的 handler 若没写弃权、直接返回 `undefined`，也按「这条我不接」处理——否则代理对任何名字都应答，会把后面的兜底对象全部吃掉；要返回「空但已处理」请显式返回 `nil`。
 
-`respondsTo` / 补全 / 桥接的 `hasMessage` 仍是按名字的**静态**能力查询，不预知运行时弃权；全链都弃权时解释器抛「没有定义该方法」，宿主桥接返回 `undefined` 让宿主默认值生效。
+链的**最后一个后继是内建协议**（`+` / `||` / `if` / `include` …）。它从前藏在派发函数尾部，导致 `merge` 包装反而收不到这些消息；挂进链后包装与单对象结果一致，用户层同名成员仍可覆盖它。全链（含内建协议）都没接，出口才抛一次 `OocMethodNotFoundError`——解释器与编译产物抛的是同一个结构化错误（`receiver` / `methodName` / `argumentsList`）。桥接的 `sendTo` 是严格派发，同样会抛；只有 `trySendTo` 是能力查询，压根没人认领时返回 `undefined` 让宿主默认值生效（用于读可选钩子与值成员）。
+
+`respondsTo` / 补全 / 桥接的 `hasMessage` 仍是按名字的**静态**能力查询，回答「有没有人可能接」，不预知运行时弃权，也不保证最终由谁应答。Proxy 不会为 `then` / `toJSON` / `includes` / `has` 这类 JS 协议探针伪造消息方法，避免 Promise、序列化与容器判定绕回消息链。
+
+注意：`merge unhandled` 目前仍是一等值，可以被绑定、传参、参与表达式；语言缺省仍是「单对象未定义即抛」，只有进入 `merge` 链才把「没定义」当作 `unhandled`。把弃权收成只在路由上下文存在的控制标记，需要专门的语法符号与求值边界。
 
 ## 嵌套对象
 

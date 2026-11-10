@@ -1,6 +1,8 @@
 import { sendMessage } from './runtime.js'
 import { isCatchAllProxy, proxyCatchAll } from './proxy.js'
 import { OocMethodNotFoundError } from './errors.js'
+import { numDef } from '../library/num.js'
+import { objectDefine } from '../library/object.js'
 
 /**
  * 宿主注入的 JS 全局对象（storage/js/merge），供 OOC 源码直接按名引用。
@@ -71,6 +73,33 @@ export const js = {
 }
 
 /**
+ * union：消息联合的**构造器**（具象化对象）。
+ *
+ * 把「对象能消化的消息」看成一组联合
+ *   `(nameA, arg1, arg2...) | (nameB, arg1, ...) | …`
+ * 方法名就是判别标识。向 union 发任何消息，它都不处理，而是把这条消息
+ * 原样折成一个联合成员值——普通数组元组 `[name, ...args]`：
+ *
+ *   union add 1 2      → ['add', 1, 2]
+ *   union tag          → ['tag']
+ *
+ * 元组不带接收者，所以是可持有、可转发、可存进信号、可回放的一等值；
+ * 消解（把元组交回某个对象的处理分支）由 `Object dispatch 对象 元组` 完成，
+ * 见 runtime.ts。旧写法 `Object send 对象 '名字' 实参…` 保持不变。
+ *
+ * 实现上就是一个兜底 Proxy：handler 恒返回元组，永不弃权。因此把 union
+ * 放进 merge 链时它会吞掉后面的层（这是「通用消息记录器」的正确行为），
+ * 要兜底请把它放在链尾。
+ *
+ * 纯 OOC 里等价写法：`js proxy {} [name, ...args => Array of name ...args]`；
+ * 内建一份是为了不依赖 js 桥接、让名字在类型侧可见，并对两条运行时给出同一值。
+ */
+export const union: Record<string, unknown> = proxyCatchAll(
+  {},
+  (name, ...args) => [name, ...args],
+)
+
+/**
  * merge 委托链的「显式弃权」哨兵：链上任意一层（普通对象的方法 / 数据成员 /
  * 兜底 Proxy 的 handler）返回它，就表示本层不处理这条消息，继续查下一层。
  *
@@ -93,7 +122,9 @@ export const UNHANDLED: unique symbol = Symbol('ooc.merge.unhandled')
  * Proxy（见 chainWrap）；原对象（overrides/defaults）只读不写，可被多个 merge
  * 安全共享，也可把已组合的委托再拼接进新链（二次 merge 不丢链）。
  *
- * 命中即停，除非该层显式返回 UNHANDLED（见上）；全链弃权最终抛
+ * 命中即停，除非该层「没有该成员」或显式返回 UNHANDLED（见上）——两者在
+ * 应答代数里都是 `unhandled`，链继续向后问；用户层之后还挂一层内建协议
+ * （`numDef` / `objectDefine`）作为最后一个显式后继；全链耗尽才抛
  * OocMethodNotFoundError。
  *
  * this 语义是 home-object：成员在哪一层命中，this 就是那一层对象——
@@ -118,50 +149,92 @@ export const merge = {
         entries.push(p)
       }
     }
-    return chainWrap(entries)
+    return createMessageChain(entries)
   },
 }
 
-/** 一层对 name 的应答：found=false 表示本层没有这个成员 */
-type LayerHit =
-  | { found: false }
-  | { found: true; value: unknown; isMethod: boolean }
+/**
+ * 一层对一条消息的应答代数：`handled(value)` | `unhandled`。
+ *
+ * 「这一层没有该成员」与「这一层显式返回 UNHANDLED」在这里收敛成**同一个结果**，
+ * 链的循环只有一个判据。对象被当作消息处理中心：方法名是消息联合类型的判别
+ * 标识，缺分支是一次合法应答，不是异常；异常只在整条链耗尽后由出口抛一次。
+ */
+type LayerAnswer =
+  | { readonly handled: false }
+  | { readonly handled: true; readonly value: unknown }
 
-const NO_LAYER: LayerHit = { found: false }
+const UNHANDLED_ANSWER: LayerAnswer = { handled: false }
 
 /**
- * 查一层对 name 的应答，判据与 sendMessage 的派发顺序一致：
- * own descriptor → 原型链 / 宿主内建的 `in` → 兜底 Proxy 的 get trap。
+ * 问一层「这条消息你接不接」，并按需要真正调用该层的实现。
+ * 判据顺序与 sendMessage 一致：own descriptor → 原型链 / 宿主内建的 `in`
+ * → 兜底 Proxy 的 get trap（它对任何名字都应答，没有 has trap，`in` 查不出来）。
  *
- * 兜底 Proxy 对任何名字都应答（没有 has trap，`in` 查不出来），故单独放行：
- * 它的 handler 会被调用，返回 UNHANDLED 才算弃权。这同时修好了「catch-all
- * Proxy 进链后被跳过、handler 永不触发」的老问题。
+ * home-object 语义：成员在哪层命中，`this` 就是那层对象。
  */
-function lookupLayer(o: unknown, name: string): LayerHit {
-  if (o == null) return NO_LAYER
+function answerOf(o: unknown, name: string, args: unknown[]): LayerAnswer {
+  if (o == null) return UNHANDLED_ANSWER
+  const catchAll = isCatchAllProxy(o)
   const desc = Object.getOwnPropertyDescriptor(o, name)
+  let value: unknown
   if (desc) {
     // getter 以命中层为 this 单次读取，结果原样返回（可为 lambda，绝不二次调用）。
     if (desc.get || desc.set) {
-      return {
-        found: true,
-        value: desc.get ? desc.get.call(o) : undefined,
-        isMethod: false,
-      }
+      value = desc.get ? desc.get.call(o) : undefined
+    } else if (typeof desc.value === 'function') {
+      value = desc.value.apply(o, args)
+    } else {
+      value = desc.value
     }
-    return {
-      found: true,
-      value: desc.value,
-      isMethod: typeof desc.value === 'function',
-    }
+  } else if (catchAll || name in Object(o)) {
+    const v = (o as Record<string, unknown>)[name]
+    value = typeof v === 'function' ? v.apply(o, args) : v
+  } else {
+    return UNHANDLED_ANSWER
   }
-  if (!isCatchAllProxy(o) && !(name in Object(o))) return NO_LAYER
-  const value = (o as Record<string, unknown>)[name]
-  return { found: true, value, isMethod: typeof value === 'function' }
+  // 兜底 Proxy 的 handler 没写弃权时，undefined 按「这条我不接」处理：
+  // 代理对任何名字都应答，若不缺省弃权，它会把后面的兜底对象全部吃掉。
+  if (catchAll && value === undefined) return UNHANDLED_ANSWER
+  // 只认唯一哨兵的严格相等；nil / false / 0 / undefined 都是正常应答。
+  return value === UNHANDLED
+    ? UNHANDLED_ANSWER
+    : { handled: true, value }
 }
 
-/** 组装「链式委托包装对象」：把链挂到包装自己的 own __chain 键上，兜底 Proxy 包一层 */
-function chainWrap(entries: unknown[]): unknown {
+/**
+ * 内建协议作为链的**最后一个显式后继**：numDef / objectDefine 对一切对象都
+ * 应答，从前是 sendMessage 尾部的隐式特例，导致 `merge` 包装反而收不到
+ * `+` / `||`。挂进链后用户层仍优先（同名可覆盖），全链耗尽才轮到它。
+ */
+function builtinProtocolLayer(receiver: unknown): Record<string, unknown> {
+  const layer: Record<string, unknown> = {}
+  const put = (name: string, fn: (...args: unknown[]) => unknown) => {
+    Object.defineProperty(layer, name, {
+      enumerable: true,
+      configurable: true,
+      value: fn,
+    })
+  }
+  for (const [name, fn] of Object.entries(numDef)) {
+    put(name, (...args) =>
+      (fn as (a: unknown, b: unknown) => unknown)(receiver, args[0]),
+    )
+  }
+  for (const [name, fn] of Object.entries(objectDefine)) {
+    put(name, (...args) => fn(receiver, ...args))
+  }
+  return layer
+}
+
+/**
+ * 组装「链式委托包装对象」：把链挂到包装自己的 own __chain 键上，兜底 Proxy 包一层。
+ *
+ * 这是语言里唯一的消息路由链实现：`merge $` 与解释器的 `currentScope` 共用同一条链
+ * （命中即停、任意层可弃权、链尾内建协议、全链耗尽抛同一个结构化错误）。对外导出
+ * 是为了让「作用域」也能作为一个普通对象参与路由，而不是另写一套特例派发。
+ */
+export function createMessageChain(entries: unknown[]): unknown {
   const wrapper: Record<string, unknown> = {}
   Object.defineProperty(wrapper, '__chain', {
     value: entries,
@@ -169,19 +242,16 @@ function chainWrap(entries: unknown[]): unknown {
     writable: false,
     configurable: false,
   })
+  const layers = [...entries]
   // home-object 语义：成员在哪层命中，this 就是那层对象（见 merge 头注释）。
   const wrapped = proxyCatchAll(wrapper, (name, ...args) => {
-    for (const o of entries) {
-      const hit = lookupLayer(o, name)
-      if (!hit.found) continue
-      const value = hit.isMethod
-        ? (hit.value as (...a: unknown[]) => unknown).apply(o, args)
-        : hit.value
-      // 任意层显式弃权 → 继续委托下一层；其余（含 nil/undefined）命中即停。
-      if (value === UNHANDLED) continue
-      return value
+    for (const layer of layers) {
+      const answer = answerOf(layer, name, args)
+      if (answer.handled) return answer.value
     }
+    // 全链（含内建协议）都没接：出口抛唯一的结构化错误。
     throw new OocMethodNotFoundError(wrapped, name, args)
   })
+  layers.push(builtinProtocolLayer(wrapped))
   return wrapped
 }

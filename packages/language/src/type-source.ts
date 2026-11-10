@@ -14,8 +14,8 @@ import type { TypeInfo } from './type-system.js'
  * 复用 collectConfigGlobals 管线解析，不引入新的解析路径。
  */
 
-/** 语言内置桥接的类型源：storage / js / merge / console（运行时实现见 interpreter/bridges.ts，console 是自由全局） */
-export const coreBridgeTypesSource = `// 语言内置桥接类型源（storage / js / merge / console）
+/** 语言内置桥接的类型源：storage / js / merge / union / currentScope / console（运行时实现见 interpreter/，console 是自由全局） */
+export const coreBridgeTypesSource = `// 语言内置桥接类型源（storage / js / merge / union / currentScope / console）
 // 运行时实现见 interpreter/bridges.ts，这里只声明类型（签名方法不落地）。
 Ref #type<T> {
     get: T,
@@ -38,6 +38,19 @@ merge = {
     unhandled: any
 };
 
+// union：消息联合的构造器。任何消息都具象化为 [名字, ...实参] 元组，
+// 名字集合是开放的，静态侧无法枚举，故声明为空对象——未知消息按 any 推定。
+// 运行时见 interpreter/bridges.ts；消解走 Object dispatch 对象 元组。
+union = {
+};
+
+// currentScope：解释器把当前作用域链暴露成的消息处理中心，消息名就是绑定名。
+// 名字集合随作用域动态变化，静态侧无法枚举，故声明为空对象（未知消息按 any 推定）。
+// 只存在于解释器路径：编译产物是真实 JS 词法变量，没有可查询的作用域对象；
+// 因此它不进 AMBIENT_NAMES，也不进各宿主项目 config.ooc 的 globals。
+currentScope = {
+};
+
 console = {
     log(...args): any,
     error(...args): any
@@ -48,6 +61,8 @@ config = {
         storage = storage,
         js = js,
         merge = merge,
+        union = union,
+        currentScope = currentScope,
         console = console
     }
 };

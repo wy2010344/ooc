@@ -46,7 +46,7 @@ export { createSignal, memo, addEffect } from 'wy-helper'
 // 上游 wy-helper 尚未发布 createLateProxy，桥接包自带等价实现（见 late-proxy.ts）
 export { createLateProxy, createLateProxy as lateProxy } from './late-proxy.js'
 export { createContext } from 'mve-core'
-export { storage, js, merge } from 'object-oriented-c-language'
+export { storage, js, merge, union } from 'object-oriented-c-language'
 
 // {get,set} 持有者 → 无参读 / 单参写的 lambda；bindSignal/bindRef 是常用封装
 export { bindSignal, bindRef, multiBind } from './multi-bind.js'

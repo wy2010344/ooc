@@ -17,7 +17,7 @@ export const AMBIENT_NAMES: ReadonlySet<string> = new Set([
   'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
   'queueMicrotask', 'structuredClone', 'URL', 'Infinity', 'NaN', 'undefined',
   // OOC 运行时注入的宿主无关内建（createInterpretAction 默认 globals）
-  'storage', 'js', 'merge',
+  'storage', 'js', 'merge', 'union',
   'window', 'document', 'navigator', 'location', 'localStorage', 'sessionStorage',
   'history', 'screen', 'fetch', 'performance', 'crypto', 'requestAnimationFrame',
   'cancelAnimationFrame', 'URLSearchParams', 'AbortController', 'Image', 'Blob',

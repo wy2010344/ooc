@@ -7,6 +7,21 @@
 // 共享 runtime 模块源码：给定义加 export，作为项目构建（ooc build）的 _ooc_runtime.ts。
 // 宿主无关：视图/信号/storage 等依赖由 OOC 侧 #import 进来，这里只提供消息派发与对象构造。
 export const OOC_RUNTIME_MODULE = String.raw`// ---- OOC 运行时辅助（与解释器语义对齐，宿主无关）----
+// 消息路由链的出口错误：与解释器 OocMethodNotFoundError 同名同形，两条运行时
+// 抛的是同一类结构化错误（receiver / methodName / argumentsList 都可取）。
+export class OocMethodNotFoundError extends TypeError {
+  readonly receiver: any
+  readonly methodName: string
+  readonly argumentsList: readonly any[]
+  constructor(receiver: any, methodName: string, args: readonly any[]) {
+    super('没有定义该方法 ' + methodName)
+    this.name = 'OocMethodNotFoundError'
+    this.receiver = receiver
+    this.methodName = methodName
+    this.argumentsList = args
+  }
+}
+
 export const OOC_NUM_DEF: Record<string, (a: any, b: any) => any> = {
   '+': (a, b) => a + b,
   '-': (a, b) => a - b,
@@ -84,17 +99,25 @@ export function __send(o: any, value: string, args: any[]): any {
     if (args.length) o[value] = args[0]
     return o[value]
   }
-  // 动态消息名是 Object 的专属消息：Object send 目标 '名字' 实参…
-  // 约定同解释器 runtime.ts：唯一数组实参视为完整实参列表，否则其余实参即列表。
+  // 关于消息的操作是 Object 的专属消息（语义同解释器 runtime.ts）：
+  //   Object send 目标 '名字' 实参…   —— 唯一数组实参视为完整实参列表
+  //   Object dispatch 目标 元组      —— 元组元素逐字作实参，供 union 具象化回放
   if (value === 'send' && o === Object) {
     const [target, name, ...rest] = args
     const params = rest.length === 1 && Array.isArray(rest[0]) ? rest[0] : rest
     return __send(target, String(name), params)
   }
+  if (value === 'dispatch' && o === Object) {
+    const [target, tuple] = args
+    if (!Array.isArray(tuple) || tuple.length === 0 || typeof tuple[0] !== 'string') {
+      throw new TypeError('Object dispatch 需要 [消息名, ...实参] 形式的消息元组')
+    }
+    return __send(target, tuple[0], tuple.slice(1))
+  }
   const num = OOC_NUM_DEF[value]
   if (num) return num(o, args[0])
   const obj = OOC_OBJ_DEF[value]
   if (obj) return obj(o, ...args)
-  throw new Error('OOC 方法未找到: ' + String(o) + ' . ' + value + '(' + args.map((a) => String(a)).join(', ') + ')')
+  throw new OocMethodNotFoundError(o, value, args)
 }
 `

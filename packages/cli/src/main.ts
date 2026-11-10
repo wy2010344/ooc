@@ -4,6 +4,7 @@ import {
   merge,
   js,
   storage,
+  union,
   ObjectOrientedCLanguageMetaData,
 } from 'object-oriented-c-language'
 import chalk from 'chalk'
@@ -39,7 +40,8 @@ config = {
     globals = {
         storage = storage,
         js = js,
-        merge = merge
+        merge = merge,
+        union = union
     }
 };
 
@@ -81,9 +83,9 @@ export const buildAction = async (
 }
 
 export const interpretAction = (fileName: string) => {
-  // 注入语言包自带宿主桥接（storage/js/merge），与浏览器 demo 一致，
+  // 注入语言包自带宿主桥接（storage/js/merge/union），与浏览器 demo 一致，
   // 让同一份 OOC 项目源码在 Node（CLI）与浏览器（vite）端行为相同。
-  return createInterpretAction(nodeContext, { storage, js, merge }).interpretPath(
+  return createInterpretAction(nodeContext, { storage, js, merge, union }).interpretPath(
     fileName,
   )
 }
